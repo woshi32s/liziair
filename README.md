@@ -6,6 +6,19 @@
 
 ---
 
+## 下载
+
+| 平台 | 文件 | 夸克网盘 | 百度网盘 |
+|---|---|---|---|
+| Windows | `LIZI-Setup-1.0.0.exe` | [下载](https://pan.quark.cn/s/fa4fa30384e3) | [下载](https://pan.baidu.com/s/1KNGKoNSfLXC7Wgvd8pcvVg?pwd=lizi) |
+| Android | `LIZI-Android-1.0.0-arm64-v8a.apk` | [下载](https://pan.quark.cn/s/3af3bf455dd9) | [下载](https://pan.baidu.com/s/1Nkep3vROfDl8nGOwqp9uTw?pwd=lizi) |
+
+- 百度网盘提取码都是 **`lizi`**；夸克链接点开即可，不需要提取码。
+- 手机装 `arm64-v8a` 那个包（现在的手机基本都是 arm64）。`x86_64` 只给模拟器用，没有上传。
+- 安装包和 APK 都没有做代码签名，Windows SmartScreen 可能提示「未知发布者」，选「仍要运行」即可。
+
+---
+
 ## 快速开始
 
 双击 **`start.cmd`**（会自动开浏览器）。
