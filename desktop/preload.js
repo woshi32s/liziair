@@ -23,4 +23,16 @@ contextBridge.exposeInMainWorld('__desktop', {
       ipcRenderer.on(ch, () => cb(ch.replace('media:', '')));
     }
   },
+  /** 更新：手动检查 / 立即下载 / 打开固定下载页 / 读应用版本 */
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: () => ipcRenderer.invoke('update:download'),
+    /** target 只认 'pan' | 'github'，真实 URL 留在主进程 */
+    open: (target) => ipcRenderer.invoke('update:open', target),
+    version: () => ipcRenderer.invoke('app:version'),
+    /** 主进程推新版本：{ version }（窗口可见时才推；不可见走原生对话框） */
+    onAvailable(cb) {
+      ipcRenderer.on('update:available', (_e, info) => cb(info));
+    },
+  },
 });

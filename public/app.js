@@ -13451,4 +13451,117 @@
     // 布局稳定后重建贴图（挂载时若有元素尺寸未定，这一步纠正）
     requestAnimationFrame(() => setTimeout(() => LiquidGlass.refresh(), 300));
   })();
+
+  /* ==========================================================================
+     桌面壳：新版本小提示条 + 设置页「检查更新」
+     - 浏览器版没有 window.__desktop：整块跳过，按钮保持 hidden
+     - 主进程只在窗口可见时推 update:available；收进托盘时它自己弹原生对话框
+     - 同一版本本次运行只提示一次（关掉 / 点过任意按钮后不再弹）
+     ========================================================================== */
+  (function initDesktopUpdate() {
+    const desktop = window.__desktop;
+    if (!desktop || !desktop.isDesktop || !desktop.update) return;
+
+    const toast = document.getElementById('upd-toast');
+    const verEl = document.getElementById('upd-ver');
+    const closeBtn = document.getElementById('upd-close');
+    const panBtn = document.getElementById('upd-pan');
+    const ghBtn = document.getElementById('upd-gh');
+    const nowBtn = document.getElementById('upd-now');
+    const checkBtn = document.getElementById('set-check-update');
+    const stateEl = document.getElementById('set-upd-state');
+    const versionEl = document.getElementById('set-app-version');
+
+    /* 本次运行只提示一次：sessionStorage 让页面重载后也不重复弹，
+       关掉窗口 / 退出应用后清空。 */
+    const SEEN_KEY = 'lizi.update.seen';
+    let seenVersion = '';
+    try { seenVersion = sessionStorage.getItem(SEEN_KEY) || ''; } catch { /* 隐私模式 */ }
+    let checking = false;
+    let stateTimer = 0;
+
+    function showUpdate(version) {
+      const v = version ? String(version) : '';
+      if (!v || v === seenVersion || !toast) return;
+      seenVersion = v;
+      try { sessionStorage.setItem(SEEN_KEY, v); } catch { /* 隐私模式 */ }
+      if (verEl) verEl.textContent = 'v' + v;
+      toast.hidden = false;
+    }
+
+    function closeToast() {
+      if (toast) toast.hidden = true;
+    }
+
+    function setState(text, tone) {
+      if (!stateEl) return;
+      stateEl.textContent = text || '';
+      if (tone) stateEl.dataset.tone = tone;
+      else delete stateEl.dataset.tone;
+      clearTimeout(stateTimer);
+      if (text) stateTimer = setTimeout(() => {
+        stateEl.textContent = '';
+        delete stateEl.dataset.tone;
+      }, 3200);
+    }
+
+    /* 主进程推来的新版本（窗口可见时才有） */
+    if (typeof desktop.update.onAvailable === 'function') {
+      desktop.update.onAvailable((info) => {
+        if (info && info.version) showUpdate(info.version);
+      });
+    }
+
+    if (closeBtn) closeBtn.addEventListener('click', closeToast);
+    if (panBtn) panBtn.addEventListener('click', () => {
+      desktop.update.open('pan');
+      closeToast();
+    });
+    if (ghBtn) ghBtn.addEventListener('click', () => {
+      desktop.update.open('github');
+      closeToast();
+    });
+    if (nowBtn) nowBtn.addEventListener('click', () => {
+      desktop.update.download();
+      closeToast();
+    });
+
+    /* 设置页：显示真实版本号 + 检查更新按钮（仅桌面壳） */
+    if (versionEl) {
+      desktop.update.version().then((v) => {
+        if (v) versionEl.textContent = String(v);
+      }).catch(() => { /* 读不到就保留 HTML 里的默认值 */ });
+    }
+    if (!checkBtn) return;
+    checkBtn.hidden = false;
+
+    checkBtn.addEventListener('click', async () => {
+      if (checking) return;
+      checking = true;
+      checkBtn.disabled = true;
+      checkBtn.textContent = '检查中…';
+      setState('');
+      try {
+        const r = await desktop.update.check();
+        const status = r && r.status;
+        if (status === 'available') {
+          showUpdate(r.version);
+          /* 提示条已经关过（同一版本本次运行不再弹）时，至少在按钮旁给个结果 */
+          if (!toast || toast.hidden) setState(`发现新版本 v${r.version}`, 'ok');
+        } else if (status === 'latest') {
+          setState('已是最新', 'ok');
+        } else if (status === 'dev') {
+          setState('开发环境不检查更新', 'muted');
+        } else {
+          setState('检查失败，稍后再试', 'err');
+        }
+      } catch {
+        setState('检查失败，稍后再试', 'err');
+      } finally {
+        checking = false;
+        checkBtn.disabled = false;
+        checkBtn.textContent = '检查更新';
+      }
+    });
+  })();
 })();

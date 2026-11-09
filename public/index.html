@@ -1027,9 +1027,12 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
         <span class="setpage__label">关于 LIZI</span>
         <span class="setpage__val">LIZI Air</span>
       </div>
-      <div class="setpage__row">
+      <div class="setpage__row setpage__row--update">
         <span class="setpage__label">版本</span>
-        <span class="setpage__val">1.0.0</span>
+        <span class="setpage__val" id="set-app-version">1.0.0</span>
+        <span class="setpage__updstate" id="set-upd-state" role="status" aria-live="polite"></span>
+        <!-- 仅桌面壳显示（app.js 在 window.__desktop 存在时取消 hidden） -->
+        <button class="setpage__checkupd" id="set-check-update" type="button" hidden>检查更新</button>
       </div>
       <p class="setpage__note">折射和形态渲染已固定为默认值；形态切换在播放页右侧抽屉里。</p>
       </section>
@@ -1527,6 +1530,22 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
     </div>
   </div>
 </div>
+
+<!-- 新版本提示条（桌面壳专用，小尺寸）：默认隐藏。
+     主进程只在窗口可见时推 update:available；窗口收进托盘时改用原生对话框兜底。
+     玻璃表面走 .lg-surface 的兜底模糊，不挂 data-liquid-glass（挂载时它是 0 宽）。 -->
+<aside class="updtoast lg-surface" id="upd-toast" hidden role="status" aria-live="polite" aria-label="更新提示">
+  <div class="updtoast__head">
+    <span class="updtoast__dot" aria-hidden="true"></span>
+    <b class="updtoast__title">发现新版本 <i id="upd-ver">v1.0.1</i></b>
+    <button class="updtoast__x" id="upd-close" type="button" aria-label="关闭更新提示">×</button>
+  </div>
+  <div class="updtoast__acts">
+    <button class="updtoast__btn" id="upd-pan" type="button">网盘下载</button>
+    <button class="updtoast__btn" id="upd-gh" type="button">GitHub</button>
+    <button class="updtoast__btn updtoast__btn--go" id="upd-now" type="button">立即下载</button>
+  </div>
+</aside>
 
 <script src="assets/liquid-glass.js"></script>
 <script src="hall/grainient.js"></script>
