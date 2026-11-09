@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>（改我）</title>
+<!--
+  ============================================================================
+  这是「空壳」：只有协议层，没有任何画面。你要自己决定这一件作品长什么样。
+  ============================================================================
+  怎么用：
+    1. Copy-Item 本文件到 public/stages/<NNN>-<名字>.html
+    2. 把 <title> 改成中文名
+    3. 从「你的实现」那条线往下，全部是你的事。上面一行都别动。
+  ============================================================================
+-->
+<style>
+  html,body{margin:0;height:100%;background:#050506;overflow:hidden}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);pointer-events:none;
+        font:500 11px/1.6 ui-monospace,Consolas,monospace;letter-spacing:.18em;
+        color:rgba(255,255,255,.28);transition:opacity .8s;white-space:nowrap}
+</style>
+</head>
+<body data-chrome="off">
+<canvas id="c"></canvas>
+<div id="hint">等待第一句…</div>
+<script>
+"use strict";
+/* ────────────────────────────────────────────────────────────────────────────
+   协议层（照抄，别改）：init / tick / beat / live → ready / activity / key
+   ──────────────────────────────────────────────────────────────────────────── */
+const cv = document.getElementById('c');
+const hint = document.getElementById('hint');
+const now = () => clockT + (playing ? (performance.now() - clockAt) / 1000 : 0);
+
+let W = 1, H = 1, PR = 1;
+let lines = [], idx = -1, lastT = -1e9;
+let clockT = 0, clockAt = 0, playing = false, vT = 0;
+let beatPulse = 0, bass = 0, treb = 0, frames = 0, jsMs = 0, errMsg = '';
+let readySent = false, dirty = true, raf = 0;
+
+/* prefers-reduced-motion：随时切换都要跟得上 */
+let RM = false, mq = null;
+try {
+  mq = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  if (mq) {
+    RM = !!mq.matches;
+    const on = (e) => { RM = !!e.matches; };
+    if (mq.addEventListener) mq.addEventListener('change', on); else if (mq.addListener) mq.addListener(on);
+  }
+} catch (_) {}
+
+function resize() {
+  W = Math.max(2, window.innerWidth); H = Math.max(2, window.innerHeight);
+  PR = Math.min(1.5, window.devicePixelRatio || 1);
+  cv.width = Math.round(W * PR); cv.height = Math.round(H * PR);
+  dirty = true;
+}
+let rzT = 0;
+addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(resize, 120); });
+
+/* ────────────────────────────────────────────────────────────────────────────
+   ↓↓↓ 你的实现 ↓↓↓  从这里往下随便写，上面一行都别动
+   ──────────────────────────────────────────────────────────────────────────── */
+
+/* 先把这一句想清楚，再写代码：**字在这个世界里是什么东西？**
+   不是"什么材料上有字"，是"字本身是什么"。
+   （例：字是一副还没拼好的拼图 / 字是别人留下的笔迹 / 字是脚下的路 /
+     字是回声 / 字是坏掉的霓虹招牌 / 字是密码锁 / 字是排到位的骨牌） */
+
+const gl = cv.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false,
+  powerPreference: 'high-performance', preserveDrawingBuffer: false });
+
+function draw() {
+  if (!gl) return;
+  gl.viewport(0, 0, cv.width, cv.height);
+  gl.clearColor(0.02, 0.02, 0.03, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  /* ← 你的画面在这里 */
+}
+
+/* 每帧：vT 是视觉时钟（暂停时它不动，画面就冻住） */
+let last = performance.now();
+function frame(ms) {
+  const js0 = performance.now();
+  const dt = Math.min(0.05, Math.max(0, (ms - last) / 1000));
+  last = ms; frames++;
+  const T = now();
+  vT = RM ? T * 0.24 : T;           /* 减少动态时整体变慢，不是不变 */
+  if (playing) { beatPulse *= Math.exp(-dt * 3.6); bass *= Math.exp(-dt * 0.08); treb *= Math.exp(-dt * 0.10); }
+
+  /* 当前唱到哪一句（lines[i].t 是这句的起点，lines[i].chars[k] 是逐字时间） */
+  let ci = -1;
+  for (let i = lines.length - 1; i >= 0; i--) { if (T >= lines[i].t) { ci = i; break; } }
+  if (ci !== idx) { idx = ci; dirty = true; }
+
+  try { if (playing || dirty) { draw(); dirty = false; } }
+  catch (e) { errMsg = 'draw: ' + (e && e.message ? e.message : e); }
+
+  if (!readySent) { readySent = true; try { parent.postMessage({ __c100: 1, type: 'ready' }, '*'); } catch (_) {} }
+  jsMs = performance.now() - js0;
+  raf = requestAnimationFrame(frame);
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+   协议（照抄，别改）
+   ──────────────────────────────────────────────────────────────────────────── */
+const ping = () => { try { parent.postMessage({ __c100: 1, type: 'activity' }, '*'); } catch (_) {} };
+addEventListener('pointermove', ping, { passive: true });
+addEventListener('pointerdown', ping, { passive: true });
+addEventListener('wheel', ping, { passive: true });
+addEventListener('keydown', (e) => {
+  ping();
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    try { parent.postMessage({ __c100: 1, type: 'key', payload: { key: 'Space' } }, '*'); } catch (_) {}
+  }
+}, true);
+
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.__c100 !== 1) return;
+  if (d.type === 'init') {
+    const p = d.payload || {};
+    lines = (p.lines || []).slice().sort((a, b) => a.t - b.t);
+    idx = -1; lastT = -1e9; vT = 0; beatPulse = 0; bass = 0; treb = 0;
+    clockT = 0; clockAt = performance.now(); playing = true;
+    hint.style.opacity = lines.length ? '0.9' : '0.4';
+    hint.textContent = lines.length ? '等待第一句…' : '这首没有歌词';
+    dirty = true;
+  } else if (d.type === 'tick') {
+    clockT = d.payload.time; clockAt = performance.now();
+    playing = !!d.payload.playing; dirty = true;
+  } else if (d.type === 'beat') {
+    beatPulse = Math.min(1, beatPulse + 0.32 + (d.payload.level || 0) * 0.5); dirty = true;
+  } else if (d.type === 'live') {
+    const l = d.payload || {};
+    if (typeof l.bass === 'number') bass = Math.max(bass, Math.min(1, l.bass));
+    if (typeof l.treble === 'number') treb = Math.max(treb, Math.min(1, l.treble));
+    if (typeof l.level === 'number') beatPulse = Math.max(beatPulse, Math.min(0.9, l.level * 0.8));
+  }
+});
+addEventListener('pagehide', () => cancelAnimationFrame(raf));
+
+window.__stage = () => ({
+  lines: lines.length, idx: idx, t: +now().toFixed(2), playing: playing, frames: frames,
+  js: +jsMs.toFixed(2), err: errMsg, text: (idx >= 0 && lines[idx]) ? lines[idx].text : '',
+  gl: !!gl, rm: RM, vT: +vT.toFixed(2)
+});
+
+resize();
+raf = requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="viewport-fit=cover, width=device-width, initial-scale=1">
+<title>LIZI Air · 形态长廊</title>
+<meta name="theme-color" content="#f7f6f4">
+<meta name="description" content="LIZI Air 形态长廊：把每一种歌词形态的静态预览，铺在一颗可拖动旋转的球面格网上。">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="css/site.css?v=3">
+</head>
+<body>
+
+<canvas id="gl" aria-hidden="true"></canvas>
+
+<main id="stage" aria-label="LIZI Air 形态长廊">
+  <div class="coords coords-l"><span id="forms-count">653 FORMS</span></div>
+  <div class="coords coords-r"><span id="orbit-read">ORBIT 000.0°</span></div>
+</main>
+
+<header id="header">
+  <div class="rule v" style="left:9.091%"></div>
+  <div class="rule v" style="left:36.364%"></div>
+  <div class="rule v" style="left:63.636%"></div>
+  <div class="rule v" style="left:90.909%"></div>
+  <div class="rule h" style="left:0;top:33.333%;width:36.364%"></div>
+  <div class="rule h" style="left:63.636%;top:33.333%;right:0"></div>
+  <div class="rule h" style="left:9.091%;top:66.667%;width:27.273%"></div>
+  <div class="rule h" style="left:63.636%;top:66.667%;width:27.273%"></div>
+  <div class="rule v" style="left:4.545%;top:0;height:33.333%"></div>
+  <div class="rule v" style="left:95.455%;top:0;height:33.333%"></div>
+
+  <div class="hdr-grid">
+    <nav class="nav">
+      <span class="lbl">Form Gallery</span>
+    </nav>
+
+    <div class="meta-r">
+      <span class="lbl lbl-dim">静态预览</span>
+    </div>
+
+
+    <a class="logo" href="#" id="logo" aria-label="LIZI Air">
+      <img class="logo__mark" src="assets/logo.svg" alt="" aria-hidden="true">
+      <span class="logo__word">LIZI <em>Air</em></span>
+    </a>
+
+    <p class="tagline tagline-l">形态长廊</p>
+    <p class="tagline tagline-r"><span id="form-total">653</span> 种形态</p>
+
+    <div class="orbit-cell">
+      <span class="orbit-hint">拖动旋转</span>
+    </div>
+  </div>
+</header>
+
+<footer class="ticker" id="ticker" aria-hidden="true">
+  <div class="ticker-track" id="ticker-track"></div>
+</footer>
+
+<div class="tune">
+  <span class="tune-lbl">曲率 · Curve</span>
+  <input id="bulge" class="tune-range" type="range" min="0" max="100" step="1" value="50" aria-label="球面曲率">
+  <output id="bulge-val" class="tune-val">50</output>
+</div>
+
+<div class="caption" id="caption" aria-hidden="true" aria-live="polite" tabindex="-1">
+  <div class="caption__meta">
+    <span class="caption__id" id="cap-id">001</span>
+    <span class="caption__index" id="cap-index">001 / 653</span>
+  </div>
+  <strong class="caption__name" id="cap-name">形态名</strong>
+  <p class="caption__desc" id="cap-desc">描述</p>
+  <div class="caption__foot">
+    <button type="button" class="caption__enter" id="cap-enter" hidden>进入形态</button>
+    <span class="caption__kind" id="cap-kind">静态预览</span>
+  </div>
+  <button type="button" class="caption__close" id="cap-close" aria-label="关闭预览说明">×</button>
+</div>
+
+<div class="stage-layer" id="stage-layer" role="dialog" aria-modal="true" aria-hidden="true" aria-label="形态实时预览">
+  <div class="stage-layer__bar">
+    <span class="stage-layer__id" id="sl-id">001</span>
+    <strong class="stage-layer__name" id="sl-name">形态</strong>
+    <button type="button" class="stage-layer__back" id="sl-back">返回长廊</button>
+  </div>
+  <div class="stage-layer__body">
+    <iframe class="stage-layer__frame" id="sl-frame" title="形态实时预览" src="about:blank"></iframe>
+    <div class="stage-layer__error" id="sl-error" hidden>
+      <p>形态加载失败</p>
+      <button type="button" class="stage-layer__back" id="sl-error-back">返回长廊</button>
+    </div>
+  </div>
+</div>
+
+<div id="boot">
+  <img class="boot-logo" src="assets/logo.svg" alt="LIZI Air">
+  <p class="boot-title">LIZI Air</p>
+  <p class="boot-sub">形态长廊</p>
+  <p class="boot-loading">展开球面格网…</p>
+  <div class="boot-notice" id="boot-notice" hidden>
+    <p>这个页面需要 WebGL。</p>
+    <p>请用最新版 Chrome、Edge 或 Safari 打开。</p>
+  </div>
+</div>
+
+<script src="js/data.js?v=2"></script>
+<script type="module" src="js/app.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+# 运行产物，不进版本库
+.port
+.session.json
+*.log
+server.err.log
+
+# 截图（几十 MB，靠 shots/ 本地留档就够）
+shots/
+
+# 依赖（本项目零依赖，留个口子）
+node_modules/
+
+# Electron 打包产物
+dist/
+
+# 临时探针留下的大文件
+_*.json
+
+promo/assets/
+
+# 官网的安装包下载（111MB，不进版本库）
+public/site/download/
+
+# 网易云设备指纹（每台机器一份，不进版本库）
+.netease-device.json
+
+# 本地手滑备份（*.bak / *.bak-时间戳），不进版本库
+*.bak
+*.bak-*
+*.bak2
+*.bak-*/
+
+# 根目录下划线开头的一次性探针脚本 / 截图目录 / 旧版快照
+# （_628-shots、_513-src、_queue、_HANDOFF-*.md 这类，只在本机留档）
+/_*
+
+# 本地临时目录
+.scratch-*/
+.claude/
+__pycache__/

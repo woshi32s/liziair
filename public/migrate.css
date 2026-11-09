@@ -1,0 +1,607 @@
+/* ==========================================================================
+   LIZI · 歌单搬运浮层（migrate.css）
+   --------------------------------------------------------------------------
+   照 tokens.css 的语言：纸白、墨黑、1px 细线、极小圆角、等宽数字。
+   强调色只做一处角色：当前选中的来源 / 目标，以及轨道上正在走的那一段。
+   没有大块渐变、没有投影堆叠，也没有 backdrop-filter —— 浮层只需要安静地
+   把「左边 → 轨道 → 右边」这件事摆清楚。
+   ========================================================================== */
+
+.mig {
+  position: fixed;
+  inset: 0;
+  z-index: 260;
+  display: grid;
+  place-items: center;
+  padding: var(--sp-6);
+  background: oklch(21% 0.022 270 / 0.34);
+}
+.mig[hidden] { display: none; }
+
+.mig *,
+.mig *::before,
+.mig *::after { box-sizing: border-box; }
+
+.mig__sheet {
+  width: min(1080px, 100%);
+  max-height: 88vh;
+  /* dvh 兜住移动端地址栏：vh 会按「地址栏收起」算高，矮窗口下底栏会被裁出视口。
+     min() 保留 88vh 上限，同时保证浮层四周还有 padding 的余量。 */
+  max-height: min(88vh, calc(100dvh - var(--sp-6) - var(--sp-6)));
+  min-height: 0;          /* 作为 grid 子项时允许被压缩，滚动交给 .mig__scroll */
+  display: flex;
+  flex-direction: column;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.mig__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-5) var(--sp-6) var(--sp-4);
+  border-bottom: 1px solid var(--rule);
+}
+.mig__t {
+  margin: 0 0 2px;
+  font-size: 20px;
+  font-weight: var(--fw-semi);
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+.mig__sub {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+.mig__x {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.mig__x:hover { border-color: var(--rule); color: var(--ink); }
+.mig__x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ---------- 滚动区：搬运台 + 核对 ---------- */
+.mig__scroll {
+  flex: 1;
+  min-height: 0;          /* 关键：没有它 flex 子项会被内容撑高，底栏就会被推出视口 */
+  overflow: auto;
+  overscroll-behavior: contain;   /* 滚到底不把外层页面一起滚走 */
+  padding: var(--sp-5) var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mig__board {
+  display: grid;
+  grid-template-columns: 272px minmax(190px, 1fr) 252px;
+  gap: var(--sp-4);
+  align-items: stretch;
+  min-height: 0;          /* 矮窗口下允许整块随 .mig__scroll 一起滚，而不是把 sheet 顶开 */
+}
+
+.mig__col {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.mig__col-h,
+.mig__row-h,
+.mig__track-h {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+.mig__col-h b,
+.mig__row-h b,
+.mig__track-h b { font-weight: var(--fw-semi); }
+.mig__k {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.mig__hint {
+  margin-left: auto;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 来源：网易云平台卡 ---------- */
+.mig__plat {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--paper-2);
+}
+.mig__plat-mark {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.mig__plat-tx {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mig__plat-tx b {
+  font-size: 12.5px;
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mig__plat-tx i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+.mig__plat-tag {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+
+/* ---------- 歌单列表 ---------- */
+.mig__list {
+  flex: 1;
+  min-height: 0;
+  max-height: 318px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--paper-2);
+}
+.mig__pl {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.mig__pl:last-child { border-bottom: 0; }
+.mig__pl:hover { background: oklch(21% 0.022 270 / 0.035); }
+.mig__pl:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 选中态要一眼看出来：底色 + 左侧 2px 强调条（不是只换个很浅的灰） */
+.mig__pl.is-on {
+  background: oklch(21% 0.022 270 / 0.07);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.mig__pl.is-on b { color: var(--accent-ink); }
+/* 匹配/写入期间来源列表锁住，视觉上说明「这会儿不能换」 */
+.mig__list.is-locked .mig__pl { pointer-events: none; opacity: 0.55; }
+
+.mig__pl-cv {
+  position: relative;
+  width: 38px; height: 38px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--paper-2);
+}
+.mig__pl-cv i {
+  font-style: normal;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.mig__pl-cv img {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+.mig__pl-tx {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.mig__pl-tx b {
+  font-size: 12px;
+  font-weight: var(--fw-body);
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mig__pl-tx span {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.mig__empty {
+  margin: 0;
+  padding: var(--sp-4);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+/* ---------- 中间：传输轨道 ---------- */
+.mig__track {
+  position: relative;
+  min-width: 0;           /* grid 子项默认 min-width:auto，窄屏会被内容撑破 */
+  min-height: 212px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: oklch(21% 0.022 270 / 0.018);
+}
+.mig__track-h { margin-bottom: 2px; }
+
+.mig__lane {
+  position: relative;
+  height: 92px;
+  margin: 0;
+}
+.mig__lane::before,
+.mig__lane::after {
+  content: "";
+  position: absolute;
+  top: 62%;
+  width: 5px; height: 5px;
+  border: 1px solid var(--ink-2);
+  border-radius: 50%;
+  background: var(--paper-2);
+  transform: translate(-50%, -50%);
+}
+.mig__lane::before { left: 0; }
+.mig__lane::after { left: 100%; }
+
+.mig__rail {
+  position: absolute;
+  left: 0; right: 0;
+  top: 62%;
+  height: 1px;
+  background: var(--rule);
+}
+.mig__rail-fill {
+  height: 1px;
+  width: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-med) var(--ease-out);
+}
+.mig__track.is-done .mig__rail-fill { background: var(--ink); }
+
+/* 状态机在轨道上的三种可见态：空闲（灰）→ 传输中（强调色）→ 完成/失败 */
+.mig__track.is-run { border-color: var(--accent); }
+.mig__track.is-run .mig__note { color: var(--ink-2); }
+.mig__track.is-err { border-color: var(--accent); }
+
+/* 小文件块：CSS 动画沿轨道飞过，带一条淡尾迹；JS 只负责生成和回收 */
+.mig__file {
+  position: absolute;
+  top: 62%;
+  left: 0;
+  width: 12px; height: 15px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  background: var(--paper-2);
+  transform: translate(-50%, -50%);
+  animation: mig-fly 1s var(--ease-inout) forwards;
+  pointer-events: none;
+}
+.mig__file::after {
+  content: "";
+  position: absolute;
+  right: calc(100% + 1px);
+  top: 50%;
+  width: 20px; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--ink));
+  opacity: 0.26;
+}
+@keyframes mig-fly {
+  0%   { left: 0;    transform: translate(-50%, -50%) rotate(-4deg) scale(0.7); opacity: 0; }
+  10%  { opacity: 1; }
+  50%  { left: 50%;  transform: translate(-50%, -150%) rotate(2deg) scale(1); }
+  92%  { opacity: 1; }
+  100% { left: 100%; transform: translate(-50%, -50%) rotate(5deg) scale(0.75); opacity: 0; }
+}
+
+.mig__note {
+  margin: 0;
+  min-height: 15px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 完成卡：一次搬运结束就收束成这一张 */
+.mig__done {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 7px 10px;
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--paper-2);
+  animation: mig-done-in var(--dur-med) var(--ease-out);
+}
+.mig__done[hidden] { display: none; }
+.mig__done-k {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--accent-ink);
+}
+.mig__done-t {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mig__track.is-err .mig__done { border-color: var(--accent); }
+@keyframes mig-done-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- 目标：五张大卡 ---------- */
+.mig__targets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mig__tcard {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "n tag" "d d";
+  gap: 1px var(--sp-2);
+  padding: 9px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--paper-2);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.mig__tcard:hover { border-color: oklch(21% 0.022 270 / 0.24); }
+.mig__tcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mig__tcard:disabled { opacity: 0.5; cursor: default; }
+.mig__tcard:disabled:hover { border-color: var(--rule); }
+.mig__tcard.is-on {
+  border-color: var(--accent);
+  background: oklch(62% 0.22 12 / 0.04);
+}
+.mig__tcard-n {
+  grid-area: n;
+  font-size: 13px;
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.mig__tcard-tag {
+  grid-area: tag;
+  align-self: center;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.mig__tcard.is-on .mig__tcard-tag { color: var(--accent-ink); }
+.mig__tcard-d {
+  grid-area: d;
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+/* ---------- 核对（横跨整行） ---------- */
+.mig__step {
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.mig__step[hidden] { display: none; }
+.mig__row-h { margin-bottom: var(--sp-3); }
+
+.mig__table {
+  max-height: 34vh;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+}
+.mig__tr {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.3fr) 76px;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 7px var(--sp-3);
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--text-xs);
+}
+.mig__tr:last-child { border-bottom: 0; }
+.mig__tr-src { min-width: 0; }
+.mig__tr-src b { display: block; font-weight: var(--fw-body); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mig__tr-src span { display: block; font-size: 10.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mig__tr-pick { min-width: 0; }
+.mig__sel {
+  width: 100%;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--paper-2);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-family: inherit;
+}
+.mig__sel:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mig__tr-tag {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.mig__tr.is-auto .mig__tr-tag { color: var(--ink-2); }
+.mig__tr.is-review .mig__tr-tag { color: var(--accent-ink); }
+.mig__tr.is-miss .mig__tr-src b { color: var(--ink-3); text-decoration: line-through; text-decoration-thickness: 1px; }
+.mig__none { color: var(--ink-3); font-size: 11px; }
+
+/* ---------- 底栏 ---------- */
+.mig__foot {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;        /* 窄窗口下按钮换行，而不是被横向裁掉 */
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-6);
+  border-top: 1px solid var(--rule);
+  background: var(--paper-2);
+}
+.mig__btn {
+  height: 32px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--paper-2);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.mig__btn:disabled { opacity: 0.4; cursor: default; }
+.mig__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mig__btn--ghost { background: transparent; color: var(--ink-2); border-color: var(--rule); }
+.mig__btn--ghost:hover { color: var(--ink); border-color: oklch(21% 0.022 270 / 0.22); }
+.mig__btn--ghost[hidden] { display: none; }
+.mig__msg {
+  margin-left: auto;
+  min-width: 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 1020px) {
+  .mig__board {
+    grid-template-columns: 1fr;
+    gap: var(--sp-3);
+  }
+  .mig__track { min-height: 150px; }
+  .mig__lane { height: 70px; }
+  .mig__list { max-height: 220px; }
+  .mig__targets {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .mig { padding: 0; }
+  .mig__sheet {
+    width: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+  .mig__head,
+  .mig__scroll,
+  .mig__foot { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+  .mig__targets { grid-template-columns: 1fr; }
+  .mig__tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px; }
+  .mig__foot { flex-wrap: wrap; }
+  .mig__msg {
+    flex-basis: 100%;
+    margin-left: 0;
+    white-space: normal;
+  }
+}
+
+/* 矮窗口：中间轨道和来源列表都可以缩，让底栏永远留在 sheet 里。
+   列表自己仍是独立滚动（max-height + overflow:auto），不会把整块顶长。 */
+@media (max-height: 760px) {
+  .mig__scroll { padding-top: var(--sp-4); padding-bottom: var(--sp-4); }
+  .mig__track { min-height: 150px; }
+  .mig__lane { height: 64px; }
+  .mig__list { max-height: 220px; }
+  .mig__table { max-height: 26vh; }
+}
+
+@media (max-height: 600px) {
+  .mig__track { min-height: 120px; }
+  .mig__lane { height: 48px; }
+  .mig__list { max-height: 170px; }
+  .mig__table { max-height: 22vh; }
+  .mig__sub { display: none; }        /* 最矮的窗口里先让副标题让位给操作区 */
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mig__pl,
+  .mig__tcard,
+  .mig__rail-fill { transition: none; }
+  .mig__done { animation: none; }
+  .mig__file {
+    animation: none;
+    display: none;
+  }
+}

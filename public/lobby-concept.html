@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI · 大厅概念稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   大厅概念稿 ·「今日节目」
+   纸白 + 巨大字号 + 细线 + 封面墙；和播放页（暗场）一明一暗。
+   左栏是一张节目单：今日单曲 + 本期曲目；右栏是本日推荐 + 形态长廊。
+   静态稿：数据从 /api/personalized 真拉，拿不到就退回内置样例。
+   ============================================================ */
+:root{
+  --paper:#fdfcfa; --paper-2:#f4f2ee;
+  --ink:#17171a; --ink-2:#4c4c55; --ink-3:#8c8c96; --ink-4:#b9b9c1;
+  --rule:oklch(21% .022 270 / .10);
+  --rule-soft:oklch(21% .022 270 / .06);
+  --font-ui:"Geist",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:"Geist Mono",ui-monospace,monospace;
+  --pad:clamp(26px,3.2vw,44px);
+  --topbar:64px; --dock:88px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--font-ui); font-size:14px; line-height:1.6;
+  -webkit-font-smoothing:antialiased; overflow:hidden; user-select:none;
+}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+img{display:block}
+
+/* ---------- 顶栏 ---------- */
+.top{height:var(--topbar);display:flex;align-items:center;gap:18px;
+  padding:0 clamp(18px,2.4vw,32px);border-bottom:1px solid var(--rule-soft)}
+.logo{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.16em;font-size:13px}
+.logo i{width:16px;height:16px;background:var(--ink);display:block;
+  clip-path:polygon(0 0,18% 0,18% 78%,100% 78%,100% 100%,0 100%)}
+.logo b{font-weight:400;color:var(--ink-3);letter-spacing:.05em}
+.search{flex:none;display:flex;align-items:center;gap:8px;height:32px;width:min(30vw,260px);
+  margin:0 auto;padding:0 12px;border-radius:999px;background:oklch(21% .022 270 / .045);
+  color:var(--ink-3);font-size:12.5px}
+.search svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.9;flex:none}
+.top__r{display:flex;align-items:center;gap:14px;font-size:12.5px;color:var(--ink-3)}
+
+/* ---------- 两栏 ---------- */
+.hall{height:calc(100vh - var(--topbar) - var(--dock));
+  display:grid;grid-template-columns:minmax(0,1.08fr) minmax(0,.92fr)}
+.feat{position:relative;padding:var(--pad) var(--pad) 0;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.feat__wash{position:absolute;left:-16%;top:-20%;width:76%;height:78%;
+  background:radial-gradient(circle at 38% 42%, oklch(80% .09 66 / .42), transparent 68%);
+  filter:blur(40px);pointer-events:none}
+.eyebrow{position:relative;display:flex;align-items:baseline;gap:11px;
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3)}
+.eyebrow b{color:var(--ink);font-weight:500;letter-spacing:.07em}
+.eyebrow .dot{width:3px;height:3px;border-radius:50%;background:var(--ink-4);flex:none;transform:translateY(-3px)}
+
+.feat__body{position:relative;display:flex;gap:clamp(20px,2.6vw,38px);
+  margin-top:clamp(18px,2.6vh,30px);align-items:flex-start}
+.sleeve{position:relative;flex:none;width:clamp(200px,23vw,304px);aspect-ratio:1;
+  border-radius:3px;overflow:hidden;background:var(--paper-2);
+  box-shadow:0 26px 62px -20px oklch(20% .03 270 / .4), 0 0 0 1px oklch(21% .022 270 / .08);
+  transition:transform .6s cubic-bezier(.2,.9,.2,1), box-shadow .6s cubic-bezier(.2,.9,.2,1)}
+.sleeve img{width:100%;height:100%;object-fit:cover;filter:saturate(1.04)}
+.sleeve::after{content:"";position:absolute;inset:0;border-radius:inherit;
+  box-shadow:inset 0 0 0 1px oklch(100% 0 0 / .16)}
+.feat:hover .sleeve{transform:translateY(-4px) rotate(-.5deg);
+  box-shadow:0 36px 74px -22px oklch(20% .03 270 / .46), 0 0 0 1px oklch(21% .022 270 / .08)}
+.sleeve__play{position:absolute;inset:0;display:grid;place-items:center;
+  background:oklch(12% .02 270 / .32);color:#fff;opacity:0;transition:opacity .3s}
+.sleeve:hover .sleeve__play{opacity:1}
+.sleeve__play svg{width:46px;height:46px;fill:currentColor;filter:drop-shadow(0 4px 16px oklch(0% 0 0 / .4))}
+
+.feat__meta{min-width:0;padding-top:1px}
+.feat__kicker{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.feat__title{margin:.2em 0 0;font-size:clamp(28px,3.1vw,42px);font-weight:600;line-height:1.04;
+  letter-spacing:-.035em;text-wrap:balance}
+.feat__sub{margin:9px 0 0;color:var(--ink-2);font-size:13px}
+.feat__sub span{color:var(--ink-4);margin:0 6px}
+.feat__acts{display:flex;align-items:center;gap:9px;margin-top:clamp(14px,2.2vh,22px)}
+.btn-play{display:inline-flex;align-items:center;gap:9px;height:40px;padding:0 21px 0 17px;
+  border-radius:999px;background:var(--ink);color:var(--paper);font-size:13px;font-weight:500;
+  transition:transform .3s cubic-bezier(.2,.9,.2,1), background .2s}
+.btn-play:hover{transform:translateY(-1px);background:oklch(28% .02 270)}
+.btn-play svg{width:12px;height:12px;fill:currentColor}
+.btn-ghost{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 17px;
+  border-radius:999px;border:1px solid var(--rule);color:var(--ink-2);font-size:12.5px;
+  transition:border-color .2s,color .2s,background .2s}
+.btn-ghost:hover{border-color:oklch(21% .022 270 / .26);color:var(--ink);background:oklch(21% .022 270 / .03)}
+.btn-ghost svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.9}
+
+/* 本期曲目：节目单 */
+.sheet{position:relative;margin-top:clamp(16px,2.6vh,28px);border-top:1px solid var(--rule);min-height:0;display:flex;flex-direction:column}
+.sheet__head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:12px 0 6px}
+.sheet__t{font-size:12px;font-weight:500}
+.sheet__c{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4)}
+.sheet__list{overflow:hidden}
+.rw{display:grid;grid-template-columns:22px minmax(0,1.35fr) minmax(0,1fr) 40px;align-items:center;gap:10px;
+  width:100%;height:38px;border-top:1px solid var(--rule-soft);color:var(--ink-2);
+  transition:background .16s,color .16s}
+.rw:first-child{border-top:0}
+.rw:hover{background:oklch(21% .022 270 / .035);color:var(--ink)}
+.rw__i{font-family:var(--font-mono);font-size:9.5px;color:var(--ink-4);letter-spacing:.06em}
+.rw__n{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rw__a{font-size:10.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rw__d{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);text-align:right}
+.rw:hover .rw__n{font-weight:500}
+
+.foot{margin-top:auto;padding:14px 0 16px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.memo{display:flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:9.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4)}
+.memo__bar{position:relative;width:96px;height:2px;background:var(--rule);border-radius:2px;overflow:hidden}
+.memo__bar i{position:absolute;inset:0 62% 0 0;background:var(--ink-2)}
+.memo b{color:var(--ink-2);font-weight:500}
+.recent{display:flex;align-items:center;gap:7px;margin-left:auto}
+.recent__l{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);margin-right:3px}
+.recent span.th{width:26px;height:26px;border-radius:50%;overflow:hidden;box-shadow:0 2px 8px oklch(20% .02 270 / .18);
+  transition:transform .3s}
+.recent span.th:hover{transform:translateY(-2px)}
+.recent img{width:100%;height:100%;object-fit:cover}
+
+/* ---------- 右栏 ---------- */
+.wall{border-left:1px solid var(--rule-soft);padding:var(--pad) var(--pad) 0 clamp(22px,2.6vw,36px);
+  display:flex;flex-direction:column;min-height:0}
+.wall__head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.wall__t{font-size:12px;font-weight:500}
+.wall__c{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4)}
+.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  align-content:start;
+  gap:clamp(12px,1.5vw,18px) clamp(10px,1.2vw,15px);
+  margin-top:clamp(12px,1.8vh,18px);min-height:0;flex:1 1 auto;
+  overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 26px),transparent);
+  mask-image:linear-gradient(to bottom,#000 calc(100% - 26px),transparent)}
+.grid::-webkit-scrollbar{display:none}
+.cd{display:block;min-width:0}
+.cd__img{display:block;position:relative;width:100%;aspect-ratio:1;border-radius:2px;
+  overflow:hidden;background:var(--paper-2);box-shadow:0 1px 2px oklch(20% .02 270 / .1), 0 0 0 1px oklch(21% .022 270 / .06)}
+.cd__img img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  transition:transform .7s cubic-bezier(.2,.9,.2,1)}
+.cd:hover .cd__img img{transform:scale(1.05)}
+.cd__cue{position:absolute;inset:0;display:grid;place-items:center;
+  background:oklch(12% .02 270 / .28);opacity:0;transition:opacity .25s}
+.cd:hover .cd__cue{opacity:1}
+.cd__cue svg{width:24px;height:24px;fill:#fff}
+.cd__n{margin-top:7px;font-size:12px;font-weight:500;line-height:1.3;letter-spacing:-.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cd__a{margin-top:1px;font-size:10px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.lane{margin-top:auto;padding:clamp(16px,2.2vh,24px) 0 clamp(14px,2vh,20px);border-top:1px solid var(--rule-soft)}
+.lane__head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px}
+.lane__t{font-size:12px;font-weight:500}
+.lane__c{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4)}
+.lane__row{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(to right,#000 92%,transparent);
+  mask-image:linear-gradient(to right,#000 92%,transparent)}
+.lane__row::-webkit-scrollbar{display:none}
+.st{position:relative;flex:none;width:124px;height:62px;border-radius:3px;overflow:hidden;
+  padding:0;color:#fff;background:linear-gradient(135deg,var(--c1),var(--c2));
+  box-shadow:0 1px 2px oklch(20% .02 270 / .14);
+  transition:transform .4s cubic-bezier(.2,.9,.2,1), box-shadow .4s}
+.st:hover{transform:translateY(-3px);box-shadow:0 12px 24px -8px oklch(20% .03 270 / .4)}
+.st__id{position:absolute;left:10px;top:7px;font-family:var(--font-mono);font-size:8.5px;letter-spacing:.12em;opacity:.7}
+.st__n{position:absolute;left:10px;bottom:7px;font-size:11.5px;font-weight:600;text-shadow:0 1px 6px oklch(0% 0 0 / .3)}
+.st--on{box-shadow:0 0 0 2px var(--paper), 0 0 0 3.5px var(--ink)}
+.st--on::after{content:"当前";position:absolute;right:7px;top:6px;font-family:var(--font-mono);
+  font-size:8px;letter-spacing:.08em;padding:1px 5px;border-radius:99px;background:oklch(100% 0 0 / .22)}
+
+/* ---------- 底部 dock ---------- */
+.dock{height:var(--dock);border-top:1px solid var(--rule);display:flex;align-items:center;gap:13px;
+  padding:0 clamp(18px,2.4vw,32px);background:var(--paper)}
+.dock__art{width:54px;height:54px;border-radius:2px;overflow:hidden;flex:none;
+  box-shadow:0 2px 10px oklch(20% .02 270 / .2)}
+.dock__art img{width:100%;height:100%;object-fit:cover}
+.dock__txt{min-width:0;width:210px}
+.dock__n{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock__a{font-size:10.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dock__mid{margin:0 auto;display:flex;align-items:center;gap:15px;color:var(--ink-2)}
+.dock__mid svg{width:14px;height:14px;fill:currentColor;opacity:.75}
+.dock__play{width:36px;height:36px;border-radius:50%;background:var(--ink);color:var(--paper);
+  display:grid;place-items:center;box-shadow:0 4px 14px -2px oklch(20% .03 270 / .42)}
+.dock__play svg{width:14px;height:14px;opacity:1}
+.dock__time{display:flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:9.5px;
+  color:var(--ink-3);width:240px}
+.dock__rail{position:relative;flex:1;height:2px;background:var(--rule);border-radius:2px}
+.dock__rail i{position:absolute;inset:0 78% 0 0;background:var(--ink-2)}
+
+.mark{font-family:var(--font-mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-4);pointer-events:none}
+@media (max-width:1080px){
+  .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .feat__body{flex-direction:column}
+  .sleeve{width:clamp(180px,30vw,240px)}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="logo"><i></i>LIZI <b>Air</b></span>
+  <span class="search">
+    <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+    搜索歌曲、歌手或专辑
+  </span>
+  <span class="top__r"><span class="mark">Concept</span><span>登录</span></span>
+</header>
+
+<main class="hall">
+
+  <!-- ================= 左：今日节目 + 本期曲目 ================= -->
+  <section class="feat">
+    <div class="feat__wash"></div>
+
+    <div class="eyebrow">
+      <b>今日节目</b><i class="dot"></i><span id="date">2026 · 10 · 25</span><i class="dot"></i><span>第 001 期</span>
+    </div>
+
+    <div class="feat__body">
+      <div class="sleeve" id="sleeve">
+        <img id="sleeve-img" alt="">
+        <span class="sleeve__play"><svg viewBox="0 0 24 24"><path d="M8 5.2v13.6L19.4 12z"/></svg></span>
+      </div>
+
+      <div class="feat__meta">
+        <div class="feat__kicker">Featured · 今日单曲</div>
+        <h1 class="feat__title" id="feat-title">宝船</h1>
+        <p class="feat__sub" id="feat-sub">DOUDOU / 燕云十六声<span>·</span>《宝船》</p>
+
+        <div class="feat__acts">
+          <button class="btn-play">
+            <svg viewBox="0 0 24 24"><path d="M8 5.2v13.6L19.4 12z"/></svg>播放
+          </button>
+          <button class="btn-ghost">
+            <svg viewBox="0 0 24 24"><path d="M4 14v-4M9 18V6M14 16V8M19 20V4"/></svg>用形态看
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 本期曲目：一张节目单，把左栏的空处填成内容 -->
+    <div class="sheet">
+      <div class="sheet__head">
+        <span class="sheet__t">本期曲目</span>
+        <span class="sheet__c">Playbill · 10 首</span>
+      </div>
+      <div class="sheet__list" id="sheet"></div>
+    </div>
+
+    <div class="foot">
+      <span class="memo">
+        <span>上次听到</span>
+        <span class="memo__bar"><i></i></span>
+        <b>1:12 / 3:52</b>
+      </span>
+      <span class="recent">
+        <span class="recent__l">最近</span>
+        <span class="th"><img id="r1" alt=""></span>
+        <span class="th"><img id="r2" alt=""></span>
+        <span class="th"><img id="r3" alt=""></span>
+      </span>
+    </div>
+  </section>
+
+  <!-- ================= 右：本日推荐 + 形态长廊 ================= -->
+  <section class="wall">
+    <div class="wall__head">
+      <span class="wall__t">本日推荐</span>
+      <span class="wall__c">按热度 · 10 首</span>
+    </div>
+    <div class="grid" id="grid"></div>
+
+    <div class="lane">
+      <div class="lane__head">
+        <span class="lane__t">视觉形态</span>
+        <span class="lane__c">66 个 · 换一种看法</span>
+      </div>
+      <div class="lane__row" id="lane"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="dock">
+  <div class="dock__art"><img id="dock-img" alt=""></div>
+  <div class="dock__txt">
+    <div class="dock__n" id="dock-n">未播放</div>
+    <div class="dock__a" id="dock-a">—</div>
+  </div>
+  <div class="dock__mid">
+    <svg viewBox="0 0 24 24"><path d="M18 5.8v12.4L9.2 12zM6.4 5h2.4v14H6.4z"/></svg>
+    <span class="dock__play"><svg viewBox="0 0 24 24"><path d="M8 5.2v13.6L19.4 12z"/></svg></span>
+    <svg viewBox="0 0 24 24"><path d="M6 5.8v12.4L14.8 12zM15.6 5h2.4v14h-2.4z"/></svg>
+  </div>
+  <div class="dock__time"><span>0:00</span><span class="dock__rail"><i></i></span><span>3:26</span></div>
+</footer>
+
+
+<script>
+const FALLBACK = [
+  { name:'宝船', artists:'DOUDOU / 燕云十六声', album:'宝船', cover:'http://p2.music.126.net/pdpmj0csBR_nUM7c2xr6pA==/109951174135616642.jpg', duration:232500 },
+  { name:'睡前别想太多', artists:'李雨霏_晚饭', album:'睡前别想太多', cover:'http://p2.music.126.net/CdAZ76__lHkE_HcjXgR_4w==/109951173999807018.jpg', duration:210079 },
+  { name:'一张相片', artists:'连麻Swimming', album:'斩鸭线', cover:'http://p2.music.126.net/Eafh2qRUgw2IXXOVD4B9LQ==/109951174139932904.jpg', duration:224842 },
+  { name:'自由的你', artists:'G.E.M.邓紫棋', album:'自由的你', cover:'http://p2.music.126.net/G4Vtk4Je9Sj8zB4KGlxprw==/109951174017350276.jpg', duration:296900 },
+  { name:'Undefined', artists:'PerVade / 第五人格', album:'Undefined', cover:'http://p2.music.126.net/ccu6U_1qtxIIz5ReqhhQ0w==/109951174144800369.jpg', duration:175915 },
+  { name:'FIRESTARTER', artists:'K/DA / 英雄联盟', album:'FIRESTARTER', cover:'http://p2.music.126.net/9R6YxeIwMLT7nHy8W7-P-g==/109951174131850898.jpg', duration:187280 },
+];
+const img = (u, s = 400) => u ? `/api/img?url=${encodeURIComponent(u.includes('?') ? u : u + '?param=' + s + 'y' + s)}` : '';
+const mmss = (ms) => { const s = Math.round((ms || 0) / 1000); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+
+const STAGES = [
+  { id:'005', name:'粒子文字', c1:'#bb8a5c', c2:'#6a4630' },
+  { id:'013', name:'水波涟漪', c1:'#5f8fb8', c2:'#2c4761' },
+  { id:'014', name:'万花筒',  c1:'#a05f9c', c2:'#47264f' },
+  { id:'060', name:'星系',    c1:'#3f4a86', c2:'#1b2043' },
+  { id:'062', name:'弹簧链',  c1:'#7d8a5a', c2:'#3b4327' },
+  { id:'063', name:'丝带',    c1:'#c07a63', c2:'#60382d' },
+  { id:'041', name:'磁流体',  c1:'#4f6f6a', c2:'#233130' },
+];
+
+function paint(list) {
+  const hero = list[0];
+  document.getElementById('sleeve-img').src = img(hero.cover, 640);
+  document.getElementById('feat-title').textContent = hero.name;
+  document.getElementById('feat-sub').innerHTML = `${hero.artists}<span>·</span>《${hero.album || '单曲'}》`;
+  document.getElementById('dock-img').src = img(hero.cover, 120);
+  document.getElementById('dock-n').textContent = hero.name;
+  document.getElementById('dock-a').textContent = `${hero.artists} · ${hero.album || ''}`;
+
+  document.getElementById('sheet').innerHTML = list.slice(1, 6).map((t, i) => `
+    <button class="rw">
+      <span class="rw__i">${String(i + 2).padStart(2, '0')}</span>
+      <span class="rw__n">${t.name}</span>
+      <span class="rw__a">${t.artists}</span>
+      <span class="rw__d">${mmss(t.duration)}</span>
+    </button>`).join('');
+
+  document.getElementById('grid').innerHTML = list.slice(0, 9).map((t) => `
+    <button class="cd">
+      <span class="cd__img">
+        <img src="${img(t.cover, 300)}" alt="" loading="lazy">
+        <span class="cd__cue"><svg viewBox="0 0 24 24"><path d="M8 5.2v13.6L19.4 12z"/></svg></span>
+      </span>
+      <div class="cd__n">${t.name}</div>
+      <div class="cd__a">${t.artists}</div>
+    </button>`).join('');
+
+  ['r1','r2','r3'].forEach((id, i) => {
+    document.getElementById(id).src = img(list[(i + 2) % list.length].cover, 80);
+  });
+}
+
+document.getElementById('lane').innerHTML = STAGES.map((s, i) => `
+  <button class="st${i === 1 ? ' st--on' : ''}" style="--c1:${s.c1};--c2:${s.c2}">
+    <span class="st__id">${s.id}</span>
+    <span class="st__n">${s.name}</span>
+  </button>`).join('');
+
+const d = new Date();
+document.getElementById('date').textContent =
+  `${d.getFullYear()} · ${String(d.getMonth() + 1).padStart(2, '0')} · ${String(d.getDate()).padStart(2, '0')}`;
+
+fetch('/api/personalized', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+  .then((r) => r.json())
+  .then((j) => paint(j && j.tracks && j.tracks.length ? j.tracks : FALLBACK))
+  .catch(() => paint(FALLBACK));
+</script>
+</body>
+</html>

@@ -1,0 +1,1537 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>粒子标志 · LIZI LOGO LAB</title>
+<style>
+  :root{
+    --bg:#0a0c0b;
+    --tile:#171c18;
+    --panel:rgba(255,255,255,.035);
+    --glass:rgba(10,12,11,.78);
+    --line:rgba(255,255,255,.09);
+    --line-strong:rgba(255,255,255,.16);
+    --ink:#edf0e9;
+    --muted:#8b948c;
+    --faint:#5f6861;
+    --accent:#c9f45a;
+    --accent-ink:#0a0c0b;
+    --check:rgba(255,255,255,.035);
+    --shadow:0 30px 70px -40px rgba(0,0,0,.9);
+    color-scheme:dark;
+  }
+  html[data-theme="light"]{
+    --bg:#f1f0ea;
+    --tile:#fbfaf4;
+    --panel:rgba(255,255,255,.62);
+    --glass:rgba(241,240,234,.82);
+    --line:rgba(22,26,22,.13);
+    --line-strong:rgba(22,26,22,.24);
+    --ink:#171b17;
+    --muted:#656d66;
+    --faint:#8b938c;
+    --accent:#4e7600;
+    --accent-ink:#f5f8ee;
+    --check:rgba(20,24,20,.045);
+    --shadow:0 30px 70px -46px rgba(40,50,30,.35);
+    color-scheme:light;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    min-height:100vh;
+    background:
+      radial-gradient(1100px 560px at 82% -12%, rgba(201,244,90,.07), transparent 62%),
+      radial-gradient(900px 500px at 8% 8%, rgba(4,227,180,.045), transparent 60%),
+      var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+    transition:background-color .28s ease, color .28s ease;
+  }
+  body::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    background-image:radial-gradient(var(--check) 1px, transparent 1.2px);
+    background-size:24px 24px;
+    -webkit-mask-image:linear-gradient(#000, transparent 72%);
+    mask-image:linear-gradient(#000, transparent 72%);
+  }
+  .mono{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    font-variant-numeric:tabular-nums;
+  }
+  .wrap{
+    position:relative;
+    z-index:1;
+    max-width:1480px;
+    margin:0 auto;
+    padding:0 40px 84px;
+  }
+  /* ---------- hero ---------- */
+  .hero{
+    padding:54px 0 32px;
+    border-bottom:1px solid var(--line);
+    display:grid;
+    gap:26px;
+  }
+  .hero-meta{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:18px;
+    flex-wrap:wrap;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10.5px;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .tag{
+    display:inline-flex;
+    align-items:center;
+    gap:9px;
+    padding:6px 10px;
+    border:1px solid var(--line);
+    border-radius:999px;
+  }
+  .tag b{
+    color:var(--accent-ink);
+    background:var(--accent);
+    border-radius:999px;
+    padding:2px 7px;
+    font-size:10px;
+    letter-spacing:.12em;
+  }
+  .hero-main{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:42px;
+    flex-wrap:wrap;
+  }
+  h1{
+    margin:0;
+    display:flex;
+    align-items:flex-start;
+    gap:14px;
+    font-size:clamp(42px,5.6vw,78px);
+    line-height:.94;
+    letter-spacing:-.045em;
+    font-weight:650;
+  }
+  .h1-num{
+    margin-top:6px;
+    padding:5px 9px;
+    border:1px solid var(--line-strong);
+    border-radius:999px;
+    color:var(--accent);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11px;
+    line-height:1;
+    letter-spacing:.12em;
+    font-weight:500;
+  }
+  .hero-copy{
+    max-width:430px;
+    margin:0 0 4px;
+    color:var(--muted);
+    font-size:13.5px;
+    line-height:1.85;
+  }
+  .hero-copy b{color:var(--ink);font-weight:500}
+  .hero-rule{
+    display:flex;
+    justify-content:space-between;
+    gap:20px;
+    flex-wrap:wrap;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10.5px;
+    letter-spacing:.1em;
+    color:var(--faint);
+    text-transform:uppercase;
+  }
+  /* ---------- controls ---------- */
+  .controls{
+    position:sticky;
+    top:12px;
+    z-index:20;
+    margin:26px 0 30px;
+    display:flex;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    gap:20px 26px;
+    padding:17px 20px 16px;
+    border:1px solid var(--line);
+    border-radius:16px;
+    background:var(--glass);
+    -webkit-backdrop-filter:blur(18px) saturate(1.25);
+    backdrop-filter:blur(18px) saturate(1.25);
+    box-shadow:var(--shadow);
+  }
+  .ctl{
+    display:flex;
+    flex-direction:column;
+    gap:9px;
+    flex:1 1 158px;
+    min-width:146px;
+    max-width:236px;
+  }
+  .ctl-label{
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:12px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  .ctl-label output{
+    color:var(--ink);
+    letter-spacing:0;
+    text-transform:none;
+    white-space:nowrap;
+    font-size:10.5px;
+  }
+  input[type="range"]{
+    -webkit-appearance:none;
+    appearance:none;
+    width:100%;
+    height:18px;
+    margin:0;
+    background:transparent;
+    cursor:pointer;
+    --v:50%;
+  }
+  input[type="range"]::-webkit-slider-runnable-track{
+    height:2px;
+    border-radius:2px;
+    background:linear-gradient(to right, var(--accent) 0 var(--v), var(--line-strong) var(--v) 100%);
+  }
+  input[type="range"]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:13px;
+    height:13px;
+    margin-top:-5.5px;
+    border-radius:3px;
+    background:var(--ink);
+    border:1px solid var(--line);
+    box-shadow:0 0 0 3px var(--glass);
+  }
+  input[type="range"]::-moz-range-track{
+    height:2px;
+    border-radius:2px;
+    background:var(--line-strong);
+  }
+  input[type="range"]::-moz-range-progress{
+    height:2px;
+    border-radius:2px;
+    background:var(--accent);
+  }
+  input[type="range"]::-moz-range-thumb{
+    width:12px;
+    height:12px;
+    border-radius:3px;
+    background:var(--ink);
+    border:1px solid var(--line);
+  }
+  .seg{
+    display:inline-flex;
+    align-self:flex-start;
+    padding:2px;
+    border:1px solid var(--line);
+    border-radius:9px;
+    background:var(--panel);
+  }
+  .seg button{
+    appearance:none;
+    border:0;
+    background:transparent;
+    color:var(--muted);
+    padding:6px 13px;
+    border-radius:7px;
+    font-size:11.5px;
+    cursor:pointer;
+    transition:background-color .18s ease, color .18s ease;
+  }
+  .seg button.on{
+    background:var(--ink);
+    color:var(--bg);
+  }
+  .switch{
+    appearance:none;
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:7px 10px;
+    border:1px solid var(--line);
+    border-radius:9px;
+    background:transparent;
+    color:var(--muted);
+    font-size:11.5px;
+    cursor:pointer;
+    transition:border-color .18s ease, color .18s ease, background-color .18s ease;
+  }
+  .switch::before{
+    content:"";
+    width:11px;
+    height:11px;
+    border-radius:3px;
+    border:1px solid currentColor;
+    opacity:.65;
+    transition:background-color .18s ease, border-color .18s ease, opacity .18s ease;
+  }
+  .switch[aria-checked="true"]{
+    color:var(--ink);
+    border-color:var(--line-strong);
+    background:var(--panel);
+  }
+  .switch[aria-checked="true"]::before{
+    background:var(--accent);
+    border-color:var(--accent);
+    opacity:1;
+  }
+  .toggles{
+    display:flex;
+    flex-wrap:wrap;
+    gap:7px;
+    flex:3 1 330px;
+    max-width:none;
+  }
+  .reset{
+    appearance:none;
+    margin-left:auto;
+    padding:8px 13px;
+    border:1px solid var(--line);
+    border-radius:9px;
+    background:transparent;
+    color:var(--muted);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    cursor:pointer;
+  }
+  .reset:hover{color:var(--ink);border-color:var(--line-strong)}
+  /* ---------- gallery ---------- */
+  .gallery{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:20px;
+  }
+  .card{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    justify-content:space-between;
+    gap:14px;
+    padding:18px;
+    border:1px solid var(--line);
+    border-radius:18px;
+    background:var(--panel);
+    overflow:hidden;
+    transition:border-color .22s ease, background-color .28s ease;
+  }
+  .card::after{
+    content:"";
+    position:absolute;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    border-radius:inherit;
+    background:radial-gradient(125% 85% at 88% -14%, color-mix(in srgb, var(--brand,#888) 10%, transparent), transparent 62%);
+  }
+  .card > *{position:relative;z-index:1}
+  .card:hover{border-color:color-mix(in srgb, var(--brand,#888) 38%, var(--line))}
+  .card-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+  }
+  .card-id{
+    display:flex;
+    align-items:baseline;
+    gap:9px;
+    flex-wrap:wrap;
+  }
+  .idx{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10px;
+    color:var(--faint);
+    letter-spacing:.06em;
+  }
+  .card-id h2{
+    margin:0;
+    font-size:17px;
+    font-weight:600;
+    letter-spacing:-.01em;
+  }
+  .en{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:9px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--faint);
+  }
+  .swatches{display:flex;gap:5px;padding-top:4px}
+  .swatches i{
+    width:10px;
+    height:10px;
+    border-radius:3px;
+    background:var(--c);
+    box-shadow:inset 0 0 0 1px rgba(0,0,0,.14);
+  }
+  .compare{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+  }
+  .tile{
+    position:relative;
+    margin:0;
+    aspect-ratio:1 / 1;
+    border:1px solid var(--line);
+    border-radius:12px;
+    overflow:hidden;
+    background:var(--tile);
+  }
+  .tile figcaption{
+    position:absolute;
+    z-index:3;
+    left:10px;
+    top:9px;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    pointer-events:none;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:9.5px;
+    letter-spacing:.11em;
+    text-transform:uppercase;
+    color:var(--muted);
+    white-space:nowrap;
+  }
+  .tile figcaption .dot{
+    width:5px;
+    height:5px;
+    border-radius:1px;
+    background:var(--accent);
+    flex:none;
+  }
+  .tile-orig::before{
+    content:"";
+    position:absolute;
+    inset:0;
+    background-image:
+      linear-gradient(45deg, var(--check) 25%, transparent 25% 75%, var(--check) 75%),
+      linear-gradient(45deg, var(--check) 25%, transparent 25% 75%, var(--check) 75%);
+    background-size:14px 14px;
+    background-position:0 0, 7px 7px;
+    pointer-events:none;
+  }
+  .orig-wrap{
+    position:absolute;
+    inset:27px 14px 14px;
+    display:grid;
+    place-items:center;
+  }
+  .orig-wrap img{
+    display:block;
+    width:72%;
+    height:72%;
+    object-fit:contain;
+    user-select:none;
+    -webkit-user-drag:none;
+    filter:drop-shadow(0 12px 34px rgba(0,0,0,.24));
+  }
+  .card.on-white .tile-orig{background:#fff}
+  .card.on-white .tile-orig::before{display:none}
+  .card.on-white .tile-orig figcaption{color:rgba(24,28,24,.5)}
+  .tile-particles{
+    background:
+      radial-gradient(90% 90% at 50% 38%, color-mix(in srgb, var(--brand,#888) 9%, transparent), transparent 72%),
+      var(--tile);
+    transition:border-color .18s ease;
+  }
+  .tile-particles:hover{border-color:color-mix(in srgb, var(--brand,#888) 45%, var(--line))}
+  .stage{
+    position:absolute;
+    inset:25px 9px 9px;
+    cursor:crosshair;
+    touch-action:pan-y;
+  }
+  .stage::after{
+    content:"SAMPLING";
+    position:absolute;
+    inset:0;
+    display:grid;
+    place-items:center;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:9.5px;
+    letter-spacing:.22em;
+    color:var(--faint);
+    pointer-events:none;
+    transition:opacity .35s ease .1s;
+  }
+  .stage.is-ready::after{opacity:0;content:""}
+  .stage.is-error::after{display:none}
+  html[data-theme="dark"] .card[data-id="qishui"] .tile-particles,
+  html[data-theme="dark"] .card[data-id="qishui"] .tile-orig{
+    background:
+      radial-gradient(90% 90% at 50% 38%, rgba(38,254,104,.10), transparent 72%),
+      #232a24;
+  }
+  .lizi-ascii-canvas{display:block;width:100%;height:100%}
+  .lizi-ascii-error{
+    position:absolute;
+    inset:0;
+    display:grid;
+    place-items:center;
+    color:#d98b8b;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10px;
+    letter-spacing:.1em;
+  }
+  .card-foot{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:14px;
+    padding-top:2px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:9.5px;
+    letter-spacing:.06em;
+    color:var(--faint);
+  }
+  .card-foot .stat{color:var(--muted)}
+  .dim{color:var(--faint)}
+  /* ---------- note card ---------- */
+  .card-note{
+    justify-content:flex-start;
+    gap:15px;
+    background:linear-gradient(155deg, var(--panel), transparent 72%);
+    padding:22px;
+  }
+  .card-note .note-label{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:9.5px;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    color:var(--accent);
+  }
+  .card-note h2{
+    margin:0;
+    font-size:23px;
+    line-height:1.35;
+    letter-spacing:-.02em;
+    font-weight:600;
+    max-width:400px;
+  }
+  .card-note p{
+    margin:0;
+    color:var(--muted);
+    font-size:12.5px;
+    line-height:1.8;
+  }
+  .card-note code{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:11px;
+    color:var(--ink);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:5px;
+    padding:1px 5px;
+  }
+  .code{
+    margin:0;
+    padding:13px 14px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    background:rgba(0,0,0,.16);
+    color:var(--ink);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10.5px;
+    line-height:1.75;
+    overflow-x:auto;
+    white-space:pre;
+  }
+  html[data-theme="light"] .code{background:rgba(20,30,20,.045)}
+  .note-list{
+    margin:0;
+    padding:0;
+    list-style:none;
+    display:grid;
+    gap:7px;
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.7;
+  }
+  .note-list li{
+    position:relative;
+    padding-left:14px;
+  }
+  .note-list li::before{
+    content:"";
+    position:absolute;
+    left:0;
+    top:.62em;
+    width:5px;
+    height:5px;
+    border-radius:1px;
+    background:color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  .page-foot{
+    display:flex;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-top:26px;
+    padding-top:16px;
+    border-top:1px solid var(--line);
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:9.5px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--faint);
+  }
+  :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  @media (max-width:1040px){
+    .wrap{padding:0 24px 64px}
+    .controls{top:8px}
+    .hero{padding-top:40px}
+    .ctl{max-width:none}
+  }
+  @media (max-width:860px){
+    .gallery{grid-template-columns:1fr}
+    .hero-main{align-items:flex-start}
+    .hero-copy{max-width:100%}
+  }
+  @media (max-width:560px){
+    .wrap{padding:0 14px 48px}
+    .hero{padding:28px 0 24px;gap:20px}
+    h1{gap:9px}
+    .h1-num{margin-top:3px}
+    .controls{padding:14px;gap:16px;border-radius:13px}
+    .ctl{flex:1 1 100%;max-width:none}
+    .toggles{flex:1 1 100%}
+    .reset{margin-left:0}
+    .compare{grid-template-columns:1fr}
+    .card{padding:14px;border-radius:15px}
+    .tile{aspect-ratio:1 / 1}
+    .stage{inset:25px 6px 6px}
+    .card-note{padding:18px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    *,*::before,*::after{transition-duration:.01ms !important;animation-duration:.01ms !important}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="hero-meta">
+      <span class="tag"><b>LAB</b> 07 FLAGS</span>
+      <span>SVG &rarr; VOXEL GRID &middot; LOCAL ONLY</span>
+    </div>
+    <div class="hero-main">
+      <h1>粒子标志<span class="h1-num">07</span></h1>
+      <p class="hero-copy">七个平台图标逐格采样成<b>方块粒子</b>，颜色直接来自 SVG 像素。<br>密度、间隙、背景实时可调；左侧原图并排对照，默认参数即成品。</p>
+    </div>
+    <div class="hero-rule">
+      <span>SAMPLING: 1024 &rarr; GRID</span>
+      <span>DEFAULT: 64 COLS / 78% BLOCK</span>
+      <span>DPR &le; 2</span>
+    </div>
+  </header>
+
+  <section class="controls" aria-label="粒子参数面板">
+    <div class="ctl">
+      <label class="ctl-label" for="density">点阵密度 <output id="density-out">64 列</output></label>
+      <input id="density" type="range" min="24" max="120" step="1" value="64">
+    </div>
+    <div class="ctl">
+      <label class="ctl-label" for="fill">方块大小 / 间隙 <output id="fill-out">78% / 22%</output></label>
+      <input id="fill" type="range" min="0.45" max="1" step="0.01" value="0.78">
+    </div>
+    <div class="ctl">
+      <label class="ctl-label" for="radius">方块圆角 <output id="radius-out">18%</output></label>
+      <input id="radius" type="range" min="0" max="0.5" step="0.01" value="0.18">
+    </div>
+    <div class="ctl">
+      <span class="ctl-label">页面背景</span>
+      <div class="seg" role="group" aria-label="页面背景">
+        <button type="button" data-theme-btn="dark" class="on">深色</button>
+        <button type="button" data-theme-btn="light">浅色</button>
+      </div>
+    </div>
+    <div class="ctl toggles" role="group" aria-label="显示选项">
+      <button type="button" class="switch" role="switch" aria-checked="true" data-toggle="color">保留原色</button>
+      <button type="button" class="switch" role="switch" aria-checked="true" data-toggle="glow">轻微发光</button>
+      <button type="button" class="switch" role="switch" aria-checked="true" data-toggle="motion">悬停动效</button>
+    </div>
+    <button type="button" class="reset" id="reset">重置参数</button>
+  </section>
+
+  <main class="gallery" id="gallery"></main>
+
+  <footer class="page-foot">
+    <span>LIZI PARTICLE LAB &middot; 独立预览页</span>
+    <span>NO CDN &middot; NO MAIN-UI CHANGE</span>
+  </footer>
+</div>
+<script>
+/* ========================================================================
+   LiziAsciiLogo 1.0
+   SVG → 离屏画布 → 网格采样 → 方块粒子。
+   接口：window.LiziAsciiLogo.render(svgUrl, container, opts)
+   ======================================================================== */
+(function () {
+  'use strict';
+
+  var VERSION = '1.0.0';
+  var SRC_SIZE = 1024;
+  var ALPHA_STEPS = 12;
+
+  var DEFAULTS = {
+    cols: 64,
+    fill: 0.78,
+    radius: 0.18,
+    theme: 'dark',
+    color: true,
+    glow: true,
+    motion: true,
+    plate: null,
+    alphaFloor: 0.05,
+    maxDpr: 2,
+    glowColor: null,
+    monoColor: null,
+    label: '粒子 Logo',
+    onRender: null
+  };
+
+  var reducedMQ = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var activeInstances = new Set();
+  var assetCache = new Map();
+
+  function clamp(n, a, b) { return Math.min(b, Math.max(a, n)); }
+
+  function hexToRgb(hex) {
+    if (!hex || typeof hex !== 'string') return null;
+    var s = hex.trim().replace(/^#/, '');
+    if (s.length === 3) s = s.charAt(0) + s.charAt(0) + s.charAt(1) + s.charAt(1) + s.charAt(2) + s.charAt(2);
+    if (!/^[0-9a-f]{6}$/i.test(s)) return null;
+    return {
+      r: parseInt(s.slice(0, 2), 16),
+      g: parseInt(s.slice(2, 4), 16),
+      b: parseInt(s.slice(4, 6), 16)
+    };
+  }
+
+  function luminance(r, g, b) {
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  }
+
+  function hashPhase(c, r, cols) {
+    var h = (c * 374761393 + r * 668265263 + cols * 1442695041) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h = (h ^ (h >>> 16)) >>> 0;
+    return (h % 10007) / 10007;
+  }
+
+  function roundRectPath(ctx, x, y, w, h, r) {
+    r = Math.min(Math.max(r, 0), Math.min(w, h) / 2);
+    if (r <= 0.35) { ctx.rect(x, y, w, h); return; }
+    if (typeof ctx.roundRect === 'function') { ctx.roundRect(x, y, w, h, r); return; }
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function readViewBox(text) {
+    var m = /viewBox\s*=\s*["']\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)\s*["']/i.exec(text);
+    if (m) {
+      var w = parseFloat(m[3]);
+      var h = parseFloat(m[4]);
+      if (w > 0 && h > 0) return { w: w, h: h };
+    }
+    var wm = /<svg[^>]*\bwidth\s*=\s*["']([\d.]+)(?:px)?["']/i.exec(text);
+    var hm = /<svg[^>]*\bheight\s*=\s*["']([\d.]+)(?:px)?["']/i.exec(text);
+    if (wm && hm) {
+      var nw = parseFloat(wm[1]);
+      var nh = parseFloat(hm[1]);
+      if (nw > 0 && nh > 0) return { w: nw, h: nh };
+    }
+    return { w: 1, h: 1 };
+  }
+
+  function loadImage(src) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.decoding = 'async';
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { reject(new Error('SVG 解码失败')); };
+      img.src = src;
+    });
+  }
+
+  function loadAsset(url, plate) {
+    var key = url + '|' + (plate ? (plate.fill + '|' + plate.inset + '|' + plate.radius) : '');
+    if (assetCache.has(key)) return assetCache.get(key);
+
+    var job = (async function () {
+      var res = await fetch(url, { cache: 'force-cache' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      var text = await res.text();
+      var dims = readViewBox(text);
+      text = text.replace(/<!DOCTYPE[\s\S]*?>/i, '');
+      var image = await loadImage('data:image/svg+xml;charset=utf-8,' + encodeURIComponent(text));
+
+      var W = SRC_SIZE;
+      var H = Math.max(1, Math.round(SRC_SIZE * (dims.h / dims.w)));
+      var canvas = document.createElement('canvas');
+      canvas.width = W;
+      canvas.height = H;
+      var ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
+        if (plate && plate.fill) {
+          var inset = clamp(plate.inset == null ? 0.05 : plate.inset, 0, 0.4);
+          var px = W * inset;
+          var py = H * inset;
+          var pw = W * (1 - inset * 2);
+          var ph = H * (1 - inset * 2);
+          var rad = Math.min(pw, ph) * clamp(plate.radius == null ? 0.12 : plate.radius, 0, 0.5);
+          ctx.fillStyle = plate.fill;
+          ctx.beginPath();
+          roundRectPath(ctx, px, py, pw, ph, rad);
+          ctx.fill();
+        }
+        ctx.drawImage(image, 0, 0, W, H);
+      }
+      return { canvas: canvas, aspect: W / H };
+    })();
+
+    assetCache.set(key, job);
+    job.catch(function () { assetCache.delete(key); });
+    return job;
+  }
+
+  class LiziAsciiLogo {
+    constructor(url, container, opts) {
+      if (!container) throw new Error('LiziAsciiLogo: 缺少 container');
+      this.url = url;
+      this.container = container;
+      this.opts = Object.assign({}, DEFAULTS, opts || {});
+      this._normalize();
+
+      this._destroyed = false;
+      this._ready = false;
+      this._raf = 0;
+      this._lastFrame = 0;
+      this._settleUntil = 0;
+      this._pointer = null;
+      this._visible = true;
+      this._drawQueued = false;
+      this._aspect = 1;
+      this._srcW = 1;
+      this._srcH = 1;
+      this._groups = [];
+      this._cells = [];
+      this._dominant = null;
+      this._stats = { count: 0, colors: 0, cols: this.opts.cols, rows: 0 };
+
+      this.canvas = document.createElement('canvas');
+      this.canvas.className = 'lizi-ascii-canvas';
+      this.canvas.setAttribute('role', 'img');
+      this.canvas.setAttribute('aria-label', this.opts.label);
+      this.canvas.style.cssText = 'display:block;width:100%;height:100%';
+      container.appendChild(this.canvas);
+      this.ctx = this.canvas.getContext('2d');
+
+      this._onResize = this._onResize.bind(this);
+      this._tick = this._tick.bind(this);
+      this._onPointerEnter = this._onPointerEnter.bind(this);
+      this._onPointerMove = this._onPointerMove.bind(this);
+      this._onPointerLeave = this._onPointerLeave.bind(this);
+
+      this._measure();
+
+      if (typeof ResizeObserver !== 'undefined') {
+        this._ro = new ResizeObserver(this._onResize);
+        this._ro.observe(container);
+      } else {
+        window.addEventListener('resize', this._onResize);
+      }
+
+      container.addEventListener('pointerenter', this._onPointerEnter);
+      container.addEventListener('pointermove', this._onPointerMove);
+      container.addEventListener('pointerleave', this._onPointerLeave);
+      container.addEventListener('pointercancel', this._onPointerLeave);
+
+      if (typeof IntersectionObserver !== 'undefined') {
+        this._io = new IntersectionObserver(function (entries) {
+          for (var i = 0; i < entries.length; i++) {
+            this._visible = entries[i].isIntersecting;
+            if (!this._visible) this._stopLoop();
+            else if (this._pointer && this._pointer.active) this._startLoop();
+          }
+        }.bind(this), { threshold: 0.01 });
+        this._io.observe(container);
+      }
+
+      activeInstances.add(this);
+      this._applyCanvasStyle();
+      this._load();
+    }
+
+    _normalize() {
+      this.opts.cols = clamp(Math.round(Number(this.opts.cols) || 64), 8, 200);
+      this.opts.fill = clamp(Number(this.opts.fill) || 0.78, 0.2, 1);
+      this.opts.radius = clamp(Number(this.opts.radius) || 0, 0, 0.5);
+      this.opts.alphaFloor = clamp(Number(this.opts.alphaFloor) || 0, 0, 0.5);
+      this.opts.maxDpr = clamp(Number(this.opts.maxDpr) || 2, 1, 2);
+      this.opts.theme = this.opts.theme === 'light' ? 'light' : 'dark';
+    }
+
+    async _load() {
+      try {
+        var asset = await loadAsset(this.url, this.opts.plate);
+        if (this._destroyed) return;
+        this._source = asset.canvas;
+        this._srcW = asset.canvas.width;
+        this._srcH = asset.canvas.height;
+        this._aspect = asset.aspect;
+        this._sample();
+        this._ready = true;
+        this.container.classList.add('is-ready');
+        this._measure();
+        this._applyCanvasStyle();
+        this._requestDraw();
+      } catch (err) {
+        if (this._destroyed) return;
+        console.warn('[LiziAsciiLogo] 载入失败:', this.url, err);
+        this.container.classList.add('is-error');
+        var msg = document.createElement('div');
+        msg.className = 'lizi-ascii-error';
+        msg.textContent = 'SVG LOAD FAILED';
+        this.container.appendChild(msg);
+      }
+    }
+
+    _sample() {
+      if (!this._source) return;
+      var cols = clamp(Math.round(this.opts.cols), 8, 200);
+      var aspect = this._srcW / this._srcH;
+      var rows = Math.max(4, Math.round(cols / aspect));
+
+      if (!this._sampleCanvas) this._sampleCanvas = document.createElement('canvas');
+      var sc = this._sampleCanvas;
+      sc.width = cols;
+      sc.height = rows;
+      var sctx = sc.getContext('2d', { willReadFrequently: true });
+      sctx.clearRect(0, 0, cols, rows);
+      sctx.imageSmoothingEnabled = true;
+      sctx.imageSmoothingQuality = 'high';
+      sctx.drawImage(this._source, 0, 0, this._srcW, this._srcH, 0, 0, cols, rows);
+      var data = sctx.getImageData(0, 0, cols, rows).data;
+
+      var groups = [];
+      var byKey = new Map();
+      var cells = [];
+      var cutoff = Math.max(1, Math.round(this.opts.alphaFloor * 255));
+      var count = 0;
+
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          var i = (r * cols + c) * 4;
+          var a = data[i + 3];
+          if (a < cutoff) continue;
+          var rr = data[i];
+          var gg = data[i + 1];
+          var bb = data[i + 2];
+          var key = ((rr >> 4) << 8) | ((gg >> 4) << 4) | (bb >> 4);
+          var g = byKey.get(key);
+          if (!g) {
+            g = { r: rr, g: gg, b: bb, bestA: -1, lum: 0, count: 0, buckets: [] };
+            for (var k = 0; k < ALPHA_STEPS; k++) g.buckets.push([]);
+            byKey.set(key, g);
+            groups.push(g);
+          }
+          if (a > g.bestA) {
+            g.bestA = a;
+            g.r = rr;
+            g.g = gg;
+            g.b = bb;
+          }
+          g.count++;
+
+          var phase = hashPhase(c, r, cols);
+          var cell = {
+            x: (c + 0.5) * this._srcW / cols,
+            y: (r + 0.5) * this._srcH / rows,
+            b: Math.min(ALPHA_STEPS - 1, Math.floor((a / 255) * ALPHA_STEPS)),
+            phase: phase,
+            ux: Math.cos(phase * Math.PI * 2),
+            uy: Math.sin(phase * Math.PI * 2)
+          };
+          cells.push(cell);
+          g.buckets[cell.b].push(cell);
+          count++;
+        }
+      }
+
+      for (var gi = 0; gi < groups.length; gi++) {
+        groups[gi].lum = luminance(groups[gi].r, groups[gi].g, groups[gi].b);
+      }
+
+      var best = null;
+      var score = -1;
+      for (var bj = 0; bj < groups.length; bj++) {
+        var s = groups[bj].count * (0.2 + groups[bj].lum);
+        if (s > score) { score = s; best = groups[bj]; }
+      }
+
+      this._groups = groups;
+      this._cells = cells;
+      this._cols = cols;
+      this._rows = rows;
+      this._dominant = best ? { r: best.r, g: best.g, b: best.b } : null;
+      this._stats = { count: count, colors: groups.length, cols: cols, rows: rows };
+      this._applyCanvasStyle();
+    }
+
+    _measure() {
+      var rect = this.container.getBoundingClientRect();
+      var cssW = Math.max(1, Math.round(rect.width || this.container.clientWidth || 320));
+      var cssH = Math.max(1, Math.round(rect.height || this.container.clientHeight || (cssW / (this._aspect || 1))));
+      var dpr = Math.min(window.devicePixelRatio || 1, this.opts.maxDpr);
+      var bw = Math.max(1, Math.round(cssW * dpr));
+      var bh = Math.max(1, Math.round(cssH * dpr));
+      if (bw !== this.canvas.width || bh !== this.canvas.height) {
+        this.canvas.width = bw;
+        this.canvas.height = bh;
+        this._dpr = dpr;
+        this._requestDraw();
+      }
+    }
+
+    _onResize() { this._measure(); }
+
+    _applyCanvasStyle() {
+      var light = this.opts.theme === 'light';
+      this._ink = light ? { r: 18, g: 22, b: 18 } : { r: 242, g: 246, b: 242 };
+      if (!this.canvas) return;
+      if (!this.opts.glow) { this.canvas.style.filter = 'none'; return; }
+
+      var rgb = null;
+      if (!this.opts.color) rgb = this._ink;
+      else if (this.opts.glowColor) rgb = hexToRgb(this.opts.glowColor) || this._dominant;
+      else rgb = this._dominant;
+      if (!rgb) rgb = this._ink;
+
+      var s = rgb.r + ',' + rgb.g + ',' + rgb.b;
+      this.canvas.style.filter = 'drop-shadow(0 0 2px rgba(' + s + ',0.5)) drop-shadow(0 0 8px rgba(' + s + ',0.16))';
+    }
+
+    _requestDraw() {
+      if (this._drawQueued || this._destroyed) return;
+      this._drawQueued = true;
+      requestAnimationFrame(function () {
+        this._drawQueued = false;
+        if (this._destroyed || !this._ready) return;
+        this._draw(false, 0);
+        this._emitStats();
+      }.bind(this));
+    }
+
+    _emitStats() {
+      if (typeof this.opts.onRender === 'function') {
+        try { this.opts.onRender(this._stats, this); }
+        catch (err) { console.warn('[LiziAsciiLogo] onRender:', err); }
+      }
+    }
+
+    _startLoop() {
+      if (this._raf || this._destroyed || !this._ready) return;
+      if (!this.opts.motion || (reducedMQ && reducedMQ.matches)) return;
+      if (document.hidden || !this._visible) return;
+      this._raf = requestAnimationFrame(this._tick);
+    }
+
+    _stopLoop() {
+      if (this._raf) {
+        cancelAnimationFrame(this._raf);
+        this._raf = 0;
+      }
+    }
+
+    _tick(now) {
+      this._raf = 0;
+      if (this._destroyed || document.hidden || !this._visible) return;
+      if (!this.opts.motion) return;
+      var active = (this._pointer && this._pointer.active) || now < this._settleUntil;
+      if (!active) {
+        this._draw(false, 0);
+        this._emitStats();
+        return;
+      }
+      if (now - this._lastFrame >= 33) {
+        this._lastFrame = now;
+        this._draw(true, now);
+      }
+      this._raf = requestAnimationFrame(this._tick);
+    }
+
+    _pointFromEvent(e) {
+      var rect = this.canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      return {
+        x: (e.clientX - rect.left) * (this.canvas.width / rect.width),
+        y: (e.clientY - rect.top) * (this.canvas.height / rect.height),
+        active: true
+      };
+    }
+
+    _motionAllowed() {
+      return !!this.opts.motion && !(reducedMQ && reducedMQ.matches);
+    }
+
+    _onPointerEnter(e) {
+      if (!this._motionAllowed()) return;
+      var p = this._pointFromEvent(e);
+      if (p) this._pointer = p;
+      this._startLoop();
+    }
+
+    _onPointerMove(e) {
+      if (!this._motionAllowed()) return;
+      var p = this._pointFromEvent(e);
+      if (p) this._pointer = p;
+      if (!this._raf) this._startLoop();
+    }
+
+    _onPointerLeave() {
+      if (this._pointer) this._pointer.active = false;
+      this._settleUntil = performance.now() + 620;
+      this._startLoop();
+    }
+    _draw(animated, nowMs) {
+      var ctx = this.ctx;
+      var W = this.canvas.width;
+      var H = this.canvas.height;
+      if (!ctx) return;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+      if (!this._cells.length) return;
+
+      var scale = Math.min(W / this._srcW, H / this._srcH);
+      var ox = (W - this._srcW * scale) / 2;
+      var oy = (H - this._srcH * scale) / 2;
+      var cellW = (this._srcW / this._cols) * scale;
+      var cellH = (this._srcH / this._rows) * scale;
+      var base = Math.min(cellW, cellH) * clamp(this.opts.fill, 0.2, 1);
+      var radius = clamp(this.opts.radius, 0, 0.5) * base;
+      var t = animated ? (nowMs || 0) / 1000 : 0;
+      var pulse = animated ? 1 + 0.035 * Math.sin(t * 1.55) : 1;
+      var ptr = animated ? this._pointer : null;
+      var ptrActive = !!(ptr && ptr.active);
+      var ptrR = Math.min(W, H) * 0.26;
+      var ptrR2 = ptrR * ptrR;
+      var amp = base * 0.32;
+      var waveAmp = base * 0.18;
+      var mono = !this.opts.color;
+      var lightTheme = this.opts.theme === 'light';
+      var ink = this._ink || { r: 240, g: 244, b: 240 };
+
+      for (var gi = 0; gi < this._groups.length; gi++) {
+        var g = this._groups[gi];
+        var cr, cg, cb;
+        if (mono) { cr = ink.r; cg = ink.g; cb = ink.b; }
+        else { cr = g.r; cg = g.g; cb = g.b; }
+        ctx.fillStyle = 'rgb(' + cr + ',' + cg + ',' + cb + ')';
+
+        var tone = 1;
+        if (mono) {
+          var v = lightTheme ? 1 - g.lum : g.lum;
+          tone = 0.1 + 0.9 * v;
+        }
+
+        for (var bi = 0; bi < ALPHA_STEPS; bi++) {
+          var arr = g.buckets[bi];
+          if (!arr.length) continue;
+          var level = bi === ALPHA_STEPS - 1 ? 1 : (bi + 0.5) / ALPHA_STEPS;
+          var alpha = Math.min(1, level * tone * pulse);
+          if (alpha < 0.01) continue;
+          ctx.globalAlpha = alpha;
+
+          for (var i = 0; i < arr.length; i++) {
+            var cell = arr[i];
+            var x = ox + cell.x * scale;
+            var y = oy + cell.y * scale;
+            var s = base;
+
+            if (animated) {
+              var ph = cell.phase * Math.PI * 2;
+              var wave = Math.sin(t * 1.25 + ph);
+              x += cell.ux * waveAmp * wave;
+              y += cell.uy * waveAmp * wave;
+
+              if (ptrActive) {
+                var dx = x - ptr.x;
+                var dy = y - ptr.y;
+                var d2 = dx * dx + dy * dy;
+                if (d2 < ptrR2 && d2 > 0.01) {
+                  var d = Math.sqrt(d2);
+                  var f = 1 - d / ptrR;
+                  var push = amp * 1.2 * f * f * (0.8 + 0.2 * Math.sin(t * 2.4 + ph));
+                  x += (dx / d) * push;
+                  y += (dy / d) * push;
+                }
+              }
+              s *= 1 + 0.055 * Math.sin(t * 1.7 + ph);
+            }
+
+            var px = x - s / 2;
+            var py = y - s / 2;
+            if (radius > 0.35) {
+              ctx.beginPath();
+              roundRectPath(ctx, px, py, s, s, radius);
+              ctx.fill();
+            } else {
+              ctx.fillRect(px, py, s, s);
+            }
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    setOptions(patch) {
+      if (!patch) return this;
+      var prevCols = this.opts.cols;
+      var prevFloor = this.opts.alphaFloor;
+      Object.assign(this.opts, patch);
+      this._normalize();
+
+      if (this._ready && (Math.round(prevCols) !== this.opts.cols || prevFloor !== this.opts.alphaFloor)) {
+        this._sample();
+      }
+      if (patch.motion === false) {
+        if (this._pointer) this._pointer.active = false;
+        this._stopLoop();
+      }
+      this._applyCanvasStyle();
+      this._requestDraw();
+      return this;
+    }
+
+    update(patch) {
+      return this.setOptions(patch);
+    }
+
+    redraw() {
+      this._applyCanvasStyle();
+      this._requestDraw();
+      return this;
+    }
+
+    destroy() {
+      this._destroyed = true;
+      this._stopLoop();
+      if (this._ro) { this._ro.disconnect(); this._ro = null; }
+      else window.removeEventListener('resize', this._onResize);
+      if (this._io) { this._io.disconnect(); this._io = null; }
+      this.container.removeEventListener('pointerenter', this._onPointerEnter);
+      this.container.removeEventListener('pointermove', this._onPointerMove);
+      this.container.removeEventListener('pointerleave', this._onPointerLeave);
+      this.container.removeEventListener('pointercancel', this._onPointerLeave);
+      activeInstances.delete(this);
+      if (this.canvas && this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
+      this._sampleCanvas = null;
+      this._source = null;
+    }
+
+  }
+
+  /* 页面隐藏时停掉所有动效 rAF；回到前台只恢复仍被 hover 的实例。 */
+  document.addEventListener('visibilitychange', function () {
+    activeInstances.forEach(function (inst) {
+      if (document.hidden) inst._stopLoop();
+      else if (inst._pointer && inst._pointer.active) inst._startLoop();
+    });
+  });
+
+  if (reducedMQ) {
+    var onReducedChange = function () {
+      activeInstances.forEach(function (inst) {
+        if (reducedMQ.matches) {
+          inst._stopLoop();
+          inst._requestDraw();
+        }
+      });
+    };
+    if (reducedMQ.addEventListener) reducedMQ.addEventListener('change', onReducedChange);
+    else if (reducedMQ.addListener) reducedMQ.addListener(onReducedChange);
+  }
+
+  window.LiziAsciiLogo = {
+    version: VERSION,
+    defaults: DEFAULTS,
+    render: function (svgUrl, container, opts) {
+      return new LiziAsciiLogo(svgUrl, container, opts);
+    },
+    Logo: LiziAsciiLogo
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+
+  var ASSETS = '../assets/platforms/';
+  var DEFAULT_STATE = {
+    cols: 64,
+    fill: 0.78,
+    radius: 0.18,
+    theme: 'dark',
+    color: true,
+    glow: true,
+    motion: true
+  };
+  var state = Object.assign({}, DEFAULT_STATE);
+
+  var PLATFORMS = [
+    {
+      id: 'netease', name: '网易云音乐', en: 'NETEASE CLOUD', file: 'netease.svg',
+      brand: '#EA3E3C', colors: ['#EA3E3C', '#FFFFFF']
+    },
+    {
+      id: 'qq', name: 'QQ 音乐', en: 'QQ MUSIC', file: 'qq.svg',
+      brand: '#F8C913', colors: ['#F8C913', '#02B053']
+    },
+    {
+      id: 'kugou', name: '酷狗音乐', en: 'KUGOU MUSIC', file: 'kugou.svg',
+      particleFile: 'kugou-mark.svg',
+      plate: { fill: '#3D8BFA', inset: 0.05, radius: 0.1333 },
+      brand: '#3D8BFA', colors: ['#3D8BFA', '#FFFFFF'], onWhite: true
+    },
+    {
+      id: 'qishui', name: '汽水音乐', en: 'QISHUI MUSIC', file: 'qishui.svg',
+      brand: '#26FE68', colors: ['#111111', '#BDFD45', '#26FE68']
+    },
+    {
+      id: 'bodian', name: '波点音乐', en: 'BODIAN MUSIC', file: 'bodian.svg',
+      brand: '#04E3B4', colors: ['#04E3B4', '#FFFFFF', '#000000']
+    },
+    {
+      id: 'spotify', name: 'Spotify', en: 'SPOTIFY', file: 'spotify.svg',
+      brand: '#1ED75F', colors: ['#1ED75F', '#191515']
+    },
+    {
+      id: 'kuwo', name: '酷我音乐', en: 'KUWO MUSIC', file: 'kuwo.svg',
+      brand: '#F4D329', colors: ['#F4D329', '#00C9FD', '#FD6000']
+    }
+  ];
+
+  var gallery = document.getElementById('gallery');
+  if (!gallery || !window.LiziAsciiLogo) return;
+
+  function cardHtml(p, index) {
+    var swatches = p.colors.map(function (c) {
+      return '<i style="--c:' + c + '"></i>';
+    }).join('');
+    var origNote = p.onWhite ? ' · 白底' : '';
+    return [
+      '<article class="card' + (p.onWhite ? ' on-white' : '') + '" data-id="' + p.id + '" style="--brand:' + p.brand + '">',
+        '<header class="card-head">',
+          '<div class="card-id">',
+            '<span class="idx">' + String(index + 1).padStart(2, '0') + '</span>',
+            '<h2>' + p.name + '</h2>',
+            '<span class="en">' + p.en + '</span>',
+          '</div>',
+          '<div class="swatches" aria-hidden="true">' + swatches + '</div>',
+        '</header>',
+        '<div class="compare">',
+          '<figure class="tile tile-orig">',
+            '<figcaption><span class="dot"></span>原始 SVG' + origNote + '</figcaption>',
+            '<div class="orig-wrap"><img src="' + ASSETS + p.file + '" alt="' + p.name + ' 原始 SVG" draggable="false" decoding="async"></div>',
+          '</figure>',
+          '<figure class="tile tile-particles">',
+            '<figcaption><span class="dot"></span>粒子重建 <span class="cols-out">· ' + state.cols + ' 列</span></figcaption>',
+            '<div class="stage" data-stage="' + p.id + '"></div>',
+          '</figure>',
+        '</div>',
+        '<footer class="card-foot">',
+          '<span class="stat" data-stat="' + p.id + '">采样中…</span>',
+          '<span class="mono dim">' + p.en + '</span>',
+        '</footer>',
+      '</article>'
+    ].join('');
+  }
+
+  var noteCardHtml = [
+    '<article class="card card-note">',
+      '<span class="note-label">REUSABLE API</span>',
+      '<h2>粒子层已经封装好，随时能接进大厅。</h2>',
+      '<pre class="code">window.LiziAsciiLogo.render(svgUrl, el, {',
+      '  cols: 64, fill: .78, radius: .18,',
+      "  theme: 'dark', color: true,",
+      '  glow: true, motion: true',
+      '})</pre>',
+      '<p>实例带 <code>setOptions(patch)</code>、<code>redraw()</code>、<code>destroy()</code>。每个 Logo 一张 canvas，DPR 上限 2；页面隐藏停 rAF；参数变化合并成一次重绘。</p>',
+      '<ul class="note-list">',
+        '<li>采样：SVG → 1024 离屏画布 → 降采样到列数网格 → 每格平均色 + 覆盖度</li>',
+        '<li>轮廓：边缘覆盖度转成方块透明度，阈值以下不生成粒子</li>',
+        '<li>酷狗用 kugou-mark.svg 叠 #3D8BFA 品牌蓝底，白环与白 K 不丢失</li>',
+        '<li>本页是独立实验页，未改动主界面</li>',
+      '</ul>',
+      '<p class="dim">限制：极细笔画在低密度下会并入邻格；透明镂空会露出页面背景；白底图标的白色细节依赖周围色块承载。</p>',
+    '</article>'
+  ].join('\n');
+
+  gallery.innerHTML = PLATFORMS.map(cardHtml).join('') + noteCardHtml;
+
+  var instances = [];
+
+  PLATFORMS.forEach(function (p) {
+    var stage = gallery.querySelector('[data-stage="' + p.id + '"]');
+    if (!stage) return;
+    var card = stage.closest('.card');
+
+    var opts = Object.assign({}, state, {
+      plate: p.plate || null,
+      glowColor: p.brand,
+      label: p.name + ' 粒子 Logo',
+      onRender: function (stats) {
+        var statEl = card.querySelector('[data-stat="' + p.id + '"]');
+        if (statEl) {
+          statEl.textContent = stats.count.toLocaleString('en-US') + ' 粒子 · ' +
+            stats.colors + ' 色簇 · ' + stats.cols + '×' + stats.rows;
+        }
+        var colsEl = card.querySelector('.cols-out');
+        if (colsEl) colsEl.textContent = '· ' + stats.cols + ' 列';
+      }
+    });
+
+    instances.push(window.LiziAsciiLogo.render(ASSETS + (p.particleFile || p.file), stage, opts));
+  });
+
+  var densityEl = document.getElementById('density');
+  var fillEl = document.getElementById('fill');
+  var radiusEl = document.getElementById('radius');
+
+  function setRange(el, value, text, outId) {
+    if (!el) return;
+    el.value = String(value);
+    var min = parseFloat(el.min);
+    var max = parseFloat(el.max);
+    var pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
+    el.style.setProperty('--v', pct.toFixed(2) + '%');
+    var out = document.getElementById(outId);
+    if (out) out.textContent = text;
+  }
+
+  function syncUI() {
+    document.documentElement.setAttribute('data-theme', state.theme);
+    setRange(densityEl, state.cols, state.cols + ' 列', 'density-out');
+    setRange(fillEl, state.fill,
+      Math.round(state.fill * 100) + '% / ' + Math.round((1 - state.fill) * 100) + '%',
+      'fill-out');
+    setRange(radiusEl, state.radius, Math.round(state.radius * 100) + '%', 'radius-out');
+
+    document.querySelectorAll('[data-theme-btn]').forEach(function (btn) {
+      btn.classList.toggle('on', btn.getAttribute('data-theme-btn') === state.theme);
+    });
+    document.querySelectorAll('[data-toggle]').forEach(function (btn) {
+      btn.setAttribute('aria-checked', String(!!state[btn.getAttribute('data-toggle')]));
+    });
+  }
+
+  var applyQueued = false;
+  function scheduleApply() {
+    if (applyQueued) return;
+    applyQueued = true;
+    requestAnimationFrame(function () {
+      applyQueued = false;
+      var patch = {
+        cols: state.cols,
+        fill: state.fill,
+        radius: state.radius,
+        theme: state.theme,
+        color: state.color,
+        glow: state.glow,
+        motion: state.motion
+      };
+      for (var i = 0; i < instances.length; i++) instances[i].setOptions(patch);
+    });
+  }
+
+  if (densityEl) {
+    densityEl.addEventListener('input', function () {
+      state.cols = Math.round(parseFloat(densityEl.value));
+      syncUI();
+      scheduleApply();
+    });
+  }
+  if (fillEl) {
+    fillEl.addEventListener('input', function () {
+      state.fill = Math.round(parseFloat(fillEl.value) * 100) / 100;
+      syncUI();
+      scheduleApply();
+    });
+  }
+  if (radiusEl) {
+    radiusEl.addEventListener('input', function () {
+      state.radius = Math.round(parseFloat(radiusEl.value) * 100) / 100;
+      syncUI();
+      scheduleApply();
+    });
+  }
+
+  document.querySelectorAll('[data-theme-btn]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      state.theme = btn.getAttribute('data-theme-btn') === 'light' ? 'light' : 'dark';
+      syncUI();
+      scheduleApply();
+    });
+  });
+
+  document.querySelectorAll('[data-toggle]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var key = btn.getAttribute('data-toggle');
+      if (!(key in state)) return;
+      state[key] = !state[key];
+      syncUI();
+      scheduleApply();
+    });
+  });
+
+  var resetBtn = document.getElementById('reset');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', function () {
+      Object.assign(state, DEFAULT_STATE);
+      syncUI();
+      scheduleApply();
+    });
+  }
+
+  syncUI();
+})();
+</script>
+</body>
+</html>

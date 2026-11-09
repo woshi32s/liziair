@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI · 卡片大厅</title>
+<!-- 只引同源的 tokens.css（本地文件，不会阻塞、不走网络）。
+     千万不要引 Google Fonts：<link rel=stylesheet> 到外网会卡住内联脚本执行。 -->
+<link rel="stylesheet" href="tokens.css">
+<style>
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:var(--font-body);
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    user-select:none;
+    /* 纸面上的极淡光晕，让卡片浮起来 */
+    background-image:
+      radial-gradient(120% 80% at 12% 0%, oklch(99% 0.004 264 / .9), transparent 60%),
+      radial-gradient(90% 70% at 100% 100%, oklch(94% 0.012 12 / .55), transparent 62%);
+  }
+
+  /* ================= 顶栏 ================= */
+  .top{
+    height:72px; display:flex; align-items:center; gap:var(--sp-4);
+    padding:0 var(--sp-8); position:relative; z-index:5;
+  }
+  .brand{display:flex; align-items:baseline; gap:8px; font-family:var(--font-display);}
+  .brand b{font-size:var(--text-xl); font-weight:600; letter-spacing:-.01em}
+  .brand span{font-size:var(--text-xs); color:var(--ink-3); letter-spacing:.18em; text-transform:uppercase}
+  .brand i{
+    width:9px;height:9px;border-radius:50%;background:var(--accent);
+    display:inline-block;margin-right:2px;transform:translateY(-2px);
+    box-shadow:0 0 0 4px oklch(62% .22 12 / .14);
+  }
+  .top__sp{flex:1}
+  .hint{
+    font-family:var(--font-mono); font-size:var(--text-2xs); letter-spacing:.13em;
+    text-transform:uppercase; color:var(--ink-3); white-space:nowrap;
+  }
+  .hint b{color:var(--ink-2); font-weight:500}
+  .reset{
+    appearance:none; border:1px solid var(--rule); background:transparent;
+    color:var(--ink-2); font-family:var(--font-body); font-size:var(--text-xs);
+    padding:8px 14px; border-radius:var(--r-full); cursor:pointer;
+    transition:all var(--dur-fast) var(--ease-out);
+  }
+  .reset:hover{color:var(--ink); border-color:oklch(21% .022 270 / .22); background:oklch(100% 0 0 / .5)}
+
+  /* ================= 网格舞台 ================= */
+  /* 卡片放大导致行数超过 4 时，这一区可以往下滚（默认 4 行正好铺满，不出滚动条） */
+  .stage{
+    position:absolute; inset:72px 0 0; padding:0 var(--sp-8) var(--sp-8);
+    overflow-y:auto; overflow-x:hidden; scrollbar-width:thin;
+  }
+  .grid{
+    position:relative; width:100%;
+    /* height 由 JS 按行数算 */
+  }
+
+  /* ---- 卡片 ---- */
+  .card{
+    position:absolute; top:0; left:0;
+    border-radius:var(--r-xl);
+    overflow:hidden;
+    /* 虚拟卡的「卡面」：极淡的斜向光泽 + 纸色渐变 */
+    background:
+      linear-gradient(157deg,
+        oklch(100% 0 0 / .92) 0%,
+        oklch(99% 0.003 264 / .86) 46%,
+        oklch(96.5% 0.008 264 / .92) 100%);
+    border:1px solid oklch(100% 0 0 / .72);
+    box-shadow:
+      0 1px 1px oklch(21% .022 270 / .05),
+      0 10px 26px -14px oklch(21% .022 270 / .22),
+      inset 0 1px 0 oklch(100% 0 0 / .9);
+    transition:
+      left   var(--dur-slow) var(--ease-out),
+      top    var(--dur-slow) var(--ease-out),
+      width  var(--dur-slow) var(--ease-out),
+      height var(--dur-slow) var(--ease-out),
+      box-shadow var(--dur-med) var(--ease-out),
+      transform var(--dur-med) var(--ease-out);
+    will-change:left,top,width,height;
+  }
+  /* 卡面光泽：一层几乎看不见的斜扫高光，模拟塑料卡/信用卡的反射 */
+  .card::after{
+    content:''; position:absolute; inset:0; pointer-events:none;
+    background:linear-gradient(114deg,
+      transparent 28%,
+      oklch(100% 0 0 / .55) 44%,
+      oklch(100% 0 0 / .12) 50%,
+      transparent 62%);
+    opacity:.5;
+    mix-blend-mode:screen;
+  }
+  .card:hover{
+    box-shadow:
+      0 2px 2px oklch(21% .022 270 / .06),
+      0 20px 44px -18px oklch(21% .022 270 / .3),
+      inset 0 1px 0 oklch(100% 0 0 / .95);
+    transform:translateY(-2px);
+  }
+  .card.is-resizing{
+    transition:none;           /* 拖拽时不要动画，跟手最重要 */
+    z-index:40;
+    box-shadow:0 24px 60px -20px oklch(21% .022 270 / .4);
+  }
+  .card.is-dragging{ transition:box-shadow var(--dur-med) var(--ease-out); z-index:40; opacity:.92 }
+
+  .card__in{ position:relative; z-index:2; height:100%; display:flex; flex-direction:column; padding:20px 22px }
+
+  /* 小标签：卡片类型名 */
+  .eyebrow{
+    display:flex; align-items:center; gap:8px;
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    letter-spacing:.15em; text-transform:uppercase; color:var(--ink-3);
+  }
+  .eyebrow i{ width:3px;height:3px;border-radius:50%;background:currentColor;opacity:.6 }
+
+  /* ---- 尺寸把柄 ---- */
+  .grip{
+    position:absolute; right:9px; bottom:9px; z-index:6;
+    width:30px; height:30px; border-radius:10px;
+    display:grid; place-items:center; cursor:nwse-resize;
+    opacity:0; transition:opacity var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+    color:var(--ink-3);
+  }
+  .card:hover .grip, .card.is-resizing .grip{ opacity:1 }
+  .grip:hover{ background:oklch(21% .022 270 / .07); color:var(--ink) }
+  .grip svg{ display:block }
+
+  /* ---- 网格参考线（改尺寸时出现；放在 .grid 内部，可跟着滚）---- */
+  .guide{ position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity var(--dur-fast) linear; z-index:1 }
+  .guide.is-on{ opacity:1 }
+  .guide span{
+    position:absolute; border-radius:var(--r-lg);
+    border:1px dashed oklch(21% .022 270 / .16);
+    background:oklch(100% 0 0 / .3);
+  }
+
+  /* ================= 各卡片的内部排版 ================= */
+
+  /* —— 当前播放（主导卡，深色卡面）—— */
+  .card--now{
+    background:oklch(21% .022 270);
+    border-color:oklch(100% 0 0 / .12);
+    box-shadow:0 2px 3px oklch(21% .022 270 / .12), 0 26px 60px -24px oklch(21% .022 270 / .55);
+    color:oklch(98% 0.004 264);
+  }
+  .card--now::after{ opacity:.14 }
+  .now__wash{
+    position:absolute; inset:-30%; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(46% 52% at 22% 24%, oklch(62% .22 12 / .72), transparent 70%),
+      radial-gradient(52% 58% at 82% 78%, oklch(58% .18 300 / .62), transparent 72%),
+      radial-gradient(40% 46% at 68% 18%, oklch(66% .16 200 / .5), transparent 70%);
+    filter:blur(22px);
+  }
+  .card--now .eyebrow{ color:oklch(96% .01 264 / .62) }
+  .now__head{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px }
+  .now__body{ display:flex; gap:22px; align-items:center; flex:1; min-height:0; padding:6px 0 }
+  .now__queue{ border-top:1px solid oklch(100% 0 0 / .12); padding-top:13px; display:flex; align-items:center; gap:14px }
+  .q-label{
+    font-family:var(--font-mono); font-size:var(--text-2xs); letter-spacing:.14em;
+    text-transform:uppercase; color:oklch(96% .01 264 / .5); flex:none;
+  }
+  .q-row{ display:flex; gap:14px; min-width:0; flex:1 }
+  .q-item{ display:flex; align-items:center; gap:8px; min-width:0; flex:1; cursor:pointer; opacity:.78; transition:opacity var(--dur-fast) var(--ease-out) }
+  .q-item:hover{ opacity:1 }
+  .q-item span{ font-size:var(--text-xs); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .q-art{ width:26px; height:26px; border-radius:7px; flex:none; box-shadow:inset 0 0 0 1px oklch(100% 0 0 / .22) }
+  .now__ctrl{ display:flex; gap:7px; flex:none }
+  .now__art{
+    width:158px; height:158px; border-radius:var(--r-lg); flex:none;
+    background:
+      radial-gradient(120% 120% at 24% 18%, oklch(76% .18 32), transparent 62%),
+      radial-gradient(110% 110% at 82% 84%, oklch(58% .2 320), transparent 64%),
+      linear-gradient(158deg, oklch(64% .14 12), oklch(34% .08 280));
+    box-shadow:0 10px 26px -10px oklch(0% 0 0 / .6), inset 0 1px 0 oklch(100% 0 0 / .3);
+    position:relative; overflow:hidden;
+  }
+  .now__art::after{
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(150deg, oklch(100% 0 0 / .28), transparent 46%);
+  }
+  .now__meta{ min-width:0; flex:1; padding-bottom:4px }
+  .now__title{
+    font-family:var(--font-display); font-size:var(--text-2xl); font-weight:600;
+    letter-spacing:-.02em; margin:0 0 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .now__sub{ font-size:var(--text-sm); color:oklch(96% .01 264 / .68); margin:0 0 14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .now__bar{ height:3px; border-radius:99px; background:oklch(100% 0 0 / .18); overflow:hidden }
+  .now__bar i{ display:block; height:100%; width:38%; border-radius:99px; background:oklch(98% .01 264) }
+  .now__time{
+    display:flex; justify-content:space-between; margin-top:7px;
+    font-family:var(--font-mono); font-size:var(--text-2xs); color:oklch(96% .01 264 / .5);
+  }
+  .now__ctrl{ position:absolute; right:22px; top:20px; display:flex; gap:6px; z-index:3 }
+  .ibtn{
+    width:34px;height:34px;border-radius:50%; border:1px solid oklch(100% 0 0 / .16);
+    background:oklch(100% 0 0 / .08); color:inherit; display:grid; place-items:center;
+    cursor:pointer; transition:all var(--dur-fast) var(--ease-out); padding:0;
+  }
+  .ibtn:hover{ background:oklch(100% 0 0 / .18); border-color:oklch(100% 0 0 / .3) }
+  .ibtn--play{ background:oklch(98% .004 264); color:oklch(21% .022 270); border-color:transparent; width:40px;height:40px }
+  .ibtn--play:hover{ background:#fff }
+
+  /* —— 搜索 —— */
+  .card--search .card__in{ justify-content:center; gap:12px }
+  .searchbar{
+    display:flex; align-items:center; gap:12px;
+    height:48px; padding:0 18px; border-radius:var(--r-full);
+    background:oklch(100% 0 0 / .8);
+    border:1px solid oklch(21% .022 270 / .09);
+    box-shadow:inset 0 1px 2px oklch(21% .022 270 / .05);
+  }
+  .searchbar svg{ color:var(--ink-3); flex:none }
+  .searchbar input{
+    flex:1; border:0; background:transparent; outline:0;
+    font-family:var(--font-body); font-size:var(--text-md); color:var(--ink);
+    min-width:0;
+  }
+  .searchbar input::placeholder{ color:var(--ink-3) }
+  .searchbar kbd{
+    font-family:var(--font-mono); font-size:var(--text-2xs); color:var(--ink-3);
+    border:1px solid var(--rule); border-radius:6px; padding:3px 6px; flex:none;
+  }
+  .hot{ display:flex; gap:8px; flex-wrap:wrap; align-items:center }
+  .hot b{
+    font-family:var(--font-mono); font-size:var(--text-2xs); letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3); font-weight:400; margin-right:2px;
+  }
+  .chip{
+    font-size:var(--text-xs); color:var(--ink-2); padding:5px 11px; border-radius:var(--r-full);
+    background:oklch(100% 0 0 / .6); border:1px solid var(--rule); cursor:pointer;
+    transition:all var(--dur-fast) var(--ease-out); white-space:nowrap;
+  }
+  .chip:hover{ color:var(--ink); border-color:oklch(21% .022 270 / .2); background:#fff }
+
+  /* —— 每日推荐（竖卡，1×2）—— */
+  .card--daily .card__in{ gap:12px }
+  .daily__list{ display:flex; flex-direction:column; justify-content:space-evenly; gap:8px; margin-top:2px; flex:1; min-height:0 }
+  .drow{ display:flex; gap:12px; align-items:center; min-height:0 }
+  .dart{
+    width:52px;height:52px;border-radius:13px;flex:none;position:relative;overflow:hidden;
+    box-shadow:inset 0 0 0 1px oklch(100% 0 0 / .3);
+  }
+  .dart::after{ content:'';position:absolute;inset:0;background:linear-gradient(145deg,oklch(100% 0 0 / .26),transparent 52%) }
+  .dmeta{ min-width:0; flex:1 }
+  .dmeta b{ display:block; font-size:var(--text-sm); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .dmeta span{ display:block; font-size:var(--text-2xs); color:var(--ink-3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .daily__foot{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-top:auto; padding-top:4px;
+  }
+  .daily__foot span{ font-family:var(--font-mono); font-size:var(--text-2xs); color:var(--ink-3); letter-spacing:.1em }
+  .link{ display:flex; align-items:center; gap:5px; font-size:var(--text-xs); color:var(--accent-ink); cursor:pointer }
+  .link:hover{ text-decoration:underline; text-underline-offset:3px }
+
+  /* —— 精选（横卡，2×1）—— */
+  .card--picks .card__in{ gap:14px }
+  .picks__row{ display:flex; gap:12px; flex:1; min-height:0 }
+  .pick{ flex:1; min-width:0; display:flex; flex-direction:column; gap:8px; cursor:pointer }
+  .pick__art{
+    flex:1; min-height:0; border-radius:var(--r-md); position:relative; overflow:hidden;
+    box-shadow:inset 0 0 0 1px oklch(100% 0 0 / .26), 0 8px 18px -12px oklch(21% .022 270 / .5);
+    transition:transform var(--dur-med) var(--ease-out);
+  }
+  .pick:hover .pick__art{ transform:translateY(-2px) }
+  .pick__art::after{ content:'';position:absolute;inset:0;background:linear-gradient(150deg,oklch(100% 0 0 / .24),transparent 55%) }
+  .pick__t{ font-size:var(--text-xs); color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+
+  /* —— 工具箱 —— */
+  .card--tools .card__in{ gap:10px }
+  .tools__grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:8px; margin-top:2px; flex:1; min-height:0 }
+  .tbtn{
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px;
+    border-radius:var(--r-md); background:oklch(100% 0 0 / .55);
+    border:1px solid var(--rule); cursor:pointer; color:var(--ink-2);
+    transition:all var(--dur-fast) var(--ease-out); padding:6px 4px;
+  }
+  .tbtn:hover{ background:#fff; border-color:oklch(21% .022 270 / .18); color:var(--ink); transform:translateY(-1px) }
+  .tbtn span{ font-size:var(--text-2xs); white-space:nowrap }
+
+  /* —— 我的信息 —— */
+  .card--me .card__in{ gap:12px }
+  .me__row{ display:flex; align-items:center; gap:12px; margin-top:2px }
+  .me__ava{
+    width:46px;height:46px;border-radius:50%;flex:none;position:relative;overflow:hidden;
+    background:radial-gradient(70% 70% at 32% 28%, oklch(88% .09 40), oklch(58% .19 22));
+    box-shadow:inset 0 0 0 2px oklch(100% 0 0 / .8), 0 4px 12px -6px oklch(21% .022 270 / .5);
+  }
+  .me__name{ min-width:0 }
+  .me__name b{ display:block; font-size:var(--text-md); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .me__name span{ display:block; font-size:var(--text-2xs); color:var(--ink-3); margin-top:2px }
+  .me__stats{ display:flex; gap:16px; padding-top:2px }
+  .me__stats i{ display:block; font-style:normal; font-family:var(--font-mono); font-size:var(--text-md); color:var(--ink) }
+  .me__stats span{ font-size:var(--text-2xs); color:var(--ink-3) }
+  /* 本周听歌时长的小柱图：把 1×1 卡的下半部分填住 */
+  .me__week{ display:flex; align-items:flex-end; gap:5px; height:34px; margin-top:auto }
+  .me__week b{
+    flex:1; border-radius:3px 3px 2px 2px; background:oklch(21% .022 270 / .14);
+    transition:background var(--dur-fast) var(--ease-out);
+  }
+  .me__week b.on{ background:oklch(62% .22 12 / .8) }
+  .me__week b:hover{ background:oklch(21% .022 270 / .3) }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="brand"><i></i><b>LIZI</b><span>Air</span></span>
+  <span class="top__sp"></span>
+  <span class="hint">拖动卡片右下角 <b>改尺寸</b> · 布局自动记住</span>
+  <button class="reset" id="reset">重置布局</button>
+</header>
+
+<main class="stage">
+  <div class="grid" id="grid">
+    <div class="guide" id="guide"></div>
+  </div>
+</main>
+
+<script>
+/* ============================================================
+   卡片大厅 · 概念稿 v1
+   - 3 列 4 行网格（12 格），卡片可占 1×1 / 2×1 / 3×1 / 1×2 / 2×2 …
+   - 拖右下角把柄改尺寸，松手后自动重排（first-fit 装箱，不重叠）
+   - 布局存 localStorage，刷新还在
+   ============================================================ */
+const COLS = 3, ROWS = 4, GAP = 14;
+
+/* ---------- 六张卡的定义 ----------
+   顺序即装箱优先级：同一轮里排前面的先挑位置。 */
+const DEF = [
+  { id:'now',   w:2, h:2, kind:'now'   },
+  { id:'search',w:2, h:1, kind:'search'},
+  { id:'daily', w:1, h:2, kind:'daily' },
+  { id:'picks', w:2, h:1, kind:'picks' },
+  { id:'tools', w:1, h:1, kind:'tools' },
+  { id:'me',    w:1, h:1, kind:'me'    },
+];
+
+const KEY = 'lizi.lobby.cards.v1';
+
+/* ---------- 内容（概念稿用假数据，样式是真的） ---------- */
+const HOT = ['宝船', '二手玫瑰', '大梦', '草东没有派对', '伍佰'];
+/* 封面用「两层径向 + 一层线性」叠出来的柔和抽象图。
+   不要用 conic-gradient 当封面：它的中心会拉出一个明显的尖角，很廉价。 */
+const cover = (a, b, base) => [
+  `radial-gradient(120% 120% at 22% 16%, ${a}, transparent 62%)`,
+  `radial-gradient(110% 110% at 84% 82%, ${b}, transparent 64%)`,
+  `linear-gradient(158deg, ${base} 0%, oklch(30% .06 265) 100%)`,
+].join(',');
+
+const DAILY = [
+  { t:'雨停了以后', s:'惘闻 · 后摇',     g: cover('oklch(80% .13 235)','oklch(52% .15 268)','oklch(62% .1 250)') },
+  { t:'城市找猪',   s:'木马 · 独立',     g: cover('oklch(82% .15 62)','oklch(54% .17 28)','oklch(64% .12 45)') },
+  { t:'漫长的告别', s:'声音玩具 · 摇滚', g: cover('oklch(76% .11 165)','oklch(44% .1 190)','oklch(56% .09 175)') },
+  { t:'不万能的喜剧', s:'落日飞车 · 迷幻', g: cover('oklch(80% .12 320)','oklch(50% .16 290)','oklch(62% .11 305)') },
+];
+const PICKS = [
+  { t:'深夜公路',  g: cover('oklch(74% .17 32)','oklch(44% .19 320)','oklch(48% .12 10)') },
+  { t:'雨天卧室',  g: cover('oklch(82% .1 215)','oklch(50% .12 250)','oklch(60% .09 235)') },
+  { t:'通勤 40 分', g: cover('oklch(86% .14 92)','oklch(56% .16 55)','oklch(66% .12 78)') },
+  { t:'老磁带',    g: cover('oklch(74% .07 75)','oklch(40% .06 48)','oklch(50% .05 60)') },
+];
+
+/* ---------- SVG 图标（内联，不引外部） ---------- */
+const I = {
+  search:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  play:'<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5z"/></svg>',
+  prev:'<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5h2v14H7zM20 5v14l-9-7z"/></svg>',
+  next:'<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M15 5h2v14h-2zM4 5l9 7-9 7z"/></svg>',
+  arrow:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h13m-5-5 5 5-5 5"/></svg>',
+  grip:'<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M13 5.5 5.5 13M13 10 10 13"/></svg>',
+  waves:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 12h2m3-5v10m4-13v16m4-11v6m3-3h2"/></svg>',
+  timer:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l3 2M9 3h6"/></svg>',
+  cast:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-6M3 12a8 8 0 0 1 8 8M3 16a4 4 0 0 1 4 4M3 20h.01"/></svg>',
+  pen:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M16 4l4 4-11 11H5v-4z"/></svg>',
+};
+
+/* ---------- 卡片 HTML ---------- */
+function inner(c) {
+  if (c.kind === 'now') return `
+    <div class="now__wash"></div>
+    <div class="card__in">
+      <div class="now__head">
+        <div class="eyebrow"><i></i>Now Playing</div>
+        <div class="now__ctrl">
+          <button class="ibtn" title="上一首">${I.prev}</button>
+          <button class="ibtn ibtn--play" title="播放/暂停">${I.play}</button>
+          <button class="ibtn" title="下一首">${I.next}</button>
+        </div>
+      </div>
+      <div class="now__body">
+        <div class="now__art"></div>
+        <div class="now__meta">
+          <h2 class="now__title">宝船</h2>
+          <p class="now__sub">二手玫瑰 · 乐队的夏天</p>
+          <div class="now__bar"><i></i></div>
+          <div class="now__time"><span>1:24</span><span>3:41</span></div>
+        </div>
+      </div>
+      <div class="now__queue">
+        <span class="q-label">接下来</span>
+        <div class="q-row">
+          <div class="q-item"><div class="q-art" style="background:linear-gradient(140deg,oklch(70% .16 200),oklch(48% .17 235))"></div><span>大梦</span></div>
+          <div class="q-item"><div class="q-art" style="background:linear-gradient(140deg,oklch(74% .14 70),oklch(52% .17 40))"></div><span>山海</span></div>
+          <div class="q-item"><div class="q-art" style="background:linear-gradient(140deg,oklch(72% .12 330),oklch(46% .15 300))"></div><span>我想和你虚度时光</span></div>
+        </div>
+      </div>
+    </div>`;
+
+  if (c.kind === 'search') return `
+    <div class="card__in">
+      <div class="searchbar">
+        ${I.search}
+        <input placeholder="搜歌、歌手、歌单，或者直接说你想听什么" readonly>
+        <kbd>⌘K</kbd>
+      </div>
+      <div class="hot"><b>热搜</b>${HOT.map((h) => `<span class="chip">${h}</span>`).join('')}</div>
+    </div>`;
+
+  if (c.kind === 'daily') return `
+    <div class="card__in">
+      <div class="eyebrow"><i></i>每日推荐</div>
+      <div class="daily__list">
+        ${DAILY.map((d) => `
+          <div class="drow">
+            <div class="dart" style="background:${d.g}"></div>
+            <div class="dmeta"><b>${d.t}</b><span>${d.s}</span></div>
+          </div>`).join('')}
+      </div>
+      <div class="daily__foot">
+        <span>30 首 · 每日 6:00 更新</span>
+        <span class="link">全收 ${I.arrow}</span>
+      </div>
+    </div>`;
+
+  if (c.kind === 'picks') return `
+    <div class="card__in">
+      <div class="eyebrow"><i></i>精选</div>
+      <div class="picks__row">
+        ${PICKS.map((p) => `
+          <div class="pick">
+            <div class="pick__art" style="background:${p.g}"></div>
+            <div class="pick__t">${p.t}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  if (c.kind === 'tools') return `
+    <div class="card__in">
+      <div class="eyebrow"><i></i>工具箱</div>
+      <div class="tools__grid">
+        <div class="tbtn">${I.waves}<span>形态</span></div>
+        <div class="tbtn">${I.pen}<span>歌词</span></div>
+        <div class="tbtn">${I.timer}<span>定时</span></div>
+        <div class="tbtn">${I.cast}<span>投屏</span></div>
+      </div>
+    </div>`;
+
+  if (c.kind === 'me') return `
+    <div class="card__in">
+      <div class="eyebrow"><i></i>我的信息</div>
+      <div class="me__row">
+        <div class="me__ava"></div>
+        <div class="me__name"><b>夜航船</b><span>Lv.12 · 听过 4,281 首</span></div>
+      </div>
+      <div class="me__stats">
+        <div><i>126</i><span>歌单</span></div>
+        <div><i>38</i><span>关注</span></div>
+        <div><i>2.4k</i><span>粉丝</span></div>
+      </div>
+      <div class="me__week" title="本周听歌 · 今天最久">
+        <b style="height:42%"></b><b style="height:66%"></b><b style="height:38%"></b>
+        <b style="height:82%"></b><b style="height:56%"></b><b class="on" style="height:100%"></b>
+        <b style="height:24%"></b>
+      </div>
+    </div>`;
+
+  return '';
+}
+
+/* ---------- 布局状态 ----------
+   ROWS 是「至少 4 行」：格子放不下时自动加行（页面可以往下滚），
+   这样「用户想放大某张卡」永远不会被拒绝，也永远不会重叠。 */
+const grid = document.getElementById('grid');
+const guide = document.getElementById('guide');
+const stage = document.querySelector('.stage');
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+let cards = DEF.map((d) => ({ ...d, x: 0, y: 0 }));
+let cw = 0, ch = 0;
+let rows = ROWS;
+
+/* 存档要连坐标一起存：只存尺寸的话，重排顺序一变位置就漂了（实测踩过）。 */
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(cards.map((c) => ({
+      id: c.id, w: c.w, h: c.h, x: c.x, y: c.y,
+    }))));
+  } catch {}
+}
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved) || saved.length !== DEF.length) return false;
+    const byId = new Map(saved.map((s) => [s.id, s]));
+    if (!DEF.every((d) => byId.has(d.id))) return false;
+
+    const restored = DEF.map((d) => {
+      const s = byId.get(d.id);
+      return { ...d, w: clamp(s.w | 0 || 1, 1, COLS), h: clamp(s.h | 0 || 1, 1, 8),
+        x: clamp(s.x | 0, 0, COLS - 1), y: Math.max(0, s.y | 0) };
+    });
+
+    /* 坐标要校验：越界或互相重叠就丢弃存档，重新装箱（防止手改 localStorage 把页面搞坏） */
+    let maxBottom = 0;
+    const occ = new Set();
+    for (const c of restored) {
+      if (c.x + c.w > COLS) return false;
+      maxBottom = Math.max(maxBottom, c.y + c.h);
+      for (let j = c.y; j < c.y + c.h; j++) {
+        for (let i = c.x; i < c.x + c.w; i++) {
+          const k = i + ',' + j;
+          if (occ.has(k)) return false;
+          occ.add(k);
+        }
+      }
+    }
+    cards = restored;
+    rows = Math.max(ROWS, maxBottom);
+    return true;
+  } catch { return false; }
+}
+
+/* ---------- first-fit 装箱 ----------
+   关键：先按「至少 4 行」试排，排不下就加一行再试，直到全部放下。
+   所以**永远不会有卡片放不进去**，也就不需要「放不下就塞到某个格子」那种会重叠的兜底
+   （v1 就是栽在那个兜底上：满格时 tools 和 me 撞在同一格）。 */
+function tryPack(order, rowsN) {
+  const occ = new Array(COLS * rowsN).fill(false);
+  const pos = [];
+  const canPlace = (x, y, w, h) => {
+    if (x + w > COLS || y + h > rowsN) return false;
+    for (let j = y; j < y + h; j++)
+      for (let i = x; i < x + w; i++)
+        if (occ[j * COLS + i]) return false;
+    return true;
+  };
+  for (const c of order) {
+    const w = clamp(c.w, 1, COLS);
+    const h = clamp(c.h, 1, rowsN);
+    let done = false;
+    for (let y = 0; y < rowsN && !done; y++) {
+      for (let x = 0; x < COLS && !done; x++) {
+        if (!canPlace(x, y, w, h)) continue;
+        for (let j = y; j < y + h; j++)
+          for (let i = x; i < x + w; i++) occ[j * COLS + i] = true;
+        pos.push({ id: c.id, x, y, w, h });
+        done = true;
+      }
+    }
+    if (!done) return null;      // 这一行数排不下 → 交给外层加行重试
+  }
+  return pos;
+}
+
+function pack(order) {
+  for (let rowsN = ROWS; rowsN <= 10; rowsN++) {
+    const pos = tryPack(order, rowsN);
+    if (!pos) continue;
+    rows = rowsN;
+    for (const p of pos) {
+      const c = cards.find((x) => x.id === p.id);
+      if (c) { c.x = p.x; c.y = p.y; c.w = p.w; c.h = p.h; }
+    }
+    return;
+  }
+}
+
+/* ---------- 把网格坐标写成像素 ---------- */
+function place(el, c) {
+  el.style.width = (cw * c.w + GAP * (c.w - 1)) + 'px';
+  el.style.height = (ch * c.h + GAP * (c.h - 1)) + 'px';
+  el.style.left = (c.x * (cw + GAP)) + 'px';
+  el.style.top = (c.y * (ch + GAP)) + 'px';
+}
+
+/* 单元格高度按「4 行正好铺满舞台」算；行数多于 4 时舞台可滚动 */
+function measure() {
+  const r = grid.getBoundingClientRect();
+  const availH = stage.clientHeight - 56;          // 减去上下 padding / 底部留白
+  cw = (r.width - GAP * (COLS - 1)) / COLS;
+  ch = (availH - GAP * (ROWS - 1)) / ROWS;
+}
+
+function render() {
+  measure();
+  grid.style.height = (rows * ch + GAP * (rows - 1)) + 'px';
+  for (const c of cards) {
+    const el = document.getElementById('card-' + c.id);
+    if (el) place(el, c);
+  }
+  drawGuide();
+}
+
+function drawGuide() {
+  guide.style.width = grid.getBoundingClientRect().width + 'px';
+  guide.style.height = grid.style.height;
+  const need = rows * COLS;
+  /* 按需增删格子（行数会随卡片变大而变） */
+  while (guide.children.length < need) guide.appendChild(document.createElement('span'));
+  while (guide.children.length > need) guide.removeChild(guide.lastChild);
+  let k = 0;
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < COLS; i++) {
+      const s = guide.children[k++];
+      s.style.width = cw + 'px';
+      s.style.height = ch + 'px';
+      s.style.left = (i * (cw + GAP)) + 'px';
+      s.style.top = (j * (ch + GAP)) + 'px';
+    }
+  }
+}
+
+/* ---------- 建卡片 ---------- */
+function build() {
+  /* 只清卡片，保留 .guide（参考线在网格内部，要跟卡片共存） */
+  [...grid.querySelectorAll('.card')].forEach((el) => el.remove());
+  for (const c of cards) {
+    const el = document.createElement('section');
+    el.className = 'card card--' + c.kind;
+    el.id = 'card-' + c.id;
+    el.innerHTML = inner(c) + `<div class="grip" title="拖动改尺寸">${I.grip}</div>`;
+    grid.appendChild(el);
+    bindResize(el, c);
+  }
+}
+
+/* ---------- 拖右下角改尺寸 ---------- */
+function bindResize(el, c) {
+  const grip = el.querySelector('.grip');
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const startW = c.w, startH = c.h;
+    el.classList.add('is-resizing');
+    guide.classList.add('is-on');
+    grip.setPointerCapture(e.pointerId);
+
+    const move = (ev) => {
+      /* 按「拖过了几个格」算新跨度，跟手且必落在整数格上。
+         行数上限用 rows（会随内容自动加行），所以往下拖永远不会被卡住。 */
+      const dw = Math.round((ev.clientX - startX) / (cw + GAP));
+      const dh = Math.round((ev.clientY - startY) / (ch + GAP));
+      const w = clamp(startW + dw, 1, COLS - c.x);
+      const h = clamp(startH + dh, 1, Math.max(rows - c.y, 1));
+      if (w === c.w && h === c.h) return;
+      c.w = w; c.h = h;
+      place(el, c);
+    };
+    const up = () => {
+      el.classList.remove('is-resizing');
+      guide.classList.remove('is-on');
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      /* 重排：主动改尺寸的这张先挑位置，其余按当前顺序顺延 */
+      cards.sort((a, b) => (a === c ? -1 : b === c ? 1 : 0));
+      pack(cards);
+      render();
+      save();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+  });
+}
+
+/* ---------- 启动 ---------- */
+const hadSaved = loadSaved();
+build();
+if (hadSaved) {
+  render();            // 存档里已有合法坐标，直接还原，不重新装箱（否则位置会漂）
+} else {
+  pack(cards);
+  render();
+}
+addEventListener('resize', render);
+
+document.getElementById('reset').addEventListener('click', () => {
+  localStorage.removeItem(KEY);
+  cards = DEF.map((d) => ({ ...d }));
+  rows = ROWS;
+  build();
+  pack(cards);
+  render();
+});
+
+/* 诊断口：截图/探针脚本读这个 */
+window.__layout = () => cards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }));
+</script>
+</body>
+</html>

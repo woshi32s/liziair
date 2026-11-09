@@ -1,0 +1,143 @@
+/* Canvas Reveal Effect layer for the four hall entry cards.
+   背景层在卡片内容之下；布局/层级在 JS 里也内联兜底一份，
+   这里负责卡片新构图、淡入淡出、图标撞色/粒子、reduced-motion、可选深色渐变。
+
+   注意：本文件在 app.css 之后加载，只覆盖这四张入口卡的局部样式，
+   不改 app.js / app.css 里任何逻辑或文案。 */
+
+/* ---------- 新构图：中间大图标 + 大字标题，小字全部收起 ---------- */
+.hall-tools__i {
+  isolation: isolate;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 150px;
+  padding: 16px;
+  text-align: center;
+}
+
+.hall-tools__i .tool-card__top {
+  justify-content: center;
+  width: 100%;
+}
+
+/* 小字只做视觉隐藏：DOM 和 app.js 的文案源都保留 */
+.hall-tools__i .tool-card__idx,
+.hall-tools__i .tool-card__c {
+  display: none !important;
+}
+
+.hall-tools__i .tool-card__ico {
+  position: relative;
+  overflow: hidden;
+  width: 68px;
+  height: 68px;
+  border-radius: 20px;
+}
+
+.hall-tools__i .tool-card__ico svg {
+  width: 38px;
+  height: 38px;
+}
+
+.hall-tools__i .tool-card__n {
+  margin-top: 0;
+  padding-top: 0;
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -.02em;
+}
+
+/* 进入 hover/focus 的瞬间切撞色；离开时不写 transition，走 app.css 的 220ms 回退 */
+.hall-tools__i:hover .tool-card__ico,
+.hall-tools__i.is-cr-on .tool-card__ico {
+  transition: none;
+  background: var(--cr-icon-bg, var(--accent));
+  color: var(--cr-icon-ink, #fff);
+}
+
+/* 图标粒子画布：盖在真 SVG 上，不接管鼠标 */
+.hall-tools__i .tool-card__ico > .cr-icon {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+}
+
+/* ---------- 背景点阵层 ---------- */
+.hall-tools__i > .cr-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0;
+  /* 离开时慢慢退 */
+  transition: opacity 360ms cubic-bezier(.22, .61, .36, 1);
+}
+
+.hall-tools__i > .cr-layer > .cr-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 内容永远压在点阵上 */
+.hall-tools__i > :not(.cr-layer) {
+  position: relative;
+  z-index: 1;
+}
+
+.hall-tools__i.is-cr-on > .cr-layer {
+  /* 进入时 140ms 内到满，剩下的 60ms 交给点阵自己扫完（总 200ms） */
+  transition-duration: 140ms;
+  will-change: opacity;
+}
+
+/* 置灰的卡（视图还没上）不亮 */
+.hall-tools__i.is-off > .cr-layer {
+  opacity: 0 !important;
+  transition: none;
+}
+
+/* 原组件的 showGradient：深色卡上压一层自上而下的黑。
+   浅纸面默认关闭（CONFIG.showGradient = false），保留样式以备切换。 */
+.hall-tools__i > .cr-layer > .cr-gradient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(to top, rgba(3, 7, 18, .9), rgba(3, 7, 18, 0) 84%);
+}
+
+/* 窄屏：保持 2×2 / 单列（app.css 管网格），这里只缩图标和字号 */
+@media (max-width: 520px) {
+  .hall-tools__i {
+    gap: 10px;
+    min-height: 132px;
+    padding: 14px;
+  }
+  .hall-tools__i .tool-card__ico {
+    width: 56px;
+    height: 56px;
+    border-radius: 16px;
+  }
+  .hall-tools__i .tool-card__ico svg {
+    width: 32px;
+    height: 32px;
+  }
+  .hall-tools__i .tool-card__n {
+    font-size: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hall-tools__i > .cr-layer {
+    transition: none;
+  }
+}

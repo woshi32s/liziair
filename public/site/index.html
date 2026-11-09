@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI Air · 歌词演出器</title>
+<meta name="description" content="LIZI Air 是一台桌面歌词演出器：235 个可视化形态、六路音源、DJ 台与七段 EQ。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet"></noscript>
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<!-- 一屏展厅：左边索引，中间一张纸，右边粒子舞台。整页不滚动。 -->
+<div class="hall">
+
+  <header class="bar">
+    <span class="bar__mark">LIZI <i>Air</i></span>
+    <span class="bar__sep" aria-hidden="true"></span>
+    <span>v1.0.0</span>
+    <span class="bar__sep" aria-hidden="true"></span>
+    <span>Windows x64</span>
+    <span class="bar__sep" aria-hidden="true"></span>
+    <span>111.5 MB</span>
+    <a class="bar__dl" href="/site/download/LIZI-Setup-1.0.0.exe" download>下载安装包</a>
+  </header>
+
+  <nav class="idx" aria-label="展厅索引">
+    <ol class="idx__list">
+      <li><button class="idx__b is-on" type="button" data-go="0"><span>01</span>形态</button></li>
+      <li><button class="idx__b" type="button" data-go="1"><span>02</span>界面</button></li>
+      <li><button class="idx__b" type="button" data-go="2"><span>03</span>功能</button></li>
+      <li><button class="idx__b" type="button" data-go="3"><span>04</span>规格</button></li>
+      <li><button class="idx__b" type="button" data-go="4"><span>05</span>下载</button></li>
+    </ol>
+    <p class="idx__hint">← → 切换区块<br>点右边粒子会散开</p>
+  </nav>
+
+  <main class="paper" id="paper">
+
+    <!-- 01 形态 -->
+    <section class="pane is-on" data-pane="0" aria-label="形态">
+      <h1 class="pane__t">把一句歌词<br>拆成 <b>235</b> 种形态</h1>
+      <p class="pane__sub">每个形态都是独立写的作品，共用同一份频谱与节拍时钟。切形态不重载音频。</p>
+      <figure class="pane__big">
+        <img id="stage-img" src="img/13-stage-lava.png" alt="形态：熔岩" width="1440" height="900">
+        <figcaption id="stage-cap">熔岩 · 字形是缓慢流动的高温场</figcaption>
+      </figure>
+      <div class="strip" role="listbox" aria-label="选择形态">
+        <button class="thumb is-on" type="button" role="option" aria-selected="true" data-img="img/13-stage-lava.png" data-cap="熔岩 · 字形是缓慢流动的高温场">
+          <img src="img/13-stage-lava.png" alt="" loading="lazy" width="1440" height="900"><span>熔岩</span></button>
+        <button class="thumb" type="button" role="option" aria-selected="false" data-img="img/10-stage-beeswax.png" data-cap="蜂蜡 · 字被压进一层会呼吸的蜡">
+          <img src="img/10-stage-beeswax.png" alt="" loading="lazy" width="1440" height="900"><span>蜂蜡</span></button>
+        <button class="thumb" type="button" role="option" aria-selected="false" data-img="img/12-stage-maki-e.png" data-cap="莳绘 · 金箔一样的笔触在暗处堆起来">
+          <img src="img/12-stage-maki-e.png" alt="" loading="lazy" width="1440" height="900"><span>莳绘</span></button>
+        <button class="thumb" type="button" role="option" aria-selected="false" data-img="img/15-stage-contour.png" data-cap="等高线 · 词句是一张地形图上的等高线">
+          <img src="img/15-stage-contour.png" alt="" loading="lazy" width="1440" height="900"><span>等高线</span></button>
+        <button class="thumb" type="button" role="option" aria-selected="false" data-img="img/17-stage-celadon.png" data-cap="青瓷 · 釉面下的字，随震动开片">
+          <img src="img/17-stage-celadon.png" alt="" loading="lazy" width="1440" height="900"><span>青瓷</span></button>
+      </div>
+    </section>
+
+    <!-- 02 界面 -->
+    <section class="pane" data-pane="1" aria-label="界面">
+      <h1 class="pane__t">三个窗口</h1>
+      <p class="pane__sub">播放页、碟机、我的专辑。全部是真实截图，没有画出来的假界面。</p>
+      <figure class="shot">
+        <img src="img/03-now-playing.png" alt="播放页：暗场、逐字歌词与形态抽屉" width="1440" height="900" loading="lazy">
+        <figcaption><b>播放页</b> —— 暗场、逐字歌词、右侧抽屉切形态。歌词字号行距和形态里完全一致。</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="img/04-dj-deck.png" alt="DJ 台：双 deck、混音台与曲库" width="1440" height="900" loading="lazy">
+        <figcaption><b>碟机</b> —— 纯白面板，双 deck、混音台、曲库。波形滚动，转盘能搓。</figcaption>
+      </figure>
+      <figure class="shot">
+        <img src="img/06-my-albums.png" alt="我的专辑：侧立 3D 陈列" width="1440" height="900" loading="lazy">
+        <figcaption><b>我的专辑</b> —— 侧立 3D 立脊，封面取色做脊背，Enter 特写开合，滑出黑胶。</figcaption>
+      </figure>
+    </section>
+
+    <!-- 03 功能 -->
+    <section class="pane" data-pane="2" aria-label="功能">
+      <h1 class="pane__t">它到底有什么</h1>
+      <p class="pane__sub">六件事，都在同一个窗口里，不用来回切。</p>
+      <ol class="feat">
+        <li><span>01</span><div><b>235 个歌词形态</b><p>粒子聚字、液态金属、极光、等高线，也有纯 CSS 的翻页牌与加载动画。</p></div><em>WebGL / Canvas</em></li>
+        <li><span>02</span><div><b>六路音源</b><p>网易云 / QQ / 酷狗 / 汽水 / 波点 / Spotify。边车按需拉起，死了自动重起，全部只绑 127.0.0.1。</p></div><em>6 个边车</em></li>
+        <li><span>03</span><div><b>DJ 台</b><p>双 deck、搓碟转盘、keylock 变速不变调、拍网格与 SYNC、loop 与 beatjump、热键 1–8。</p></div><em>对标 Mixxx</em></li>
+        <li><span>04</span><div><b>音效</b><p>七段 EQ、十套预设，加一个照 Pro-Q 4 交互做的高级模式：可拖节点、滚轮改 Q。</p></div><em>7 段</em></li>
+        <li><span>05</span><div><b>歌手页 / 专辑页</b><p>艺人名点进去是头像、统计、热门十首、专辑墙；专辑页整页只有一张 380px 封面。</p></div><em>访问栈</em></li>
+        <li><span>06</span><div><b>歌单搬运</b><p>逐首在目标平台搜索，按歌名 / 歌手 / 时长打分，0.86 以上自动搬，其余列出来让你挑。</p></div><em>打分匹配</em></li>
+      </ol>
+    </section>
+
+    <!-- 04 规格 -->
+    <section class="pane" data-pane="3" aria-label="规格">
+      <h1 class="pane__t">规格</h1>
+      <p class="pane__sub">诚实版，包括做不到的那几条。</p>
+      <dl class="spec">
+        <div><dt>版本</dt><dd>1.0.0</dd></div>
+        <div><dt>安装包</dt><dd>111.5 MB（含 6 个音源边车的依赖）</dd></div>
+        <div><dt>平台</dt><dd>Windows 10 / 11 · x64</dd></div>
+        <div><dt>运行时</dt><dd>Electron 33.4.11 · 主服务零依赖 Node</dd></div>
+        <div><dt>形态</dt><dd>235 个（另有 1 个「传统播放器」不计入）</dd></div>
+        <div><dt>网络</dt><dd>全部服务只绑 127.0.0.1，端口以 <code>.port</code> 为准</dd></div>
+        <div><dt>已知限制</dt><dd>汽水 / 波点需要系统 Node ≥ 24；酷狗匿名播放会被风控挡</dd></div>
+      </dl>
+    </section>
+
+    <!-- 05 下载 -->
+    <section class="pane" data-pane="4" aria-label="下载">
+      <h1 class="pane__t">先装上，<br>再说话。</h1>
+      <p class="pane__sub">111.5 MB，一次装完。装完扫码登录你的网易云，歌单就来了。</p>
+      <a class="btn" href="/site/download/LIZI-Setup-1.0.0.exe" download>下载 LIZI Air 1.0.0 <span class="btn__num">111.5 MB</span></a>
+      <p class="fine">安装包没有代码签名，Windows 首次运行会提示「未知发布者」，点「更多信息 → 仍要运行」。<br>
+        所有数据都在本机：不上传歌单，不上传登录凭据。</p>
+    </section>
+
+  </main>
+
+  <aside class="stage" id="pstage-wrap" aria-hidden="true">
+    <canvas id="pstage"></canvas>
+  </aside>
+
+  <footer class="foot">
+    <span>LIZI Air · 2026</span>
+    <span class="foot__sep" aria-hidden="true"></span>
+    <span>本地运行，不上传任何歌单与登录凭据</span>
+  </footer>
+
+</div>
+
+<script src="particles.js"></script>
+<script>
+(() => {
+  const panes = [...document.querySelectorAll('.pane')];
+  const idx = [...document.querySelectorAll('.idx__b')];
+  const SHAPES = ['235', '▶', '6', 'v1', '↓'];
+  const paper = document.getElementById('paper');
+  let cur = 0;
+
+  const go = (i) => {
+    if (i === cur || i < 0 || i >= panes.length) return;
+    panes[cur].classList.remove('is-on');
+    idx[cur].classList.remove('is-on');
+    cur = i;
+    panes[cur].classList.add('is-on');
+    idx[cur].classList.add('is-on');
+    paper.scrollTop = 0;
+    if (window.SITE_PARTICLES) window.SITE_PARTICLES.set(SHAPES[cur]);
+    try { history.replaceState(null, '', '#' + cur); } catch (e) { /* file:// 下会抛 */ }
+  };
+
+  idx.forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.go))));
+
+  addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); go(cur + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); go(cur - 1); }
+    else if (/^[1-5]$/.test(e.key)) { e.preventDefault(); go(Number(e.key) - 1); }
+  });
+
+  /* 形态缩略图：只改 src + opacity，不碰布局 */
+  const big = document.getElementById('stage-img');
+  const cap = document.getElementById('stage-cap');
+  const thumbs = [...document.querySelectorAll('.thumb')];
+  thumbs.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const img = btn.dataset.img;
+      if (!big || big.getAttribute('src') === img) return;
+      thumbs.forEach((t) => { const on = t === btn; t.classList.toggle('is-on', on); t.setAttribute('aria-selected', String(on)); });
+      big.style.opacity = '0';
+      const pre = new Image();
+      pre.onload = () => { big.src = img; cap.textContent = btn.dataset.cap; big.style.opacity = '1'; };
+      pre.src = img;
+    });
+  });
+
+  /* 进场：从 URL 的 hash 恢复，然后启动粒子 */
+  const start = Math.min(4, Math.max(0, Number(location.hash.slice(1)) || 0));
+  if (start) go(start);
+  if (window.SITE_PARTICLES) {
+    window.SITE_PARTICLES.start();
+    window.SITE_PARTICLES.set(SHAPES[cur]);
+  }
+})();
+</script>
+</body>
+</html>

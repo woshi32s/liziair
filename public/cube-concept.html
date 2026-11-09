@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI · 点阵立方体</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#fdfcfa; --ink:#141416; --ink-4:#bcbcc4;
+    --font-ui:"Geist",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --font-mono:"Geist Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    background:var(--paper); color:var(--ink);
+    font-family:var(--font-ui); overflow:hidden;
+    -webkit-font-smoothing:antialiased; user-select:none;
+  }
+  canvas{display:block; width:100%; height:100%; touch-action:none; cursor:crosshair}
+
+  .tag{position:fixed;top:22px;left:26px;display:flex;align-items:baseline;gap:10px;
+    font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4)}
+  .tag b{color:var(--ink);font-weight:500;letter-spacing:.1em}
+  .hint{position:fixed;bottom:22px;left:26px;font-family:var(--font-mono);font-size:10px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4)}
+  .count{position:fixed;bottom:22px;right:26px;font-family:var(--font-mono);font-size:10px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div class="tag"><b>点阵</b><span>Cube · 001</span></div>
+<div class="hint">移动鼠标 · 靠近它会散开</div>
+<div class="count"><span id="n">0</span> dots</div>
+
+<script>
+/* ============================================================
+   点阵立方体
+   —— 纯黑小圆点铺在立方体六个面上。能读成"立方体"靠的不是透视，是三件事：
+        ① 每个面铺满点，棱上的点更黑更粗 → 骨架先出来；
+        ② 面的朝向决定深浅：正对相机的面实、背过去的面几乎消失，
+           于是自然只看见三个面，不排序也不会糊成一团；
+        ③ 透视很轻（f 很大），形状才是方的，不会被广角拉成球。
+   鼠标靠近会把附近的点轻轻推开；整块慢慢转，转速和鼠标倾斜都带阻尼。
+   ============================================================ */
+const cvs = document.getElementById('c');
+const ctx = cvs.getContext('2d', { alpha: false });
+
+const N = 15;               // 每个面 N×N 个点
+const HALF = 1;             // 半边长（单位坐标）
+
+/* ---------- 生成点 ---------- */
+const pts = [];
+{
+  const seen = new Set();
+  const step = (2 * HALF) / (N - 1);
+  const EPS = 1e-6;
+  const addFace = (normal) => {
+    const axis = normal[0] ? 0 : normal[1] ? 1 : 2;
+    const sign = normal[axis];
+    for (let i = 0; i < N; i++) {
+      for (let k = 0; k < N; k++) {
+        const a = -HALF + i * step;
+        const b = -HALF + k * step;
+        const p = axis === 0 ? [sign * HALF, a, b]
+                : axis === 1 ? [a, sign * HALF, b]
+                : [a, b, sign * HALF];
+        const key = p.map((v) => Math.round(v * 1000)).join(',');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        /* 三个坐标里有两个顶到 ±HALF = 站在棱上 */
+        const onEdge = p.filter((v) => Math.abs(Math.abs(v) - HALF) < EPS).length >= 2;
+        pts.push({ p, n: normal, onEdge, ph: Math.random() * 6.283, sp: 0.5 + Math.random() * 0.9 });
+      }
+    }
+  };
+  addFace([ 1, 0, 0]); addFace([-1, 0, 0]);
+  addFace([0,  1, 0]); addFace([0, -1, 0]);
+  addFace([0, 0,  1]); addFace([0, 0, -1]);
+}
+document.getElementById('n').textContent = pts.length;
+
+/* ---------- 状态 ---------- */
+let W = 0, H = 0;
+let yaw = -0.58, pitch = 0.42;
+let mx = 0, my = 0, tx = 0, ty = 0;
+let spin = 0, t = 0;
+
+function resize() {
+  const r = cvs.getBoundingClientRect();
+  W = r.width; H = r.height;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cvs.width = Math.round(W * dpr);
+  cvs.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+const cubeSide = () => Math.min(W, H) * 0.42;
+
+function draw() {
+  t += 1 / 60;
+  spin += 0.0022 + 0.0016 * Math.sin(t * 0.14);          // 转速有一点呼吸
+  tx += (mx * 0.34 - tx) * 0.05;
+  ty += (my * 0.26 - ty) * 0.05;
+
+  const ry = yaw + spin + tx;
+  const rx = pitch + ty + Math.sin(t * 0.2) * 0.045;
+  const cy = Math.cos(ry), sy = Math.sin(ry);
+  const cx = Math.cos(rx), sx = Math.sin(rx);
+
+  const s = cubeSide() / 2;                              // 单位坐标 → 像素
+  const f = s * 22;                                      // 很轻的透视
+  const ox = W / 2, oy = H / 2;
+
+  ctx.fillStyle = '#fdfcfa';
+  ctx.fillRect(0, 0, W, H);
+
+  const items = new Array(pts.length);
+  for (let i = 0; i < pts.length; i++) {
+    const o = pts[i];
+
+    /* 点自己的一点浮动：像手摆的，不像算出来的 */
+    const d = Math.sin(t * o.sp + o.ph) * 0.01;
+    const x = o.p[0] + d * (1.2 + o.p[1]);
+    const y = o.p[1] + d;
+    const z = o.p[2] + d * (1.2 - o.p[0]);
+
+    /* yaw → pitch */
+    const x1 = x * cy - z * sy;
+    const z1 = x * sy + z * cy;
+    const y1 = y * cx - z1 * sx;
+    const z2 = y * sx + z1 * cx;
+
+    /* 法线同转，用来算"这个面朝不朝相机" */
+    const nx1 = o.n[0] * cy - o.n[2] * sy;
+    const nz1 = o.n[0] * sy + o.n[2] * cy;
+    const nz = o.n[1] * sx + nz1 * cx;
+    const facing = nz;                                   // < 0 = 朝着相机
+
+    const k = f / (f + z2 * s);
+    let px = ox + x1 * s * k;
+    let py = oy + y1 * s * k;
+
+    /* 鼠标把附近的点轻轻推开 */
+    const dx = px - ox - mx * W * 0.42;
+    const dy = py - oy - my * H * 0.42;
+    const dist = Math.hypot(dx, dy);
+    const push = Math.max(0, 1 - dist / (s * 1.5)) * 0.05 * s;
+    if (push > 0.01) {
+      const a = Math.atan2(dy, dx);
+      px += Math.cos(a) * push;
+      py += Math.sin(a) * push;
+    }
+
+    items[i] = { px, py, z: z2, facing, onEdge: o.onEdge, k };
+  }
+
+  items.sort((a, b) => b.z - a.z);                        // 远 → 近
+
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const front = Math.max(0, -it.facing);                // 0（背）… 1（正对）
+    let r = (1.05 + front * 1.05) * it.k;
+    let a = 0.10 + front * front * 0.82;
+    if (it.onEdge) { r *= 1.22; a = Math.max(a, 0.9); }
+    if (a < 0.03) continue;
+    ctx.beginPath();
+    ctx.arc(it.px, it.py, r, 0, 6.2832);
+    ctx.fillStyle = 'rgba(18,18,20,' + a.toFixed(3) + ')';
+    ctx.fill();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+addEventListener('pointermove', (e) => {
+  mx = (e.clientX / innerWidth) * 2 - 1;
+  my = (e.clientY / innerHeight) * 2 - 1;
+}, { passive: true });
+addEventListener('pointerout', () => { mx = 0; my = 0; });
+addEventListener('resize', resize);
+
+resize();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

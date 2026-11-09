@@ -1,0 +1,46 @@
+function camPose() {
+  /* 三个机位：
+     A（0–4.2s）几乎贴着斜面横着推过去，眼睛比埂顶还低，
+        字是一排立起来的埂，灯从左边很低地压过来；
+     B（5.6–9.3s）凑到埂顶和泪痕之间，只剩两三个字，泪珠就在镜头前；
+     C（10.4–12.6s）退到右下侧回看，埂把光拦住，一条长影横着拖过来。 */
+  const cyc = 13, p = ((vT % cyc) + cyc) % cyc / cyc;
+  const sm = (t) => t * t * (3 - 2 * t);
+  const lp = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+  const A = [-0.62, -0.30, 0.235], B = [0.02, -0.34, 0.175], C = [0.44, -0.50, 0.335];
+  let P = A;
+  if (p < 0.32) P = A;
+  else if (p < 0.44) P = lp(A, B, sm((p - 0.32) / 0.12));
+  else if (p < 0.72) P = B;
+  else if (p < 0.81) P = lp(B, C, sm((p - 0.72) / 0.09));
+  else if (p < 0.96) P = C;
+  else P = lp(C, A, sm((p - 0.96) / 0.04));
+  /* 机位跟着淌到的那截往右挪，但只跟一小半 —— 字在画面里慢慢横过去 */
+  const sxW = GT.box[0] + uCut * GT.box[2];
+  const fx = sxW * 0.26;
+  const sway = 0.042 * Math.sin(vT * 0.21);
+  const eye = [fx + P[0] + sway, P[1] + 0.009 * Math.sin(vT * 0.37), P[2]];
+  const at = [fx * 0.92 + P[0] * 0.14, -0.030, 0];
+
+  /* cameraBasis 的 up 取的是 right×fwd —— 只有大体朝 ±z 看时画面才是立着的。
+     贴坡侧推是朝 ±x 看的，所以这里把滚转角补回去，再叠一点手抖似的侧倾。 */
+  const ax0 = at[0] - eye[0], ay0 = at[1] - eye[1], az = at[2] - eye[2];
+  const al = Math.hypot(ax0, ay0, az) || 1;
+  const ax = ax0 / al, ay = ay0 / al, azn = az / al;
+  const rx = -azn, rz = ax;
+  const rl = Math.hypot(rx, rz) || 1;
+  const R0x = rx / rl, R0z = rz / rl;
+  const ux0 = -R0z * ay, uy0 = R0z * ax - R0x * azn, uz0 = R0x * ay;
+  const ul0 = Math.hypot(ux0, uy0, uz0) || 1;
+  const U0x = ux0 / ul0, U0y = uy0 / ul0, U0z = uz0 / ul0;
+  /* 想要的上方向：世界 z 去掉沿视线的那一截 */
+  let zx = -ax * azn, zy = -ay * azn, zz = 1 - azn * azn;
+  const zl = Math.hypot(zx, zy, zz) || 1;
+  zx /= zl; zy /= zl; zz /= zl;
+  const c0 = zx * U0x + zy * U0y + zz * U0z;
+  const s0 = -(zx * R0x + zz * R0z);
+  const fix = Math.atan2(s0, c0);
+  const jit = 0.030 * Math.sin(vT * 0.17) + 0.009 * Math.sin(vT * 0.59);
+  const b = cameraBasis(eye, at, fix + (RM ? jit * 0.3 : jit));
+  return { eye, ...b };
+}

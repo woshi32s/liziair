@@ -1,0 +1,589 @@
+/* ==========================================================================
+   LIZI · 360° 空间音频浮层（spatial.css）
+   --------------------------------------------------------------------------
+   和工具箱其它浮层同一套语言：纸白底、墨色字、1px 细线、等宽数字。
+   全篇只用黑白灰：选中态、声波、电平都靠墨色和 alpha 分层，不用强调色。
+   舞台是一张 canvas：没有大块背景，也没有 backdrop-filter —— 透明窗口里
+   大面积模糊很容易和持续重绘一起把合成器卡住（大厅那边踩过）。
+   ========================================================================== */
+
+.spz {
+  position: fixed;
+  inset: 0;
+  z-index: 280;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vw, 32px);
+  overflow: auto;
+  background: oklch(21% 0.022 270 / 0.34);
+}
+.spz[hidden] { display: none; }
+
+.spz *,
+.spz *::before,
+.spz *::after { box-sizing: border-box; }
+
+.spz__sheet {
+  width: min(1120px, 100%);
+  max-height: min(92vh, 940px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--paper-2, #fff);
+  color: var(--ink, oklch(21% 0.022 270));
+  border: 1px solid var(--rule, oklch(21% 0.022 270 / 0.09));
+  border-radius: var(--r-lg, 20px);
+  box-shadow: 0 30px 80px -44px oklch(21% 0.022 270 / 0.6);
+}
+
+/* ---------- 头部 ---------- */
+.spz__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4, 16px);
+  padding: var(--sp-5, 20px) var(--sp-6, 24px) var(--sp-4, 16px);
+  border-bottom: 1px solid var(--rule, oklch(21% 0.022 270 / 0.09));
+}
+.spz__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: var(--fw-semi, 600);
+  letter-spacing: -0.02em;
+  color: var(--ink, oklch(21% 0.022 270));
+}
+.spz__sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-3, oklch(58% 0.014 270));
+}
+.spz__x {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm, 10px);
+  background: transparent;
+  color: var(--ink-3, oklch(58% 0.014 270));
+  cursor: pointer;
+  transition: background var(--dur-fast, 140ms) var(--ease-out, ease),
+              color var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.spz__x:hover {
+  background: oklch(21% 0.022 270 / 0.05);
+  color: var(--ink, oklch(21% 0.022 270));
+}
+.spz__x:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 2px;
+}
+
+/* ---------- 主体：舞台 + 侧栏 ---------- */
+.spz__body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 332px;
+  gap: var(--sp-6, 24px);
+  padding: var(--sp-5, 20px) var(--sp-6, 24px) var(--sp-6, 24px);
+  overflow: auto;
+}
+
+.spz__stage-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+/* 正方形舞台：canvas 自己算透视，DOM 标签按百分比贴在投影点上 */
+.spz__stage {
+  position: relative;
+  width: min(100%, 62vh, 640px);
+  aspect-ratio: 1 / 1;
+  flex: none;
+  margin: 0 auto 22px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 14px;
+}
+
+.spz__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+.spz__stage.is-rot .spz__canvas { cursor: grabbing; }
+
+/* 视角读数 + 复位 */
+.spz__cam {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 5px 4px 10px;
+  border: 1px solid var(--rule, oklch(21% 0.022 270 / 0.09));
+  border-radius: var(--r-full, 999px);
+  background: oklch(99% 0.003 264 / 0.9);
+  box-shadow: 0 6px 18px -16px oklch(21% 0.022 270 / 0.7);
+}
+.spz__cam-v {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-3, oklch(58% 0.014 270));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.spz__cam-r {
+  flex: none;
+  height: 22px;
+  padding: 0 9px;
+  border: 1px solid rgb(0 0 0 / 0.2);
+  border-radius: var(--r-full, 999px);
+  background: var(--paper-2, #fff);
+  color: var(--ink, oklch(21% 0.022 270));
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.spz__cam-r:hover {
+  border-color: oklch(21% 0.022 270 / 0.26);
+  color: var(--ink, oklch(21% 0.022 270));
+}
+.spz__cam-r:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 2px;
+}
+
+/* ---------- 音响节点（画布画块体，这里只是可点/可聚焦的热区 + 标签） ---------- */
+.spz__spks {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.spz__spk {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 52px;
+  height: 52px;
+  transform: translate(-50%, -50%);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: grab;
+  touch-action: none;
+  pointer-events: auto;
+}
+.spz__spk[hidden] { display: none; }
+.spz__spk.is-drag { cursor: grabbing; }
+.spz__spk:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 2px;
+}
+.spz__spk::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  transition: border-color var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.spz__spk:hover::before { border-color: oklch(21% 0.022 270 / 0.22); }
+
+.spz__spk-lb {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 16px);
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 8px;
+  border: 1px solid var(--rule, oklch(21% 0.022 270 / 0.09));
+  border-radius: var(--r-full, 999px);
+  background: oklch(99% 0.003 264 / 0.94);
+  box-shadow: 0 4px 14px -12px oklch(21% 0.022 270 / 0.7);
+  white-space: nowrap;
+  pointer-events: none;
+  transition: border-color var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.spz__spk-lb b {
+  font-size: 10px;
+  font-weight: var(--fw-semi, 600);
+  line-height: 1.25;
+  color: var(--ink-2, oklch(44% 0.018 270));
+}
+.spz__spk-lb i {
+  font-style: normal;
+  font-size: 9.5px;
+  line-height: 1.25;
+  color: var(--ink-3, oklch(58% 0.014 270));
+  font-variant-numeric: tabular-nums;
+}
+.spz__spk.is-on .spz__spk-lb {
+  border-color: rgb(0 0 0 / 0.5);
+  box-shadow: 0 0 0 2px rgb(0 0 0 / 0.08);
+}
+.spz__spk.is-on .spz__spk-lb b { color: var(--ink, oklch(21% 0.022 270)); }
+
+.spz__stage-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-3, oklch(58% 0.014 270));
+  text-align: center;
+}
+
+/* ---------- 侧栏 ---------- */
+.spz__side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4, 16px);
+}
+
+.spz__sec {
+  padding-top: var(--sp-4, 16px);
+  border-top: 1px solid var(--rule, oklch(21% 0.022 270 / 0.09));
+}
+.spz__sec:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+.spz__sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3, 12px);
+  margin-bottom: var(--sp-2, 8px);
+}
+.spz__sec-h h3 {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: var(--fw-semi, 600);
+  letter-spacing: 0.06em;
+  color: var(--ink-3, oklch(58% 0.014 270));
+}
+.spz__small {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-3, oklch(58% 0.014 270));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 150px;
+}
+.spz__count { margin: var(--sp-2, 8px) 0 0; max-width: none; white-space: normal; }
+
+.spz__sel {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--rule, oklch(21% 0.022 270 / 0.09));
+  border-radius: var(--r-sm, 10px);
+  background: var(--paper-2, #fff);
+  color: var(--ink, oklch(21% 0.022 270));
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.spz__sel:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 1px;
+}
+.spz__sel option:disabled { color: var(--ink-3, oklch(58% 0.014 270)); }
+
+.spz__transport {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  margin-top: var(--sp-3, 12px);
+}
+
+.spz__btn--play {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
+  border: 1px solid var(--ink, oklch(21% 0.022 270));
+  border-radius: var(--r-full, 999px);
+  background: var(--ink, oklch(21% 0.022 270));
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--fw-med, 500);
+  cursor: pointer;
+  transition: transform var(--dur-fast, 140ms) var(--ease-out, ease),
+              opacity var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.spz__btn--play:hover { opacity: 0.88; }
+.spz__btn--play:active { transform: scale(0.98); }
+.spz__btn--play:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 3px;
+}
+.spz__btn--play .spz__i-pause { display: none; }
+.spz__btn--play.is-on .spz__i-play { display: none; }
+.spz__btn--play.is-on .spz__i-pause { display: block; }
+/* 暂停态反白：白底墨字 + 墨色描边，和播放态的黑底白字配成一对 */
+.spz__btn--play.is-on {
+  background: var(--paper-2, #fff);
+  color: var(--ink, oklch(21% 0.022 270));
+}
+
+.spz__master {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--ink-3, oklch(58% 0.014 270));
+}
+.spz__master input { width: 100%; accent-color: var(--ink, oklch(21% 0.022 270)); cursor: pointer; }
+
+/* 电平表：跟 analyser 的 RMS 直接联动，播放时看得到「真有声音」 */
+.spz__meter {
+  height: 1px;
+  margin-top: var(--sp-3, 12px);
+  background: var(--rule, oklch(21% 0.022 270 / 0.09));
+  overflow: hidden;
+}
+.spz__meter i {
+  display: block;
+  height: 1px;
+  background: var(--ink, oklch(21% 0.022 270));
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.spz__msg {
+  min-height: 17px;
+  margin: var(--sp-2, 8px) 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--ink-3, oklch(58% 0.014 270));
+}
+/* 错误态也留在黑白里：加重字色并用下划线提示，不引入红色 */
+.spz__msg.is-err {
+  color: var(--ink, oklch(21% 0.022 270));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.spz__btn--sm {
+  flex: none;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgb(0 0 0 / 0.2);
+  border-radius: var(--r-full, 999px);
+  background: var(--paper-2, #fff);
+  color: var(--ink, oklch(21% 0.022 270));
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.spz__btn--sm:hover:not(:disabled) {
+  border-color: oklch(21% 0.022 270 / 0.26);
+  color: var(--ink, oklch(21% 0.022 270));
+}
+.spz__btn--sm:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 2px;
+}
+.spz__btn--sm:disabled { opacity: 0.42; cursor: default; }
+
+/* ---------- 音响列表 ---------- */
+.spz__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.spz__item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 9px;
+  border: 1px solid var(--rule, oklch(21% 0.022 270 / 0.09));
+  border-radius: var(--r-md, 14px);
+  transition: border-color var(--dur-fast, 140ms) var(--ease-out, ease),
+              background var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.spz__item.is-on {
+  border-color: rgb(0 0 0 / 0.42);
+  background: rgb(0 0 0 / 0.04);
+}
+.spz__item-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-2, 8px);
+  min-width: 0;
+}
+.spz__item-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.spz__item-main:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.spz__item-n {
+  font-size: 12.5px;
+  font-weight: var(--fw-semi, 600);
+  color: var(--ink, oklch(21% 0.022 270));
+}
+.spz__item-d {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--ink-3, oklch(58% 0.014 270));
+  font-variant-numeric: tabular-nums;
+}
+.spz__del {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgb(0 0 0 / 0.2);
+  border-radius: 6px;
+  background: var(--paper-2, #fff);
+  color: var(--ink-2, oklch(44% 0.018 270));
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.spz__del:hover:not(:disabled) {
+  border-color: rgb(0 0 0 / 0.4);
+  color: var(--ink, oklch(21% 0.022 270));
+}
+.spz__del:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 1px;
+}
+.spz__del:disabled { opacity: 0.32; cursor: default; }
+
+/* 每项 4 个滑杆：上面读数、下面轨道，键盘方向键原生命令都能用 */
+.spz__ctrls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 12px;
+}
+.spz__ctr {
+  min-width: 0;
+  display: grid;
+  grid-template-areas: "k v" "i i";
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 6px;
+}
+.spz__ctr > span:first-child {
+  grid-area: k;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--ink-3, oklch(58% 0.014 270));
+}
+.spz__val {
+  grid-area: v;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  line-height: 1.4;
+  color: var(--ink-2, oklch(44% 0.018 270));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+.spz__ctr input {
+  grid-area: i;
+  width: 100%;
+  min-width: 0;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--ink, oklch(21% 0.022 270));
+  cursor: pointer;
+}
+.spz__ctr input:focus-visible {
+  outline: 2px solid var(--ink, oklch(21% 0.022 270));
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.spz__hint {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-sm, 10px);
+  background: oklch(21% 0.022 270 / 0.035);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--ink-3, oklch(58% 0.014 270));
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 920px) {
+  .spz__body {
+    grid-template-columns: 1fr;
+    gap: var(--sp-4, 16px);
+  }
+  .spz__stage { width: min(100%, 58vh, 560px); }
+  .spz__side { padding-top: 2px; }
+}
+
+@media (max-width: 560px) {
+  .spz { padding: 0; }
+  .spz__sheet {
+    width: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+  .spz__head,
+  .spz__body { padding-left: var(--sp-4, 16px); padding-right: var(--sp-4, 16px); }
+  .spz__stage { width: min(100%, 46vh, 440px); }
+  .spz__cam-v { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spz__x,
+  .spz__spk::before,
+  .spz__spk-lb,
+  .spz__item,
+  .spz__btn--play { transition: none; }
+}

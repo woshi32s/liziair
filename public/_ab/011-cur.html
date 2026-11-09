@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>等离子体歌词</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060a;overflow:hidden}
+  #gl{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block;pointer-events:none}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:2;
+        font:500 11px/1.5 ui-monospace,Consolas,monospace;
+        color:rgba(196,176,255,.30);letter-spacing:.08em;pointer-events:none;transition:opacity .6s}
+</style>
+</head>
+<body data-chrome="off">
+<canvas id="gl"></canvas>
+<canvas id="c"></canvas>
+<div id="hint">等待第一句…</div>
+<script>
+"use strict";
+/* ============================================================================
+   011 · 等离子体歌词 —— 字是干涉场里的一条等值线
+   ----------------------------------------------------------------------------
+   和已有 10 个的区别：
+   001 粒子被吸到字形点（吸引）／003 光绘长曝光（累积）／008 接触粘附／
+   010 火星路过字形带时驻留点亮（驻留）。
+   这里粒子**从来没有被吸引过**：它一直挂在自己的字形槽位上，只是被等离子体
+   标量场 v(x,y,t) 沿梯度推开。
+        c   = smoothstep(1 - |v - iso| / band)        // 结晶度
+        pos = slot + normalize(∇v) * (1-c) * R
+   所以"字"不是被摆出来的，而是**干涉场的等值线扫过时把字雕出来**：
+   iso 缓缓漂移，亮的等值带像等离子体灯里的电弧一样在笔画上爬行，
+   离开等值线的笔画就化回一团沿场流动的雾，杆子亮暗此起彼伏。
+   背景的 WebGL 等离子体用的是**同一个 v、同一个 iso**（u_iso 传进着色器），
+   所以背景亮起的那道弧，正好就是此刻字被雕出来的地方。
+   ========================================================================== */
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const glc = document.getElementById('gl');
+let W = 1, H = 1, MN = 1, DPR = 1;
+
+let gl = null;
+try {
+  gl = glc.getContext('webgl', { antialias: false, alpha: false, depth: false })
+    || glc.getContext('experimental-webgl', { antialias: false, alpha: false, depth: false });
+} catch (_) { gl = null; }
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = Math.max(1, window.innerWidth);
+  H = Math.max(1, window.innerHeight);
+  MN = Math.min(W, H);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  gridBox();
+  if (gl) {
+    /* 背景压到 0.66 倍分辨率再拉伸：等离子体是低频的，看不出差别，
+       但片元数少一半多，给前景粒子留预算。 */
+    const s = Math.min(0.66, 1080 / W, 680 / H);
+    glc.width = Math.max(1, Math.round(W * s));
+    glc.height = Math.max(1, Math.round(H * s));
+    gl.viewport(0, 0, glc.width, glc.height);
+  }
+}
+
+/* ---------------------------- 背景：等离子体 ---------------------------- */
+const VS = 'attribute vec2 a; void main(){ gl_Position = vec4(a,0.0,1.0); }';
+const FS = [
+  'precision mediump float;',
+  'uniform vec2 u_res;',
+  'uniform float u_time;',
+  'uniform vec2 u_mouse;',
+  'uniform float u_iso;',
+  'uniform float u_phase;',
+  'vec3 pal(float t){ return 0.5 + 0.5*cos(6.28318*(t + vec3(0.0,0.33,0.67))); }',
+  'void main(){',
+  '  float mn = min(u_res.x, u_res.y);',
+  '  vec2 uv = (gl_FragCoord.xy*2.0 - u_res)/mn;',
+  '  vec2 m  = (u_mouse*2.0 - u_res)/mn;',
+  '  uv -= m*0.30;',
+  '  float t = u_time*0.55;',
+  '  float d = length(uv);',
+  '  float a = atan(uv.y, uv.x);',
+  '  float v = sin(uv.x*2.8 + t)',
+  '          + sin(uv.y*2.6 - t*0.9)',
+  '          + sin((uv.x+uv.y)*2.2 + t*1.25)',
+  '          + sin(d*5.5 - t*1.9)',
+  '          + sin(a*4.0 + t*0.7)*0.7;',
+  '  float iso = exp(-abs(v - u_iso)*1.5);',
+  '  vec3 col = pal(v*0.16 + t*0.02 + u_phase);',
+  '  col *= 0.42 + 0.58*smoothstep(0.4, 1.4, v*0.5 + d);',
+  '  col *= 1.0 - d*0.16;',
+  '  col += pal(v*0.16 + t*0.02 + u_phase + 0.12)*iso*0.5;',
+  '  col = mix(col, vec3(0.02,0.024,0.04), smoothstep(1.05, 1.75, d));',
+  '  col *= 0.60;',
+  '  gl_FragColor = vec4(col, 1.0);',
+  '}'
+].join('\n');
+
+let uRes = null, uTime = null, uMouse = null, uIso = null, uPhase = null;
+if (gl) {
+  const mk = (type, src) => {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src); gl.compileShader(s);
+    return s;
+  };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, mk(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, mk(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    gl = null;                                      // 编译失败就退回纯色底，字照演
+  } else {
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'a');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    uRes = gl.getUniformLocation(prog, 'u_res');
+    uTime = gl.getUniformLocation(prog, 'u_time');
+    uMouse = gl.getUniformLocation(prog, 'u_mouse');
+    uIso = gl.getUniformLocation(prog, 'u_iso');
+    uPhase = gl.getUniformLocation(prog, 'u_phase');
+    gl.clearColor(0.02, 0.024, 0.04, 1);
+  }
+}
+
+/* ------------------- 标量场：JS 与 GLSL 必须逐字对应 ------------------- */
+function fieldV(ux, uy, t) {
+  const d = Math.sqrt(ux * ux + uy * uy);
+  return Math.sin(ux * 2.8 + t)
+    + Math.sin(uy * 2.6 - t * 0.9)
+    + Math.sin((ux + uy) * 2.2 + t * 1.25)
+    + Math.sin(d * 5.5 - t * 1.9)
+    + Math.sin(Math.atan2(uy, ux) * 4.0 + t * 0.7) * 0.7;
+}
+/* 场在粗网格上算一遍，粒子和梯度都用双线性取样 ——
+   逐颗算 5 个 sin 是 5.5 万次三角函数，网格只要 3 千次。 */
+const GW = 76, GH = 46;
+const gv = new Float32Array(GW * GH);
+const ggx = new Float32Array(GW * GH);
+const ggy = new Float32Array(GW * GH);
+let GX0 = 0, GY0 = 0, GINVX = 1, GINVY = 1, GDX = 1, GDY = 1;
+function gridBox() {
+  const ax = Math.max(1, W / Math.max(1, MN)), ay = Math.max(1, H / Math.max(1, MN));
+  /* 网格要罩住"屏幕 + 鼠标偏移量"：着色器里 uv -= m*0.30，
+     采样点会跑到屏幕外 0.3 倍长边，不够宽就会在边缘被夹住。 */
+  const px2 = ax * 1.34 + 0.04, py2 = ay * 1.34 + 0.04;
+  GX0 = -px2; GY0 = -py2;
+  GINVX = (GW - 1) / (px2 * 2);
+  GINVY = (GH - 1) / (py2 * 2);
+  GDX = 1 / GINVX; GDY = 1 / GINVY;
+}
+function buildField(t, shx, shy) {
+  for (let j = 0; j < GH; j++) {
+    const uy = GY0 + j * GDY - shy;
+    const row = j * GW;
+    for (let i = 0; i < GW; i++) gv[row + i] = fieldV(GX0 + i * GDX - shx, uy, t);
+  }
+  for (let j = 0; j < GH; j++) {
+    for (let i = 0; i < GW; i++) {
+      const o = j * GW + i;
+      const l = i > 0 ? o - 1 : o, r = i < GW - 1 ? o + 1 : o;
+      const u = j > 0 ? o - GW : o, dn = j < GH - 1 ? o + GW : o;
+      const sx2 = r - l, sy2 = (dn - u) / GW;
+      ggx[o] = sx2 ? (gv[r] - gv[l]) / (sx2 * GDX) : 0;
+      ggy[o] = sy2 ? (gv[dn] - gv[u]) / (sy2 * GDY) : 0;
+    }
+  }
+}
+function sampleArr(arr, ux, uy) {
+  let fx = (ux - GX0) * GINVX, fy = (uy - GY0) * GINVY;
+  if (fx < 0) fx = 0; else if (fx > GW - 1.001) fx = GW - 1.001;
+  if (fy < 0) fy = 0; else if (fy > GH - 1.001) fy = GH - 1.001;
+  const i0 = fx | 0, j0 = fy | 0, tx = fx - i0, ty = fy - j0;
+  const o = j0 * GW + i0, o2 = o + GW;
+  const a = arr[o], b = arr[o + 1], c = arr[o2], d = arr[o2 + 1];
+  const t0 = a + (b - a) * tx, t1 = c + (d - c) * tx;
+  return t0 + (t1 - t0) * ty;
+}
+
+/* ---------------------------- 粒子 ---------------------------- */
+const N = 11000;
+const px = new Float32Array(N), py = new Float32Array(N);
+const slx = new Float32Array(N), sly = new Float32Array(N);  // 字形槽位
+const cr = new Float32Array(N);                              // 结晶度
+const sd = new Float32Array(N);
+for (let i = 0; i < N; i++) sd[i] = Math.random() * 6.2832;
+
+/* ---------------------------- 字形采样 ---------------------------- */
+const off = document.createElement('canvas');
+const octx = off.getContext('2d', { willReadFrequently: true });
+/* 一次扫描拿到 2 格点云，再按需要的密度抽稀（保持等间距的方格）——
+   反复重扫大画布在酝酿期会造成可见的卡顿。 */
+function glyphPoints(text, wantMax) {
+  const F = 96;
+  const maxW = Math.min(W * 0.78, 1300);
+  const font = (s) => '800 ' + s + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  octx.font = font(F);
+  let w = Math.ceil(octx.measureText(text).width) + 8;
+  const fs = w > maxW ? F * (maxW / w) : F;
+  octx.font = font(fs);
+  w = Math.ceil(octx.measureText(text).width) + 8;
+  const h = Math.ceil(fs * 1.35);
+  off.width = Math.max(8, w); off.height = Math.max(8, h);
+  octx.clearRect(0, 0, off.width, off.height);
+  octx.font = font(fs);
+  octx.textAlign = 'center'; octx.textBaseline = 'middle';
+  octx.fillStyle = '#fff';
+  octx.fillText(text, off.width / 2, off.height / 2);
+  const d = octx.getImageData(0, 0, off.width, off.height).data;
+  const ox = off.width, oy = off.height;
+  const rawX = [], rawY = [];
+  for (let y = 0; y < oy; y += 2)
+    for (let x = 0; x < ox; x += 2)
+      if (d[(y * ox + x) * 4 + 3] > 128) { rawX.push(x); rawY.push(y); }
+  const pc0 = rawX.length;
+  if (!pc0) return { pts: [], pc: 0, w: ox, h: oy };
+  /* 步长 ≤ 颗粒直径才不是点阵；点比粒子多就抽稀（4 的倍数），
+     宁可稍微稀一点也不能断笔画。 */
+  let f = Math.ceil(Math.sqrt(pc0 / Math.max(1, wantMax)));
+  if (f < 1) f = 1;
+  const step = 2 * f;
+  const pts = [];
+  for (let i = 0; i < pc0; i++) {
+    if (f > 1 && ((rawX[i] % step) !== 0 || (rawY[i] % step) !== 0)) continue;
+    pts.push(rawX[i] - ox / 2, rawY[i] - oy / 2);
+  }
+  if (pts.length < 2) for (let i = 0; i < pc0; i++) pts.push(rawX[i] - ox / 2, rawY[i] - oy / 2);
+  return { pts, pc: pts.length / 2, w: ox, h: oy };
+}
+
+/* ---------------------------- 锚点 ---------------------------- */
+const anchors = [];
+for (let i = 0; i < 96; i++) {
+  const g = i * 2.399963;
+  const rr = 0.30 + 0.70 * (((i * 37) % 97) / 97);
+  anchors.push({ nx: Math.cos(g) * rr * 0.74, ny: Math.sin(g) * rr * 0.44 });
+}
+function placeAnchor(a, hw, hh, gcx, gcy) {
+  const M = 60;
+  const x0 = M + hw - gcx, x1 = W - M - hw - gcx;
+  const y0 = M + hh - gcy, y1 = H - M - hh - gcy;
+  return {
+    x: x1 > x0 ? x0 + (a.nx * 0.5 + 0.5) * (x1 - x0) : W / 2 - gcx,
+    y: y1 > y0 ? y0 + (a.ny * 0.5 + 0.5) * (y1 - y0) : H / 2 - gcy
+  };
+}
+
+/* ------------------- 显示与酝酿分离 ------------------- */
+let prep = null;      // 已经算好、等着上场的那句
+function prepare(i) {
+  if (i < 0 || !lines[i]) return null;
+  const g = glyphPoints(lines[i].text, N);
+  if (!g.pc) return null;
+  let bx0 = 1e9, bx1 = -1e9, by0 = 1e9, by1 = -1e9;
+  for (let k = 0; k < g.pts.length; k += 2) {
+    if (g.pts[k] < bx0) bx0 = g.pts[k];
+    if (g.pts[k] > bx1) bx1 = g.pts[k];
+    if (g.pts[k + 1] < by0) by0 = g.pts[k + 1];
+    if (g.pts[k + 1] > by1) by1 = g.pts[k + 1];
+  }
+  return { idx: i, pts: g.pts, pc: g.pc, bx0, bx1, by0, by1 };
+}
+let curPrep = null;
+function commit(g) {
+  if (!g) { curPrep = null; return; }
+  curPrep = g;
+  const hw = (g.bx1 - g.bx0) / 2, hh = (g.by1 - g.by0) / 2;
+  const A = placeAnchor(anchors[((g.idx % anchors.length) + anchors.length) % anchors.length],
+    hw, hh, (g.bx0 + g.bx1) / 2, (g.by0 + g.by1) / 2);
+  const pc = g.pc;
+  for (let i = 0; i < N; i++) {
+    /* 等间隔取样：直接 i%pc 会只用到扫描顺序的前几行，字被压扁成一条带 */
+    const p = (Math.floor(i * pc / N) % pc) * 2;
+    slx[i] = A.x + g.pts[p];
+    sly[i] = A.y + g.pts[p + 1];
+  }
+}
+function clearParticles() {
+  for (let i = 0; i < N; i++) {
+    slx[i] = Math.random() * W; sly[i] = Math.random() * H;
+    px[i] = slx[i]; py[i] = sly[i];
+    cr[i] = 0;
+  }
+  curPrep = null; prep = null;
+}
+
+/* ---------------------------- 节奏 ---------------------------- */
+let lines = [];
+let clockT = 0, clockAt = 0, playing = false;
+const now = () => clockT + (playing ? (performance.now() - clockAt) / 1000 : 0);
+
+/* ================= 节奏：1-10 的教训固化在这里 =================
+   ① 显示与酝酿分离 —— curIdx 只在句首切换，brewIdx 提前 lead 秒准备
+   ② 索引单调不回退 —— 时钟在 tick 之间外推、tick 一来会往回缩一点，
+      不锁单调的话句边界来回跳、同一句被反复重建
+   ③ 提前量自适应 —— 快歌早开始，慢歌不提前太多
+   ④ 只有拖进度条（时间明显倒退）才允许重置
+   ================================================================ */
+let curIdx = -1, brewIdx = -1, lastT = -1;
+const LEAD = 1.3;
+const hint = document.getElementById('hint');
+function timing(T) {
+  if (!lines.length) return;
+  if (T < lastT - 0.6) {
+    curIdx = -1; brewIdx = -1; prep = null;
+    clearParticles();                       // 只在这里、以及 init 时清场
+  }
+  lastT = T;
+  let ci = curIdx;
+  while (ci + 1 < lines.length && T >= lines[ci + 1].t) ci++;
+  if (ci !== curIdx) {
+    curIdx = ci;
+    brewIdx = -1;
+    /* 上场：用酝酿好的那份；没来得及酝酿（刚 init 就开唱）就现算 */
+    commit(prep && prep.idx === ci ? prep : prepare(ci));
+    prep = null;
+    hint.style.opacity = lines.length ? (ci >= 0 ? '0' : '1') : '0.5';
+  }
+  const nx = curIdx + 1;
+  if (nx < lines.length && brewIdx !== nx) {
+    const gap = lines[nx].t - (curIdx >= 0 ? lines[curIdx].t : lines[nx].t - 4);
+    const lead = Math.min(LEAD, Math.max(0.45, gap * 0.55));
+    if (T >= lines[nx].t - lead) {
+      brewIdx = nx;
+      prep = prepare(nx);        // 只算字形点，不碰屏幕上的粒子（坑①）
+    }
+  }
+}
+
+/* ---------------------------- 输入 ---------------------------- */
+const mouse = { x: 0.5, y: 0.5, sx: 0.5, sy: 0.5 };
+addEventListener('pointermove', (e) => {
+  mouse.x = e.clientX / Math.max(1, window.innerWidth);
+  mouse.y = e.clientY / Math.max(1, window.innerHeight);
+}, { passive: true });
+addEventListener('pointerdown', () => { isoKick += 0.5; }, { passive: true });
+
+let phase = 0.12;
+let isoBase = 0, isoKick = 0, iso = 0;
+
+/* ---------------------------- 主循环 ---------------------------- */
+let last = performance.now();
+let t0 = 0;
+function frame(nowMs) {
+  const dt = Math.min(0.05, (nowMs - last) / 1000);
+  last = nowMs; t0 += dt;
+  timing(now());
+
+  const ft = t0 * 0.55;                       // 必须和着色器里的 t 一致
+  mouse.sx += (mouse.x - mouse.sx) * Math.min(1, dt * 2.2);
+  mouse.sy += (mouse.y - mouse.sy) * Math.min(1, dt * 2.2);
+  const mshiftX = (mouse.sx * 2 - 1) * (W / MN) * 0.30;
+  const mshiftY = (1 - mouse.sy * 2) * (H / MN) * 0.30;
+
+  /* iso 等值线缓慢漂移：字的"雕出带"随之在笔画上爬 */
+  isoBase = 1.25 * Math.sin(t0 * 0.30) + 0.55 * Math.sin(t0 * 0.113 + 1.7);
+  isoKick *= Math.exp(-dt * 2.6);
+  iso = isoBase + isoKick;
+
+  buildField(ft, mshiftX, mshiftY);
+
+  const BAND = 2.15;
+  const hasLine = curIdx >= 0 && curPrep !== null;
+  for (let i = 0; i < N; i++) {
+    const bx = slx[i], by = sly[i];
+    const ux = (2 * bx - W) / MN - mshiftX;
+    const uy = (H - 2 * by) / MN - mshiftY;
+    const v = sampleArr(gv, ux, uy);
+    let c = 1 - Math.abs(v - iso) / BAND;
+    c = c < 0 ? 0 : c > 1 ? 1 : c;
+    c = c * c * (3 - 2 * c);
+    if (!hasLine) {
+      /* 还没到第一句（或拖了进度条）：粒子只是场里飘着的一团雾 */
+      cr[i] = c * 0.22;
+      px[i] = bx + Math.cos(sd[i]) * 9 * Math.sin(t0 * 0.5 + sd[i]);
+      py[i] = by + Math.sin(sd[i]) * 9 * Math.cos(t0 * 0.43 + sd[i]);
+      continue;
+    }
+    cr[i] = c;
+    /* 梯度：等值线两侧的粒子顺坡滑开，滑得越远越暗。
+       梯度在 uv 空间，转成屏幕方向要带 y 翻转。 */
+    let ddx = sampleArr(ggx, ux, uy), ddy = -sampleArr(ggy, ux, uy);
+    const ln = Math.sqrt(ddx * ddx + ddy * ddy) + 1e-5;
+    ddx /= ln; ddy /= ln;
+    const push = (1 - c) * (24 + 52 * (1 - c));
+    const wob = Math.sin(t0 * 0.9 + sd[i]) * 7;
+    px[i] = bx + ddx * push + Math.cos(sd[i] * 3.1) * wob;
+    py[i] = by + ddy * push + Math.sin(sd[i] * 3.1) * wob;
+  }
+
+  /* ---- 背景 ---- */
+  if (gl) {
+    gl.uniform2f(uRes, glc.width, glc.height);
+    gl.uniform1f(uTime, t0);
+    gl.uniform2f(uMouse, mouse.sx * glc.width, (1 - mouse.sy) * glc.height);
+    gl.uniform1f(uIso, iso);
+    gl.uniform1f(uPhase, phase);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    ctx.clearRect(0, 0, W, H);
+  } else {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#05060a';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  /* 按结晶度分 6 档**互斥**合批：每颗只画一次。
+     逐颗拼 rgba 字符串再赋 fillStyle 是 1-5 里把 003 压到 18fps 的元凶；
+     同一颗分档重复画也会又亮又糊还白烧两倍绘制量。 */
+  ctx.globalCompositeOperation = 'lighter';
+  for (let b = 0; b < 6; b++) {
+    const q0 = b / 6, q1 = (b + 1) / 6;
+    const hue = ft * 0.02 + phase + b * 0.045;
+    const rr = Math.round(255 * (0.5 + 0.5 * Math.cos(6.28318 * hue)));
+    const gg = Math.round(255 * (0.5 + 0.5 * Math.cos(6.28318 * (hue + 0.33))));
+    const bb = Math.round(255 * (0.5 + 0.5 * Math.cos(6.28318 * (hue + 0.67))));
+    const al = (0.06 + Math.pow(q0, 1.2) * 0.62).toFixed(3);
+    ctx.fillStyle = 'rgba(' + rr + ',' + gg + ',' + bb + ',' + al + ')';
+    const sz = 1.6 + q0 * 2.6;
+    const h2 = sz / 2;
+    for (let i = 0; i < N; i++) {
+      const c = cr[i];
+      if (c < q0) continue;
+      if (b < 5 && c >= q1) continue;
+      const x = px[i], y = py[i];
+      if (x < -14 || x > W + 14 || y < -14 || y > H + 14) continue;
+      ctx.fillRect(x - h2, y - h2, sz, sz);
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  requestAnimationFrame(frame);
+}
+resize();
+requestAnimationFrame(frame);
+
+/* ---- 与播放器通信 ---- */
+const ping = () => { try { parent.postMessage({ __c100: 1, type: 'activity' }, '*'); } catch (_) {} };
+addEventListener('pointermove', ping, { passive: true });
+addEventListener('pointerdown', ping, { passive: true });
+addEventListener('wheel', ping, { passive: true });
+addEventListener('keydown', ping);
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    try { parent.postMessage({ __c100: 1, type: 'key', payload: { key: 'Space' } }, '*'); } catch (_) {}
+  }
+}, true);
+
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.__c100 !== 1) return;
+  if (d.type === 'init') {
+    const p = d.payload || {};
+    lines = (p.lines || []).slice().sort((a, b) => a.t - b.t);
+    curIdx = -1; brewIdx = -1; lastT = -1;
+    /* p.accent 是从封面提取的主色 [r,g,b]：拿它的色相当等离子体的调色相位 */
+    if (p.accent && p.accent.length >= 3) {
+      const r = p.accent[0] / 255, g = p.accent[1] / 255, b = p.accent[2] / 255;
+      const mx = Math.max(r, g, b), mn2 = Math.min(r, g, b);
+      if (mx - mn2 > 0.05) {
+        const hue = Math.atan2(Math.sqrt(3) * (g - b), 2 * r - g - b) / 6.28318;
+        phase = (((hue % 1) + 1) % 1) * 0.62;
+      }
+    }
+    clearParticles();
+    isoKick = 0.9;
+    clockT = 0; clockAt = performance.now();
+    hint.textContent = lines.length ? '等待第一句…' : '这首没有歌词';
+    hint.style.opacity = lines.length ? '1' : '0.5';
+  } else if (d.type === 'tick') {
+    clockT = d.payload.time; clockAt = performance.now(); playing = !!d.payload.playing;
+  } else if (d.type === 'beat') {
+    /* 踩拍必须相干：整场一起挪 iso —— 全部粒子同时重新判定结晶度，
+       于是一道亮带从字的这头扫到那头，而不是逐颗乱踢把字形踢散。 */
+    isoKick += 0.30 + (d.payload.level || 0) * 0.55;
+    if (isoKick > 1.5) isoKick = 1.5;
+  }
+});
+try { parent.postMessage({ __c100: 1, type: 'ready' }, '*'); } catch (_) {}
+
+window.__stage = () => {
+  let lit = 0;
+  for (let i = 0; i < N; i++) if (cr[i] > 0.5) lit++;
+  return { lines: lines.length, curIdx, brewIdx, iso: +iso.toFixed(2), lit, gl: !!gl, t: +now().toFixed(2) };
+};
+</script>
+</body>
+</html>

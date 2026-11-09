@@ -1,0 +1,10 @@
+# 波点边车自己的东西，一律不进版本库
+
+node_modules/
+.port
+.log
+*.log
+
+# 登录态（token）和设备 ID
+.auth-session.json
+.auth-device.json

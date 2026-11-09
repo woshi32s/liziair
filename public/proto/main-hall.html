@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主大厅原型 · 独立可改</title>
+
+<!--
+  ============================================================================
+  主大厅原型 —— 给另一个会话独立修改用
+  ============================================================================
+
+  【这是什么】
+  这是播放器「主大厅」（顶栏 + 歌单页 + 底部播放条 + 登录弹窗）的**独立副本**。
+  单文件、自带假数据、不连服务端，双击就能在浏览器里打开改。
+
+  【怎么用】
+    1. 另一个会话直接改这个文件
+    2. 改完拿回来，我按下面的"契约"把改动并回 index.html / app.css / app.js
+
+  【改哪里】
+    · 结构：随便改 <body> 里的标记
+    · 样式：**只写文件最下面那个 <style id="hall-override"> 块**，别去动
+      ../app.css —— 那个文件是共用的，改它会影响播放页和舞台。
+      合并时我只需要把那一个 <style> 块搬过去。
+    · 交互：随便加，但合并时我只搬视觉层，逻辑仍用原版
+
+  【必须保留的 id（app.js 靠这些 id 找元素，改了就断）】
+    顶栏    brand, search, btn-stage-menu, stage-menu, stage-pick-wrap,
+            btn-lite, btn-user, user-avatar, user-ico, user-name
+    歌单页  view-browse, playlists, pl-cover, pl-name, pl-sub,
+            btn-play-all, tracks
+    播放条  player, btn-open-now, np-cover, np-name, np-artist,
+            btn-prev, btn-play, btn-next, btn-mode,
+            t-cur, bar, bar-buf, bar-fill, t-total, badge,
+            btn-mute, vol, vol-fill
+    登录框  modal, modal-close, qr-box, qr-status
+    （class 名可以随便改；只有 id 和下面这几条约定不能破）
+
+  【曲目行的结构】
+    由 app.js 动态生成（见 app.js 第 150~178 行）。要改结构的话，
+    请在这里也同步改，并告诉我新结构 —— 我照着改 app.js 的模板。
+    现有结构：
+      li.track[data-index]
+        span.track__idx      序号
+        img.track__cover     封面（无封面时是 span.track__cover--ph）
+        span.track__body
+          span.track__name   歌名
+          span.track__sub    歌手 · 专辑
+        span.track__flag     VIP 小签（可选）
+        span.track__dur      时长
+
+  【液态玻璃怎么用】
+    加 class  lg-surface lg-sheen
+    加属性    data-liquid-glass='{"autoScale":true,"scaleRef":56}'
+    scaleRef 填元素高度附近的值（56 是按钮，200 是面板），折射才对得上。
+    引擎在 ../assets/liquid-glass.js，改完调 LiquidGlass.refresh()。
+
+  【两条硬规矩】
+    1. **不要用 emoji** —— 图标一律用 <svg class="ico"><use href="#i-xxx"/></svg>，
+       图标库在本文件里（和原版一致）。
+    2. 字体只用已有的三套：Fraunces（标题）/ Geist（正文）/ Geist Mono（数字）。
+       别引入新字体。
+  ============================================================================
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- 原版样式照旧加载，这样一打开就是当前的样子，改的是"增量" -->
+<link rel="stylesheet" href="../assets/liquid-glass.css">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../app.css">
+
+<style>
+  /* 原型专用：把播放页 / 舞台这些不属于主大厅的部分藏掉 */
+  .view--now, .view--stage { display: none !important; }
+  /* 原型里没有 JS 驱动的状态，用这个类手动预览"已登录"的样子 */
+  body.demo-logged-in #user-name { color: var(--ink-1); }
+  body.demo-logged-in #user-ico { display: none; }
+</style>
+</head>
+<body>
+
+<!-- ============================ 背景层 ============================ -->
+<div class="backdrop" aria-hidden="true">
+  <span class="blob b1"></span>
+  <span class="blob b2"></span>
+  <span class="blob b3"></span>
+  <span class="grid"></span>
+</div>
+<div class="cover-bg" id="cover-bg" aria-hidden="true"></div>
+<div class="scrim" id="scrim" aria-hidden="true"></div>
+
+<!-- ============================ 图标库 ============================ -->
+<svg class="defs" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5.5v13M15 5.5v13"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M7 6v12" stroke-linecap="round"/><path d="M18 6.5v11L9.5 12z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M17 6v12" stroke-linecap="round"/><path d="M6 6.5v11L14.5 12z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-order" viewBox="0 0 24 24"><path d="M4 7h11l-2.5-2.5"/><path d="M20 17H9l2.5 2.5"/></symbol>
+    <symbol id="i-single" viewBox="0 0 24 24"><path d="M4 7h11l-2.5-2.5"/><path d="M20 17H9l2.5 2.5"/><path d="M12.6 13.4l1.4-1v5.2" stroke-width="1.7"/></symbol>
+    <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M3 6h3.5l9.5 12H20"/><path d="M17.5 15.5L20 18l-2.5 2.5"/><path d="M17.5 3.5L20 6l-2.5 2.5"/><path d="M3 18h3.5l2.4-3"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9.5h3L11 6v12l-4-3.5H4z" fill="currentColor" stroke="none"/><path d="M15 9.5a4 4 0 010 5M17.8 7a7.5 7.5 0 010 10"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5h3L11 6v12l-4-3.5H4z" fill="currentColor" stroke="none"/><path d="M15.5 10l4 4M19.5 10l-4 4"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0115 0"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5L5 13.5h6l-1 8 8-11h-6z"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4H4v5M15 20h5v-5M20 9V4h-5M4 15v5h5"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 18V5l10-2v13"/><circle cx="6.5" cy="18" r="2.6"/><circle cx="16.5" cy="16" r="2.6"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-6 3.5 13 3-9 2 2h5"/></symbol>
+    <symbol id="i-metronome" viewBox="0 0 24 24"><path d="M9 3h6l3 18H6z"/><path d="M12 8l3.5 7"/></symbol>
+  </defs>
+</svg>
+
+<!-- ============================ 顶栏 ============================ -->
+<header class="topbar" id="topbar">
+  <div class="shell topbar__inner">
+    <a class="brand" href="#" id="brand">
+      <span class="brand__mark" aria-hidden="true"></span>
+      <span class="brand__text">网易云音乐</span>
+    </a>
+
+    <div class="search lg-surface lg-sheen" data-liquid-glass='{"autoScale":true,"scaleRef":54,"border":0.14}'>
+      <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search" type="search" placeholder="搜索歌曲、歌手或专辑" autocomplete="off" aria-label="搜索">
+    </div>
+
+    <div class="topbar__actions">
+      <div class="stagepick" id="stage-pick-wrap">
+        <button class="btn btn--ghost lg-surface lg-sheen" id="btn-stage-menu"
+                data-liquid-glass='{"autoScale":true,"scaleRef":56}' aria-haspopup="true" aria-expanded="false">
+          <svg class="ico" aria-hidden="true"><use href="#i-expand"/></svg><span>形态</span>
+          <svg class="ico stagepick__caret" aria-hidden="true"><use href="#i-chevron"/></svg>
+        </button>
+        <div class="stagepick__menu lg-surface lg-sheen" id="stage-menu" hidden></div>
+      </div>
+
+      <button class="btn btn--ghost lg-surface lg-sheen" id="btn-lite" data-liquid-glass='{"autoScale":true,"scaleRef":56}' aria-pressed="false">
+        <svg class="ico" aria-hidden="true"><use href="#i-bolt"/></svg><span>折射</span>
+      </button>
+      <button class="btn btn--user lg-surface lg-sheen" id="btn-user" data-liquid-glass='{"autoScale":true,"scaleRef":56}'>
+        <img id="user-avatar" alt="" hidden>
+        <svg class="ico" id="user-ico" aria-hidden="true"><use href="#i-user"/></svg>
+        <span id="user-name">登录</span>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ============================ 主视图 ============================ -->
+<main class="view view--browse is-active" id="view-browse">
+  <div class="shell browse">
+
+    <aside class="panel panel--side lg-surface lg-sheen" data-liquid-glass='{"autoScale":true,"scaleRef":200,"border":0.09}'>
+      <h2 class="panel__label">我的歌单</h2>
+      <nav class="plist" id="playlists">
+        <p class="hint">登录后显示你的歌单</p>
+      </nav>
+    </aside>
+
+    <section class="browse__main">
+      <header class="head lg-surface lg-sheen" data-liquid-glass='{"autoScale":true,"scaleRef":150,"border":0.1}'>
+        <img id="pl-cover" class="head__cover" alt="" hidden>
+        <div class="head__text">
+          <h1 id="pl-name">卡力老虎</h1>
+          <p id="pl-sub" class="muted">未登录 · 共 50 首</p>
+        </div>
+        <button class="btn btn--primary lg-surface lg-sheen" id="btn-play-all" data-liquid-glass='{"autoScale":true,"scaleRef":56}'>
+          <svg class="ico" aria-hidden="true"><use href="#i-play"/></svg><span>播放全部</span>
+        </button>
+      </header>
+
+      <div class="panel panel--list lg-surface lg-sheen" data-liquid-glass='{"autoScale":true,"scaleRef":220,"border":0.07}'>
+        <ol class="tracks" id="tracks"></ol>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- ============================ 播放条 ============================ -->
+<footer class="player" id="player">
+  <div class="shell player__inner">
+
+    <div class="np">
+      <button class="np__art" id="btn-open-now" title="打开播放页">
+        <img id="np-cover" alt="" hidden>
+        <svg class="ico np__art-ph" aria-hidden="true"><use href="#i-note"/></svg>
+      </button>
+      <div class="np__text">
+        <div id="np-name" class="np__name">未播放</div>
+        <div id="np-artist" class="np__artist">—</div>
+      </div>
+    </div>
+
+    <div class="transport">
+      <div class="transport__row">
+        <button class="icbtn" id="btn-prev" aria-label="上一首"><svg class="ico"><use href="#i-prev"/></svg></button>
+        <button class="icbtn icbtn--play lg-surface lg-sheen" id="btn-play" data-liquid-glass='{"autoScale":true,"scaleRef":56}' aria-label="播放">
+          <svg class="ico"><use href="#i-play"/></svg>
+        </button>
+        <button class="icbtn" id="btn-next" aria-label="下一首"><svg class="ico"><use href="#i-next"/></svg></button>
+        <button class="icbtn" id="btn-mode" aria-label="播放模式" title="顺序播放"><svg class="ico"><use href="#i-order"/></svg></button>
+      </div>
+      <div class="timeline">
+        <span id="t-cur" class="time">0:00</span>
+        <div class="bar lg-surface" id="bar" data-liquid-glass='{"autoScale":true,"scaleRef":54,"border":0.42,"mapBlur":9}' role="slider" aria-label="播放进度" tabindex="0">
+          <div class="bar__buf" id="bar-buf"></div>
+          <div class="bar__fill" id="bar-fill"><span class="knob"></span></div>
+        </div>
+        <span id="t-total" class="time">0:00</span>
+      </div>
+    </div>
+
+    <div class="player__right">
+      <span class="badge" id="badge" hidden></span>
+      <button class="icbtn" id="btn-mute" aria-label="静音"><svg class="ico"><use href="#i-volume"/></svg></button>
+      <div class="bar bar--vol lg-surface" id="vol" data-liquid-glass='{"autoScale":true,"scaleRef":54,"border":0.42,"mapBlur":9}' role="slider" aria-label="音量" tabindex="0">
+        <div class="bar__fill" id="vol-fill"><span class="knob"></span></div>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- ============================ 登录弹窗 ============================ -->
+<div class="modal is-closed" id="modal">
+  <div class="modal__card lg-surface lg-sheen" data-liquid-glass='{"autoScale":true,"scaleRef":200,"border":0.1}'>
+    <button class="icbtn modal__close" id="modal-close" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+    <h2 class="modal__title">登录网易云音乐</h2>
+    <p class="modal__lead">用网易云音乐 App 扫码登录。登录态保存在本机 <code>.session.json</code>，重启服务仍在。</p>
+
+    <div class="qr">
+      <div class="qr__box" id="qr-box"><span class="qr__ph">正在获取二维码…</span></div>
+      <p class="qr__status" id="qr-status">请用网易云音乐 App 扫描二维码</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================================
+     以下是为了"看起来是活的"的假数据脚本。合并时**不要**搬过去。
+     ============================================================================ -->
+<script src="../assets/liquid-glass.js"></script>
+<script>
+"use strict";
+/* 假歌单：卡力老虎（真实存在的歌手，和 周乘羽 合作） */
+const MOCK = [
+  ['机会到了我们出', '卡力老虎 / 周乘羽', '机会到了我们出', 214, 8],
+  ['韦东奕', '李文 / 卡力老虎', '韦东奕', 187, 8],
+  ['高雅且隐晦', '卡力老虎 / 周乘羽', '高雅且隐晦', 243, 8],
+  ['黄人至上', '卡力老虎 / 周乘羽', '黄人至上', 198, 8],
+  ['哥哥的哥哥', '卡力老虎 / 周乘羽 / Taisheng Music', '哥哥的哥哥', 226, 8],
+  ['卡虎电台freestyle', 'GTaAsia / 卡力老虎', '卡虎电台', 301, 8],
+  ['Why Not', 'SABER徐天知 / 卡力老虎 / 周乘羽', 'Why Not', 259, 8],
+  ['跳跳男', '周乘羽 / 卡力老虎', '跳跳男', 176, 8],
+  ['布拉格广场', '周杰伦 / 蔡依林', '看我72变', 298, 1],   // fee=1 → 会显示 VIP 小签
+  ['屋顶', '周杰伦 / 温岚', '屋顶', 254, 8],
+];
+
+const fmt = (s) => `${(s / 60) | 0}:${String(s % 60).padStart(2, '0')}`;
+
+function renderTracks() {
+  const ol = document.getElementById('tracks');
+  ol.innerHTML = '';
+  MOCK.forEach(([name, artists, album, dur, fee], i) => {
+    const li = document.createElement('li');
+    li.className = 'track';
+    li.dataset.index = i;
+    const flag = fee === 1 || fee === 4 ? '<span class="track__flag">VIP</span>' : '';
+    li.innerHTML = `
+      <span class="track__idx">${i + 1}</span>
+      <span class="track__cover track__cover--ph"></span>
+      <span class="track__body">
+        <span class="track__name"></span>
+        <span class="track__sub"></span>
+      </span>
+      ${flag}
+      <span class="track__dur">${fmt(dur)}</span>`;
+    li.querySelector('.track__name').textContent = name;
+    li.querySelector('.track__sub').textContent = `${artists} · ${album}`;
+    li.addEventListener('click', () => selectTrack(i));
+    ol.appendChild(li);
+  });
+}
+
+let playing = false;
+let current = -1;
+
+function selectTrack(i) {
+  current = i;
+  const [name, artists, , dur, fee] = MOCK[i];
+  document.getElementById('np-name').textContent = name;
+  document.getElementById('np-artist').textContent = artists;
+  document.getElementById('t-total').textContent = fmt(dur);
+  document.getElementById('t-cur').textContent = '0:00';
+  document.getElementById('bar-fill').style.width = '0%';
+  document.querySelectorAll('.track').forEach((el, k) => el.classList.toggle('is-on', k === i));
+  // 演示用：VIP 曲目走"演示音轨"提示
+  const badge = document.getElementById('badge');
+  if (fee === 1) {
+    badge.hidden = false;
+    badge.textContent = 'VIP 专属 · 点此登录';
+    badge.classList.add('is-action');
+  } else {
+    badge.hidden = true;
+    badge.classList.remove('is-action');
+  }
+  setPlaying(true);
+}
+
+function setPlaying(v) {
+  playing = v;
+  document.querySelector('#btn-play use').setAttribute('href', v ? '#i-pause' : '#i-play');
+  document.getElementById('btn-play').setAttribute('aria-label', v ? '暂停' : '播放');
+}
+
+document.getElementById('btn-play').addEventListener('click', () => setPlaying(!playing));
+document.getElementById('btn-next').addEventListener('click', () => selectTrack(Math.min(MOCK.length - 1, current + 1)));
+document.getElementById('btn-prev').addEventListener('click', () => selectTrack(Math.max(0, current - 1)));
+document.getElementById('btn-play-all').addEventListener('click', () => selectTrack(0));
+
+/* 形态下拉（原型里只演示展开，不真的切形态） */
+const STAGE_NAMES = ['传统播放器', '粒子歌词', '星际歌词', '萤火虫歌词', '沙粒歌词', '粒子文字'];
+const menu = document.getElementById('stage-menu');
+const menuBtn = document.getElementById('btn-stage-menu');
+menu.innerHTML = STAGE_NAMES.map((n, i) =>
+  `<button data-id="${i}"${i === 0 ? ' class="is-on"' : ''}><b>${n}</b><i>形态 ${String(i).padStart(3, '0')}</i></button>`).join('');
+menuBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  menu.hidden = !menu.hidden;
+  menuBtn.setAttribute('aria-expanded', String(!menu.hidden));
+  if (!menu.hidden) requestAnimationFrame(() => LiquidGlass.refresh());
+});
+document.addEventListener('click', (e) => {
+  if (!menu.hidden && !e.target.closest('#stage-pick-wrap')) menu.hidden = true;
+});
+
+/* 搜索框：演示用，只做本地过滤 */
+document.getElementById('search').addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  document.querySelectorAll('.track').forEach((el, i) => {
+    el.hidden = q && !MOCK[i][0].includes(q) && !MOCK[i][1].includes(q);
+  });
+});
+
+/* 登录弹窗 */
+const modal = document.getElementById('modal');
+document.getElementById('btn-user').addEventListener('click', () => {
+  modal.classList.remove('is-closed');
+  requestAnimationFrame(() => LiquidGlass.refresh());
+});
+document.getElementById('modal-close').addEventListener('click', () => modal.classList.add('is-closed'));
+modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('is-closed'); });
+
+/* 进度条 / 音量：只做拖拽演示 */
+function dragBar(el, fill, onPct) {
+  const set = (clientX) => {
+    const r = el.getBoundingClientRect();
+    const pct = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+    fill.style.width = (pct * 100) + '%';
+    onPct && onPct(pct);
+  };
+  let down = false;
+  el.addEventListener('pointerdown', (e) => { down = true; el.setPointerCapture(e.pointerId); set(e.clientX); });
+  el.addEventListener('pointermove', (e) => { if (down) set(e.clientX); });
+  el.addEventListener('pointerup', () => { down = false; });
+}
+dragBar(document.getElementById('bar'), document.getElementById('bar-fill'),
+  (p) => { const d = MOCK[current < 0 ? 0 : current][3]; document.getElementById('t-cur').textContent = fmt(Math.round(d * p)); });
+dragBar(document.getElementById('vol'), document.getElementById('vol-fill'));
+
+/* 初始化 */
+renderTracks();
+document.getElementById('vol-fill').style.width = '72%';
+document.getElementById('bar-buf').style.width = '0%';
+requestAnimationFrame(() => LiquidGlass.refresh());
+</script>
+
+<!-- ============================================================================
+     ★★★ 另一个会话改这里 ★★★
+     所有新样式都写在这个块里。合并时我只需要把这一个 <style> 块搬过去。
+     用 ../tokens.css 里的变量（--sp-*, --r-*, --text-*, --ink-*, --accent-*），
+     不要写死颜色和间距，否则换主题会崩。
+     ============================================================================ -->
+<style id="hall-override">
+  /* 在这里写你的改动。示例（删掉即可）：
+
+  .head { border-radius: var(--r-xl); }
+  .track:hover { background: oklch(100% 0 0 / 0.7); }
+  .player__inner { gap: var(--sp-6); }
+
+  */
+</style>
+
+</body>
+</html>

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>余烬歌词</title>
+<style>
+  html,body{margin:0;height:100%;background:#050304;overflow:hidden}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);font:500 11px/1.5 ui-monospace,Consolas,monospace;
+        color:rgba(255,185,120,.30);letter-spacing:.08em;pointer-events:none;transition:opacity .6s}
+</style>
+</head>
+<body data-chrome="off">
+<canvas id="c"></canvas>
+<div id="hint">等待第一句…</div>
+<script>
+"use strict";
+/* ============================================================================
+   010 · 余烬歌词 —— 字是上升气流里的一道驻波
+   和 1-9 都不同：**没有"成形"和"消散"两个阶段**。
+   火星从底部源源不断升起，经过字形所在的横向带时被点亮、横向归位，
+   离开这条带就暗下去继续往上飘走。
+   所以字不是"被摆出来"的，而是**一批批火星路过时同时亮起来**形成的 ——
+   它一直在被重建，也一直在散，从来不是静止的。
+   ========================================================================== */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha: false });
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+resize();
+addEventListener('resize', resize);
+
+const N = 13000;
+const px = new Float32Array(N), py = new Float32Array(N);
+const vx = new Float32Array(N), vy = new Float32Array(N);
+const tx = new Float32Array(N), ty = new Float32Array(N);   // 目标（字形上的点）
+const lit = new Float32Array(N);                            // 被点亮的程度 0~1
+const seed = new Float32Array(N);
+const band = new Uint8Array(N);
+const dwell = new Float32Array(N);   // 驻留计时：>0 表示正在字上停着
+const dwellMax = new Float32Array(N);
+
+function respawn(i, fromBottom) {
+  px[i] = Math.random() * W;
+  py[i] = fromBottom ? H + 10 + Math.random() * 120 : Math.random() * H;
+  vx[i] = (Math.random() - 0.5) * 10;
+  vy[i] = -(28 + Math.random() * 46);
+  lit[i] = 0;
+  dwell[i] = 0;
+  dwellMax[i] = 5.0 + Math.random() * 7.0;   // 在字上停 5~12 秒
+  band[i] = (Math.random() * 4) | 0;
+}
+for (let i = 0; i < N; i++) { respawn(i, false); seed[i] = Math.random() * 6.283; }
+
+const off = document.createElement('canvas');
+const octx = off.getContext('2d', { willReadFrequently: true });
+function glyphPoints(text) {
+  const F = 112;
+  const maxW = Math.min(W * 0.7, 1200);
+  octx.font = `800 ${F}px "PingFang SC","Microsoft YaHei",system-ui,sans-serif`;
+  let w = Math.ceil(octx.measureText(text).width) + 8;
+  const fs = w > maxW ? F * (maxW / w) : F;
+  octx.font = `800 ${fs}px "PingFang SC","Microsoft YaHei",system-ui,sans-serif`;
+  w = Math.ceil(octx.measureText(text).width) + 8;
+  const h = Math.ceil(fs * 1.35);
+  off.width = w; off.height = h;
+  octx.clearRect(0, 0, w, h);
+  octx.font = `800 ${fs}px "PingFang SC","Microsoft YaHei",system-ui,sans-serif`;
+  octx.textAlign = 'center'; octx.textBaseline = 'middle';
+  octx.fillStyle = '#fff';
+  octx.fillText(text, w / 2, h / 2);
+  const d = octx.getImageData(0, 0, w, h).data;
+  const pts = [];
+  const step = 4;
+  for (let y = 0; y < h; y += step) {
+    for (let x = 0; x < w; x += step) {
+      if (d[(y * w + x) * 4 + 3] > 128) pts.push(x - w / 2, y - h / 2);
+    }
+  }
+  return { pts, w, h };
+}
+
+const anchors = [];
+for (let i = 0; i < 96; i++) {
+  const g = i * 2.399963;
+  const rr = 0.30 + 0.70 * (((i * 37) % 97) / 97);
+  anchors.push({ nx: Math.cos(g) * rr, ny: Math.sin(g) * rr * 0.62 });
+}
+function placeAnchor(a, hw, hh, gcx, gcy) {
+  const M = 60;
+  const x0 = M + hw - gcx, x1 = W - M - hw - gcx;
+  const y0 = M + hh - gcy, y1 = H - M - hh - gcy;
+  return {
+    x: x1 > x0 ? x0 + (a.nx * 0.5 + 0.5) * (x1 - x0) : W / 2 - gcx,
+    y: y1 > y0 ? y0 + (a.ny * 0.5 + 0.5) * (y1 - y0) : H / 2 - gcy,
+  };
+}
+
+let lines = [];
+let accent = [255, 185, 120];
+let glyphH = 90;          // 字形带的半高（用来判定"是否在带里"）
+
+/** 把当前句铺成目标点。每个火星认领一个点，按 index 映射 ——
+ *  这样换句时是"整批同时改道"，不是随机重排，字不会乱。 */
+function retarget(idx) {
+  if (idx < 0 || !lines[idx]) return;
+  const { pts, h } = glyphPoints(lines[idx].text);
+  const pc = pts.length / 2;
+  if (!pc) return;
+  glyphH = h * 0.5;
+  let bx0 = 1e9, bx1 = -1e9, by0 = 1e9, by1 = -1e9;
+  for (let k = 0; k < pts.length; k += 2) {
+    if (pts[k] < bx0) bx0 = pts[k]; if (pts[k] > bx1) bx1 = pts[k];
+    if (pts[k + 1] < by0) by0 = pts[k + 1]; if (pts[k + 1] > by1) by1 = pts[k + 1];
+  }
+  const A = placeAnchor(anchors[idx % anchors.length], (bx1 - bx0) / 2, (by1 - by0) / 2, (bx0 + bx1) / 2, (by0 + by1) / 2);
+  for (let i = 0; i < N; i++) {
+    // 等间隔取样铺满整个字（按扫描顺序取只会用到上面一部分行，字会被压扁）
+    const p = (Math.floor(i * pc / N) % pc) * 2;
+    tx[i] = A.x + pts[p];
+    ty[i] = A.y + pts[p + 1];
+  }
+}
+
+let clockT = 0, clockAt = 0, playing = false;
+const now = () => clockT + (playing ? (performance.now() - clockAt) / 1000 : 0);
+
+/* ============ 节奏：显示与酝酿分离 / 单调不回退 / 提前量自适应 ============ */
+let curIdx = -1, brewIdx = -1, lastT = -1;
+const LEAD = 1.2;
+function timing(T) {
+  if (!lines.length) return;
+  if (T < lastT - 0.6) { curIdx = -1; brewIdx = -1; }
+  lastT = T;
+  let ci = curIdx;
+  while (ci + 1 < lines.length && T >= lines[ci + 1].t) ci++;
+  if (ci !== curIdx) {
+    curIdx = ci;
+    brewIdx = -1;
+    if (ci >= 0) retarget(ci);
+    hint.style.opacity = lines.length ? (ci >= 0 ? '0' : '1') : '0.5';
+  }
+  const nx = curIdx + 1;
+  if (nx < lines.length && brewIdx !== nx) {
+    const gap = lines[nx].t - (curIdx >= 0 ? lines[curIdx].t : lines[nx].t - 4);
+    const lead = Math.min(LEAD, Math.max(0.45, gap * 0.5));
+    if (T >= lines[nx].t - lead) brewIdx = nx;   // 只做标记；这个形态靠"新生火星"自然过渡
+  }
+}
+
+const hint = document.getElementById('hint');
+let last = performance.now();
+let t0 = 0;
+
+function frame(nowMs) {
+  const dt = Math.min(0.05, (nowMs - last) / 1000);
+  last = nowMs; t0 += dt;
+  const T = now();
+
+  timing(T);
+
+  /* ---- 火星 ---- */
+  for (let i = 0; i < N; i++) {
+    /* 湍流：低频旋度场，让上升轨迹翻卷而不是直线。
+       用 sin/cos 拼一个便宜的近似，比真噪声快得多。 */
+    const turb = Math.sin(py[i] * 0.006 + t0 * 0.9 + seed[i]) * Math.cos(px[i] * 0.005 - t0 * 0.6) * 34;
+
+    const dy = py[i] - ty[i];
+    const inBand = Math.abs(dy) < glyphH;
+    if (inBand && curIdx >= 0) {
+      /* 在字形带里：横向归位 + 点亮 + **驻留**。
+         驻留是关键：不驻留的话每颗火星只路过零点几秒，
+         同时在字上的数量太少（实测只有 582/4200），字根本形不成。
+         现在每颗到了就停 2~5.6 秒，字上同时有几千颗。 */
+      const dx = tx[i] - px[i];
+      vx[i] += (dx * 7.5 - vx[i]) * Math.min(1, dt * 9);
+      if (Math.abs(dx) < 4 && Math.abs(dy) < 9) {
+        dwell[i] += dt;
+        vy[i] += (0 - vy[i]) * Math.min(1, dt * 6);          // 停住
+        px[i] += (tx[i] - px[i]) * Math.min(1, dt * 14);     // 精确落到点上
+        py[i] += (ty[i] - py[i]) * Math.min(1, dt * 6);
+        lit[i] = Math.min(1, lit[i] + dt * 6);
+      } else {
+        vy[i] += (-16 - vy[i]) * Math.min(1, dt * 4);
+        lit[i] = Math.min(1, lit[i] + dt * 3.6);
+      }
+      if (dwell[i] > dwellMax[i]) { vy[i] = -180; }          // 停够了就窜上去
+    } else {
+      // 离开带子：暗下去，加速上升
+      vx[i] += (turb - vx[i]) * Math.min(1, dt * 1.1);
+      vy[i] += (-58 - vy[i]) * Math.min(1, dt * 1.4);
+      lit[i] = Math.max(0, lit[i] - dt * 2.2);
+    }
+    px[i] += vx[i] * dt; py[i] += vy[i] * dt;
+    if (px[i] < -20) px[i] = W + 20; if (px[i] > W + 20) px[i] = -20;
+    if (py[i] < -30) respawn(i, true);
+  }
+
+  /* ---- 绘制：按点亮程度分 4 档合批。
+         逐颗拼 rgba 字符串 + 赋 fillStyle 是 4200 次字符串构造 + 颜色解析，
+         1-5 里这一条把 003 压到过 18fps。 ---- */
+  ctx.fillStyle = 'rgba(5,3,4,0.26)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'lighter';
+  const [ar, ag, ab] = accent;
+  /* 4 档**互斥**地画：每颗粒子只属于一档。
+     原来 1-3 档画的是同一批（lit>=0.25），同一颗粒子被画三遍 ——
+     又亮又糊，而且白烧两倍绘制量。 */
+  for (let b = 0; b < 4; b++) {
+    const q = b / 3;
+    ctx.fillStyle = `rgba(${Math.min(255, ar)},${Math.min(255, ag - 40 + q * 60)},${Math.min(255, ab - 70 + q * 90)},${(0.22 + q * 0.72).toFixed(2)})`;
+    const sz = 1.6 + q * 2.0;
+    const h2 = sz / 2;
+    for (let i = 0; i < N; i++) {
+      if (band[i] !== b) continue;
+      const k = lit[i];
+      const lv = k < 0.25 ? 0 : k < 0.55 ? 1 : k < 0.82 ? 2 : 3;
+      if (lv !== b) continue;
+      const x = px[i], y = py[i];
+      if (x < -10 || x > W + 10 || y < -10 || y > H + 10) continue;
+      ctx.fillRect(x - h2, y - h2, sz, sz);
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ---- 与播放器通信 ---- */
+const ping = () => { try { parent.postMessage({ __c100: 1, type: 'activity' }, '*'); } catch (_) {} };
+addEventListener('pointermove', ping, { passive: true });
+addEventListener('pointerdown', ping, { passive: true });
+addEventListener('wheel', ping, { passive: true });
+addEventListener('keydown', ping);
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    try { parent.postMessage({ __c100: 1, type: 'key', payload: { key: 'Space' } }, '*'); } catch (_) {}
+  }
+}, true);
+
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.__c100 !== 1) return;
+  if (d.type === 'init') {
+    const p = d.payload || {};
+    lines = (p.lines || []).slice().sort((a, b) => a.t - b.t);
+    curIdx = -1; brewIdx = -1; lastT = -1;
+    if (p.accent) {
+      // 余烬是暖橙，主色只轻微染色
+      const [r, g, b] = p.accent;
+      accent = [Math.round((r + 255 * 2) / 3), Math.round((g + 185 * 2) / 3), Math.round((b + 120 * 2) / 3)];
+    }
+    clockT = 0; clockAt = performance.now();
+    hint.textContent = lines.length ? '等待第一句…' : '这首没有歌词';
+    hint.style.opacity = lines.length ? '1' : '0.5';
+  } else if (d.type === 'tick') {
+    clockT = d.payload.time; clockAt = performance.now(); playing = !!d.payload.playing;
+  } else if (d.type === 'beat') {
+    /* 踩拍：整片火星被托一下（相干的向上加速）。
+       1-5 的教训：逐颗随机方向踢会让字形散掉。 */
+    const lv = 0.5 + (d.payload.level || 0);
+    for (let i = 0; i < N; i++) vy[i] -= 34 * lv;
+  }
+});
+try { parent.postMessage({ __c100: 1, type: 'ready' }, '*'); } catch (_) {}
+window.__stage = () => {
+  let l = 0;
+  for (let i = 0; i < N; i++) if (lit[i] > 0.5) l++;
+  return { lines: lines.length, curIdx, brewIdx, lit: l, glyphH: Math.round(glyphH), t: +now().toFixed(2) };
+};
+</script>
+</body>
+</html>

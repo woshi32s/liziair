@@ -1,0 +1,186 @@
+/* ==================================================================
+   大厅「每日推荐」· 大环展开（CircularCarousel 原生版）
+   由 circular-carousel.js 自己注入，不依赖 app.css / app.js。
+   结构：
+     .hcc                    全屏固定覆盖层（因为跑马带 overflow:hidden，
+                             环必须脱离它才不会被裁掉）
+       .hcc__view            透视舞台，left/top 对准跑马带中心
+         .hcc__camera        translateZ(-R) + rotateX(tilt/pitch)
+           .hcc__ring        rotateY(angle)
+             .hcc__slot      rotateY(i*step) translateZ(R)
+               .marq__card   克隆出来的真卡片（封面/歌名都是原来的）
+               .hcc__shade   远端压暗（ReactBits 的 depthFade）
+   z-index 240：低于开场引导(300)，高于顶栏(60)和站内浮层(200)。
+
+   槽位虚拟化（2026-11）：DOM 里始终只有 n 个 .hcc__slot / 克隆卡，
+   槽内的卡会在转到环背面（肉眼不可见）时换成歌单里新滚入的那张，
+   所以 200 首的歌单也能一路拖到最后，而不必为每首歌建一个槽。
+   ================================================================== */
+.hcc {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  overflow: hidden;
+  color: inherit;
+  /* 不要 backdrop-filter：环转动时整屏每帧都要重算一次模糊，直接拖到 1fps。
+     去掉后靠这层径向渐变把暗底补回来。 */
+  background:
+    radial-gradient(118% 86% at 50% 46%,
+      rgba(6, 8, 14, .42) 0%,
+      rgba(6, 8, 14, .72) 58%,
+      rgba(4, 5, 9, .88) 100%);
+  opacity: 0;
+  transition: opacity 260ms ease;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: grab;
+  outline: none;
+}
+.hcc.is-open { opacity: 1; }
+.hcc.is-drag { cursor: grabbing; }
+/* 收回时 JS 逐帧写 opacity，关掉 CSS 过渡避免两层缓动叠在一起。 */
+.hcc.is-closing { pointer-events: none; transition: none; }
+
+/* 透视舞台：宽高 0，左/上对准跑马带中心，perspective-origin 就是那一点。
+   透视值由 JS 按半径写入（约 3.2R），保证近大远小但不夸张到糊。 */
+.hcc__view {
+  position: absolute;
+  left: var(--hcc-cx, 50vw);
+  top: var(--hcc-cy, 50vh);
+  width: 0;
+  height: 0;
+  perspective: var(--hcc-persp, 2400px);
+  perspective-origin: 50% 50%;
+}
+
+.hcc__camera,
+.hcc__ring,
+.hcc__slot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+.hcc__camera { will-change: transform; }
+.hcc__ring { will-change: transform; }
+/* slot 的 will-change 由 JS 只给当前朝向可见（facing > .06）的槽位挂，
+   避免 25 个槽位常驻 25 个合成层。 */
+
+/* 卡片本体：克隆来的 .marq__card，只改尺寸和定位。
+   .marq__card 在 app.css 里带 margin-right，这里必须清掉。 */
+.hcc__card {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--hcc-card-w, 168px);
+  height: var(--hcc-card-h, 208px);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  /* 以槽位原点为中心；translateZ(0) 让卡面明确成为 3D 平面，
+     交给 .hcc__slot 的 preserve-3d 按深度排序（不用 z-index）。
+     这里不做 backface-visibility:hidden：cylinder 原版让背面卡继续可见，
+     只靠 .hcc__shade 压暗，环才是完整一圈。 */
+  transform: translate(-50%, -50%) translateZ(0);
+  -webkit-tap-highlight-color: transparent;
+}
+.hcc__card .marq__art {
+  border-radius: 9px;
+  /* 环里同时有二十多张卡，3D 转动时大半径阴影会反复触发重绘；
+     换成更小 blur / 更紧的投影，正面卡仍有落地感。跑马带里的阴影不动。 */
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, currentColor 18%, transparent),
+    0 10px 22px -16px rgba(0, 0, 0, .7);
+  transition: transform 220ms var(--ease-out, cubic-bezier(.2, .8, .2, 1)),
+              box-shadow 220ms var(--ease-out, cubic-bezier(.2, .8, .2, 1));
+}
+.hcc__card:hover .marq__art {
+  transform: translateY(-4px) scale(1.012);
+}
+/* 加载失败 / 原卡本来就没有封面：给一个明确的占位，不留空白块。
+   class 由 circular-carousel.js 的 prepareCloneImages() 挂在克隆体上。 */
+.hcc__card .marq__art.hcc__art--empty {
+  background:
+    radial-gradient(82% 82% at 50% 36%,
+      color-mix(in oklch, currentColor 14%, transparent),
+      transparent 72%),
+    color-mix(in oklch, currentColor 7%, transparent);
+}
+.hcc__card .marq__art.hcc__art--empty::after {
+  content: '无封面';
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  letter-spacing: .12em;
+  opacity: .6;
+  pointer-events: none;
+}
+.hcc__card .marq__art img.hcc__img--fail { display: none; }
+.hcc__card b { font-size: 14px; }
+.hcc__card em { font-size: 11.5px; }
+.hcc__card b,
+.hcc__card em { text-shadow: 0 1px 8px rgba(0, 0, 0, .55); }
+
+/* 远端压暗：JS 逐帧写 opacity；背面卡由 JS 直接 visibility:hidden。 */
+.hcc__shade {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--hcc-card-w, 168px);
+  height: var(--hcc-card-h, 208px);
+  border-radius: 10px;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%) translateZ(0);
+}
+
+.hcc__hint {
+  position: absolute;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  color: rgba(255, 255, 255, .76);   /* 覆盖层是暗底，提示文字固定用浅色 */
+  text-shadow: 0 1px 8px rgba(0, 0, 0, .5);
+  pointer-events: none;
+}
+
+/* 原跑马带：展开时暂停并淡出。JS 通过给 app.js 派发 pointerenter/leave
+   让它真正停住（位置不变），收回时再恢复自动走。 */
+#hall-marq,
+.hall-marq {
+  transition: opacity 260ms ease, filter 260ms ease, visibility 0s;
+}
+#hall-marq.is-hcc-faded,
+.hall-marq.is-hcc-faded {
+  opacity: 0;
+  filter: blur(6px);
+  /* 淡出结束后彻底从合成里摘掉：opacity:0 的整条跑马带仍可能带着
+     6px 模糊参与合成，环一转就成了大头。 */
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 260ms ease, filter 260ms ease, visibility 0s 260ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hcc,
+  #hall-marq,
+  .hall-marq {
+    transition-duration: 1ms;
+  }
+  .hcc__card:hover .marq__art { transform: none; }
+}

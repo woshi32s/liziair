@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0;background:transparent}
+  #wrap{width:512px;height:512px;position:relative;overflow:hidden}
+  /* 深色底 + 品牌红渐变 + 白色音符（Remix music-2-fill 的形状手绘） */
+  .bg{position:absolute;inset:0;border-radius:96px;
+      background:
+        radial-gradient(120% 90% at 20% 8%, oklch(72% 0.19 12 / 0.95), oklch(52% 0.21 12 / 0.9) 45%, oklch(30% 0.12 300 / 0.95) 100%);
+      box-shadow: inset 0 0 0 8px oklch(100% 0 0 / 0.14);}
+  .disc{position:absolute;inset:64px;border-radius:50%;
+      background:
+        radial-gradient(closest-side, oklch(28% 0.02 264) 0 30%, oklch(22% 0.015 264) 30% 96%, oklch(60% 0.02 264 / .9) 96% 100%);
+      box-shadow: 0 10px 40px oklch(0% 0 0/.45), inset 0 0 0 2px oklch(100% 0 0/.12);}
+  .disc::after{content:'';position:absolute;inset:42%;border-radius:50%;background:oklch(96% 0.008 264);
+      box-shadow: inset 0 0 0 6px oklch(62% 0.22 12);}
+  svg{position:absolute;left:96px;top:96px;width:320px;height:320px;color:oklch(98% 0.005 264);
+      filter: drop-shadow(0 6px 18px oklch(0% 0 0/.45));}
+</style></head>
+<body>
+<div id="wrap">
+  <div class="bg"></div>
+  <div class="disc"></div>
+  <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M20 3V17C20 19.2091 18.2091 21 16 21C13.7909 21 12 19.2091 12 17C12 14.7909 13.7909 13 16 13C16.7286 13 17.4117 13.1948 18 13.5351V5H9V17C9 19.2091 7.20914 21 5 21C2.79086 21 1 19.2091 1 17C1 14.7909 2.79086 13 5 13C5.72857 13 6.41165 13.1948 7 13.5351V3H20Z"/></svg>
+</div>
+</body></html>

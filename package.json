@@ -1,0 +1,84 @@
+{
+  "name": "lyric-glass-player",
+  "productName": "LIZI",
+  "version": "1.0.0",
+  "description": "网易云音乐 · 液态玻璃 —— 60 种歌词可视化形态的演出器",
+  "author": "86186",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/woshi32s/liziair.git"
+  },
+  "main": "desktop/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --x64 --publish never",
+    "release": "node release.mjs"
+  },
+  "build": {
+    "appId": "app.lizi.player",
+    "productName": "LIZI",
+    "asar": false,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "woshi32s",
+        "repo": "liziair",
+        "releaseType": "release",
+        "channel": "latest"
+      }
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "desktop/**",
+      "public/**",
+      "!public/**/*.bak*",
+      "server.mjs",
+      "package.json",
+      "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "services",
+        "to": "app/services",
+        "filter": [
+          "**/*",
+          "!**/.log",
+          "!**/.log.1",
+          "!**/.port",
+          "!**/.cache/**",
+          "!**/node_modules/.bin/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "LIZI"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

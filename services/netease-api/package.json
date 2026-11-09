@@ -1,0 +1,9 @@
+{
+  "name": "lizi-netease-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LIZI 的网易云音乐边车（@neteasecloudmusicapienhanced/api，仅本机回环）",
+  "scripts": { "start": "node start.mjs" },
+  "dependencies": { "@neteasecloudmusicapienhanced/api": "4.41.1" }
+}

@@ -1,0 +1,1055 @@
+/* ==========================================================================
+   player-bar-next —— 「光河」播放状态栏
+   --------------------------------------------------------------------------
+   这一层完全接管底部播放条：旧 footer.player 由 body.pbn-on 隐藏，但 DOM 和
+   app.js 里的事件一个都没删。样式全部以 #pbn 为根，不碰全局标签选择器。
+
+   形态：
+     常态固定 92px 细带；不再随悬停 / 键盘聚焦 / 展开长高，也不再弹提示。
+     底部贯穿整条的光河（WebGL Aurora），上压一层蒙版与整条渐变进度带。
+     右侧整组控制（上一首 / 下一首 / 音量弧带 / 模式 / 展开）已按需求隐藏。
+     唱片卡仍由「明确上拖」触发，从右上方浮出，带 SpotlightCard 光斑与 StarBorder 星轨。
+   ========================================================================== */
+
+body.pbn-on {
+  --pbn-h: 92px;
+  /* 视图都用 bottom: var(--player-h) 给底部让位；覆盖成新栏高度即可，
+     不另加 body padding，避免影响 .view 的绝对定位体系。 */
+  --player-h: calc(var(--pbn-h) + env(safe-area-inset-bottom, 0px));
+}
+body.pbn-on #player { display: none !important; }
+
+/* 主页面播放条关掉时（设置页「主页面播放条」= 关，默认）：
+   新栏和旧 footer 同时藏 —— 只藏 #pbn 的话旧 footer 会露出来；
+   --player-h 归零，所有 .view 的 bottom 自动铺到底。
+   这份样式在本文件里再写一遍：本文件是运行时才注入的，比 app.css 晚，
+   万一 pbn-on / pbn-off 同时留在 body 上，也以这里为准。 */
+body.pbn-off {
+  --player-h: 0px;
+}
+body.pbn-off #pbn,
+body.pbn-off #player { display: none !important; }
+
+#pbn {
+  --pbn-h-cur: var(--pbn-h);
+  --pbn-c1: rgb(104, 214, 255);
+  --pbn-c2: rgb(153, 126, 255);
+  --pbn-c3: rgb(255, 132, 190);
+  --pbn-c4: rgb(255, 205, 128);
+  --pbn-c5: rgb(132, 255, 210);
+  --pbn-ink: oklch(97% 0.006 250);
+  --pbn-muted: oklch(78% 0.012 255);
+  --pbn-faint: oklch(72% 0.01 255 / 0.56);
+  --pbn-ease: cubic-bezier(.2, .82, .2, 1);
+  --pbn-p: 0;
+  --pbn-vol: 1;
+  --pbn-head-x: 0px;
+
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 70;
+  height: calc(var(--pbn-h-cur) + env(safe-area-inset-bottom, 0px));
+  color: var(--pbn-ink);
+  background:
+    radial-gradient(120% 180% at 18% 118%, color-mix(in srgb, var(--pbn-c2) 18%, transparent), transparent 62%),
+    linear-gradient(180deg, #0d1017 0%, #080a0f 76%, #06080c 100%);
+  border-top: 1px solid rgb(255 255 255 / 0.10);
+  box-shadow: 0 -20px 54px rgb(4 6 12 / 0.28);
+  isolation: isolate;
+  transition: height .38s var(--pbn-ease);
+  font-family: var(--font-body, "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: none;
+}
+/* 栏高固定为 92px：去掉「悬停 / 键盘聚焦 / 展开」时的弹起长高。
+   注意 #pbn[data-expanded="true"] 仍保留给唱片卡等其它规则使用，
+   这里只是不再据此改变栏高（唱片卡由明确上拖触发，本身浮在栏上方）。 */
+
+#pbn.is-scrubbing { cursor: ew-resize; }
+#pbn[hidden] { display: none !important; }
+
+/* 播放页 / 形态页：不抢位置，彻底收起（旧栏本来也在这两个视图隐藏） */
+body.is-now #pbn,
+body.is-stage #pbn { display: none !important; }
+
+/* 设置是整页工具页，不算主视图：栏收起，也不给 .view--settings 留 92px 空白。 */
+body.pbn-on[data-view="settings"] { --player-h: 0px; }
+body.pbn-on[data-view="settings"] #pbn { display: none !important; }
+
+#pbn *,
+#pbn *::before,
+#pbn *::after { box-sizing: border-box; }
+
+#pbn button {
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+#pbn button:focus-visible,
+#pbn [tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--pbn-c1) 78%, white);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
+/* ---------- 画布层 -------------------------------------------------------- */
+.pbn__aurora {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+}
+.pbn__aurora { z-index: 0; }
+
+.pbn__veil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgb(9 11 17 / 0.52) 0%, rgb(9 11 17 / 0.02) 46%, rgb(9 11 17 / 0.42) 100%),
+    radial-gradient(90% 130% at 50% 120%, transparent 35%, rgb(4 6 10 / 0.34) 100%);
+}
+
+/* 蒙版：盖在光河与 veil 之上、内容之下（z 2），把底层光河整体压暗一档，
+   让后面的渐变进度带和文字有稳定的暗底。 */
+.pbn__mask {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgb(7 9 14 / 0.40) 0%, rgb(7 9 14 / 0.58) 100%);
+}
+
+/* 渐变进度带：复刻主播放器 dock__paint 的 90° 色带，整条高度铺满。
+   与蒙版同为 z 2，但 DOM 在其之后（后绘制）→ 色带压在蒙版上。
+   --bar-a / --bar-b 由 app.js 挂在 :root，直接继承；缺省时用同样的紫作回退。 */
+.pbn__paint {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  /* 暂时关掉整条进度带，先看没有它的样子；代码和拖拽 seek 逻辑全部保留，
+     要恢复删掉这一行 display 即可。 */
+  display: none;
+  opacity: .85; /* 整条压淡一档，别盖过标题和控制；需要更亮改这里 */
+  background: linear-gradient(90deg,
+    color-mix(in oklab, var(--bar-a, oklch(72% 0.14 275)) 42%, white) 0%,
+    color-mix(in oklab, var(--bar-a, oklch(72% 0.14 275)) 80%, white) 22%,
+    var(--bar-b, oklch(56% 0.16 275)) 72%,
+    color-mix(in oklab, var(--bar-b, oklch(56% 0.16 275)) 86%, white) 100%);
+  clip-path: inset(0 100% 0 0);
+  will-change: clip-path;
+}
+/* 与 dock__paint::after 同一条顶部高光，给色带一点厚度。 */
+.pbn__paint::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: rgb(255 255 255 / 0.45);
+}
+
+/* WebGL2 不可用时的 CSS 光河（仍是真实渐变动效，不是截图） */
+#pbn.pbn--no-webgl::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(48% 160% at 16% 112%, color-mix(in srgb, var(--pbn-c1) 55%, transparent), transparent 72%),
+    radial-gradient(44% 150% at 52% 118%, color-mix(in srgb, var(--pbn-c2) 58%, transparent), transparent 74%),
+    radial-gradient(38% 140% at 84% 112%, color-mix(in srgb, var(--pbn-c3) 52%, transparent), transparent 76%);
+  opacity: .58;
+  filter: blur(14px) saturate(1.15);
+  animation: pbn-css-flow 13s ease-in-out infinite alternate;
+}
+@keyframes pbn-css-flow {
+  from { transform: translate3d(-1.5%, 1%, 0) scaleX(1.04); opacity: .46; }
+  to   { transform: translate3d(1.5%, -1%, 0) scaleX(1.12); opacity: .68; }
+}
+
+/* ---------- 主布局 -------------------------------------------------------- */
+.pbn__inner {
+  position: relative;
+  z-index: 3;
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(190px, .85fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 0 22px calc(20px + env(safe-area-inset-bottom, 0px));
+}
+
+.pbn__now {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.pbn__art {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  border-radius: 14px;
+  overflow: visible;
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.13), rgb(255 255 255 / 0.04));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.38), inset 0 0 0 1px rgb(255 255 255 / 0.10);
+  transition: transform .32s var(--pbn-ease), width .32s var(--pbn-ease), height .32s var(--pbn-ease);
+}
+#pbn:hover .pbn__art,
+#pbn:focus-within .pbn__art,
+#pbn[data-expanded="true"] .pbn__art { width: 54px; height: 54px; transform: translateY(-1px); }
+.pbn__art:hover { transform: scale(1.05) !important; }
+.pbn__art-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+  z-index: 1;
+}
+.pbn__art-img[hidden] { display: none !important; }
+.pbn__art-ph {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 18px !important; height: 18px !important;
+  transform: translate(-50%, -50%);
+  color: rgb(255 255 255 / 0.58);
+  z-index: 1;
+}
+.pbn__art-img:not([hidden]) ~ .pbn__art-ph { display: none; }
+.pbn__art-disc {
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background:
+    repeating-radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.06) 0 1px, transparent 1px 5px),
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.16), rgb(255 255 255 / 0.02) 64%);
+  z-index: 0;
+}
+.pbn__art-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: 16px;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  background: conic-gradient(from 0deg,
+    transparent 0 52%,
+    color-mix(in srgb, var(--pbn-c1) 78%, white) 72%,
+    color-mix(in srgb, var(--pbn-c3) 70%, white) 86%,
+    transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  padding: 1.5px;
+  transition: opacity .3s var(--pbn-ease);
+}
+#pbn[data-playing="true"] .pbn__art-ring { opacity: 1; animation: pbn-spin 7.5s linear infinite; }
+@keyframes pbn-spin { to { transform: rotate(360deg); } }
+
+.pbn__text { min-width: 0; display: grid; gap: 2px; }
+.pbn__title {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -.01em;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--pbn-ink);
+}
+.pbn__sub {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--pbn-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pbn__badge {
+  flex: none;
+  margin-left: 2px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  letter-spacing: .04em;
+  color: color-mix(in srgb, var(--pbn-c4) 78%, white);
+  background: color-mix(in srgb, var(--pbn-c4) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--pbn-c4) 24%, transparent);
+  white-space: nowrap;
+}
+.pbn__badge[hidden] { display: none !important; }
+
+/* ---------- 中央提示（时间 / 状态读数已移除） ---------------------------- */
+.pbn__center {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  transform: translateY(1px);
+}
+.pbn__hint {
+  /* 按需求彻底隐藏：不再有悬停 / 聚焦时浮出的操作提示 */
+  display: none !important;
+  font-size: 10px;
+  letter-spacing: .02em;
+  color: var(--pbn-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity .3s var(--pbn-ease), transform .3s var(--pbn-ease);
+}
+
+/* ---------- 右侧控制 ------------------------------------------------------ */
+.pbn__tail {
+  /* 右侧整组控制（上一首 / 下一首 / 音量弧带 / 模式 / 展开）整体隐藏。
+     元素与 JS 事件都保留在 DOM 里，隐藏后不渲染、不接收事件，
+     避免拆改手势与播放逻辑；网格第三列自然收成 0。 */
+  display: none !important;
+  align-items: center;
+  gap: 4px;
+  justify-self: end;
+}
+
+.pbn__orb {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--pbn-muted);
+  background: rgb(255 255 255 / 0.035);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.075);
+  transition: color .2s, background .2s, box-shadow .2s;
+  touch-action: none;
+}
+.pbn__orb:hover {
+  color: var(--pbn-ink);
+  background: rgb(255 255 255 / 0.075);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14), 0 0 18px color-mix(in srgb, var(--pbn-c1) 18%, transparent);
+}
+.pbn__orb-in {
+  display: grid;
+  place-items: center;
+  will-change: transform;
+  pointer-events: none;
+}
+.pbn__orb .ico { width: 17px; height: 17px; }
+.pbn__orb--prev .pbn__orb-in,
+.pbn__orb--next .pbn__orb-in { pointer-events: none; }
+
+.pbn__mode {
+  height: 36px;
+  min-width: 36px;
+  padding: 0 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pbn-muted);
+  background: rgb(255 255 255 / 0.035);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.075);
+  transition: color .2s, background .2s, box-shadow .2s;
+  white-space: nowrap;
+}
+.pbn__mode:hover {
+  color: var(--pbn-ink);
+  background: rgb(255 255 255 / 0.075);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+.pbn__mode .ico { width: 15px; height: 15px; }
+.pbn__mode span { font-size: 10.5px; letter-spacing: .04em; }
+.pbn__mode.is-on { color: color-mix(in srgb, var(--pbn-c1) 68%, white); }
+
+/* 音量：珠子 + 向上张开的弧。
+   整块随 .pbn__tail 一起隐藏，下面的 hover / is-open 展开不会再触发。 */
+.pbn__vol { position: relative; display: grid; place-items: center; }
+.pbn__vol-btn { color: var(--pbn-muted); }
+.pbn__vol-btn.is-muted { color: color-mix(in srgb, var(--pbn-c3) 62%, white); }
+.pbn__vol-btn .ico { width: 18px; height: 18px; }
+
+.pbn__arc {
+  position: absolute;
+  right: -40px;
+  bottom: 42px;
+  width: 132px;
+  height: 118px;
+  z-index: 8;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px) scale(.94);
+  transform-origin: 82% 100%;
+  transition: opacity .22s var(--pbn-ease), transform .28s var(--pbn-ease), visibility .22s;
+  filter: drop-shadow(0 10px 30px rgb(0 0 0 / 0.45));
+}
+.pbn__vol:hover .pbn__arc,
+.pbn__vol:focus-within .pbn__arc,
+.pbn__vol.is-open .pbn__arc { opacity: 1; visibility: visible; transform: none; }
+.pbn__arc svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.pbn__arc-track,
+.pbn__arc-fill {
+  fill: none;
+  stroke-linecap: round;
+}
+.pbn__arc-track { stroke: rgb(255 255 255 / 0.16); stroke-width: 7; }
+.pbn__arc-fill {
+  stroke: url(#pbn-arc-grad);
+  stroke-width: 7;
+  stroke-dasharray: 0 100;
+  transition: stroke-dasharray .16s linear;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--pbn-c1) 55%, transparent));
+}
+.pbn__arc-num {
+  position: absolute;
+  left: 50%; bottom: 10px;
+  transform: translateX(-50%);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--pbn-ink);
+  text-shadow: 0 1px 10px rgb(0 0 0 / 0.6);
+}
+.pbn__arc-cap {
+  position: absolute;
+  left: 50%; top: 12px;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: .08em;
+  color: var(--pbn-faint);
+}
+
+.pbn__grip {
+  width: 30px;
+  height: 36px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--pbn-faint);
+  transition: color .2s, background .2s;
+}
+.pbn__grip:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.06); }
+.pbn__grip .ico {
+  width: 16px; height: 16px;
+  transform: rotate(-90deg);
+  transition: transform .32s var(--pbn-ease);
+}
+#pbn[data-expanded="true"] .pbn__grip .ico { transform: rotate(90deg); }
+
+/* ---------- 光河交互面（视觉进度已交给 .pbn__paint） ----------------------
+   .pbn__rail 仍然是唯一的拖拽 / 点击 seek / 键盘进度面，元素与逻辑全部保留；
+   但轨道、缓冲、填充、辉光、光点、拖动气泡的视觉统一隐藏，
+   由底部的整条渐变进度带（.pbn__paint）负责显示进度。 */
+.pbn__rail::before,
+.pbn__rail-buffer,
+.pbn__rail-fill,
+.pbn__rail-glint,
+.pbn__head,
+.pbn__bubble { display: none !important; }
+
+.pbn__rail {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  height: 22px;
+  z-index: 4;
+  cursor: ew-resize;
+  outline-offset: 5px;
+  touch-action: none;
+}
+.pbn__rail::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.13);
+  transition: height .25s var(--pbn-ease), background .25s;
+}
+#pbn:hover .pbn__rail::before,
+#pbn:focus-within .pbn__rail::before,
+#pbn.is-scrubbing .pbn__rail::before { height: 3px; background: rgb(255 255 255 / 0.18); }
+
+.pbn__rail-buffer,
+.pbn__rail-fill {
+  position: absolute;
+  left: 0; top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  pointer-events: none;
+  transition: height .25s var(--pbn-ease);
+}
+#pbn:hover .pbn__rail-buffer,
+#pbn:hover .pbn__rail-fill,
+#pbn:focus-within .pbn__rail-buffer,
+#pbn:focus-within .pbn__rail-fill,
+#pbn.is-scrubbing .pbn__rail-buffer,
+#pbn.is-scrubbing .pbn__rail-fill { height: 3px; }
+.pbn__rail-buffer {
+  width: 0;
+  background: rgb(255 255 255 / 0.26);
+}
+.pbn__rail-fill {
+  width: 0;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--pbn-c2) 82%, white) 0%,
+    color-mix(in srgb, var(--pbn-c1) 94%, white) 55%,
+    color-mix(in srgb, var(--pbn-c3) 84%, white) 100%);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--pbn-c1) 55%, transparent);
+}
+.pbn__rail-glint {
+  position: absolute;
+  left: 0; top: 50%;
+  height: 10px;
+  width: 0;
+  transform: translateY(-50%);
+  border-radius: 10px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pbn-c1) 22%, transparent));
+  filter: blur(4px);
+  opacity: .8;
+}
+
+.pbn__head {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 0; height: 0;
+  z-index: 5;
+  pointer-events: none;
+  will-change: transform;
+}
+.pbn__head-core {
+  position: absolute;
+  left: -5px; top: -5px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #fff 0 34%, color-mix(in srgb, var(--pbn-c1) 86%, white) 66%, color-mix(in srgb, var(--pbn-c2) 70%, transparent) 100%);
+  box-shadow:
+    0 0 0 1.5px rgb(255 255 255 / 0.34),
+    0 0 12px 2px color-mix(in srgb, var(--pbn-c1) 78%, transparent),
+    0 0 28px 6px color-mix(in srgb, var(--pbn-c2) 38%, transparent);
+}
+.pbn__head-halo {
+  position: absolute;
+  left: -16px; top: -16px;
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--pbn-c1) 30%, transparent), transparent 68%);
+  opacity: .8;
+  animation: pbn-halo 2.8s ease-in-out infinite;
+}
+#pbn[data-playing="true"] .pbn__head-halo { animation-duration: 1.35s; }
+#pbn.is-scrubbing .pbn__head-core { box-shadow: 0 0 0 2px rgb(255 255 255 / 0.6), 0 0 24px 8px color-mix(in srgb, var(--pbn-c1) 82%, transparent); }
+#pbn.is-scrubbing .pbn__head-halo { opacity: 1; transform: scale(1.35); }
+@keyframes pbn-halo {
+  0%, 100% { transform: scale(.82); opacity: .38; }
+  50% { transform: scale(1.16); opacity: .82; }
+}
+
+.pbn__bubble {
+  position: absolute;
+  z-index: 7;
+  bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--pbn-ink);
+  background: rgb(10 12 18 / 0.9);
+  border: 1px solid rgb(255 255 255 / 0.14);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.pbn__bubble[hidden] { display: none !important; }
+
+/* ---------- 首次操作提示 -------------------------------------------------- */
+.pbn__coach {
+  /* 按需求不再自动弹出（JS 仍会打 is-on，但这里始终不显示） */
+  display: none !important;
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 14px);
+  transform: translate(-50%, 6px);
+  z-index: 9;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 9px 14px;
+  border-radius: 14px;
+  background: rgb(10 12 18 / 0.92);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: 0 18px 44px rgb(0 0 0 / 0.46);
+  color: var(--pbn-muted);
+  font-size: 10.5px;
+  letter-spacing: .02em;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .26s var(--pbn-ease), transform .32s var(--pbn-ease), visibility .26s;
+  white-space: nowrap;
+  max-width: calc(100vw - 24px);
+}
+/* .pbn__coach.is-on 已停用：上面的 display:none !important 会覆盖任何弹出状态。 */
+.pbn__coach b { color: var(--pbn-ink); font-weight: 500; }
+.pbn__coach i {
+  font-style: normal;
+  color: color-mix(in srgb, var(--pbn-c1) 70%, white);
+}
+
+/* ---------- 唱片卡 -------------------------------------------------------- */
+.pbn__card-wrap {
+  position: absolute;
+  right: 22px;
+  bottom: calc(100% + 14px);
+  z-index: 8;
+  width: min(452px, calc(100vw - 32px));
+  perspective: 1000px;
+  visibility: hidden;
+  pointer-events: none;
+}
+#pbn[data-expanded="true"] .pbn__card-wrap { visibility: visible; pointer-events: auto; }
+
+.pbn__card {
+  position: relative;
+  border-radius: 22px;
+  background:
+    linear-gradient(154deg, rgb(27 30 42 / 0.97) 0%, rgb(12 14 21 / 0.985) 58%, rgb(9 11 17 / 0.99) 100%);
+  border: 1px solid rgb(255 255 255 / 0.11);
+  box-shadow:
+    0 34px 90px rgb(0 0 0 / 0.55),
+    0 6px 18px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  opacity: 0;
+  transform: translateY(16px) scale(.965);
+  transform-origin: 82% 100%;
+  transition: opacity .3s var(--pbn-ease), transform .42s var(--pbn-ease);
+  touch-action: pan-y;
+}
+#pbn[data-expanded="true"] .pbn__card {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.pbn__card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: .16;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+.pbn__card-tilt {
+  position: relative;
+  border-radius: inherit;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.pbn__spot {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .28s var(--pbn-ease);
+  background: radial-gradient(220px circle at var(--pbn-mx, 72%) var(--pbn-my, 18%),
+    color-mix(in srgb, var(--pbn-c1) 20%, rgb(255 255 255 / 0.18)) 0%,
+    color-mix(in srgb, var(--pbn-c2) 10%, transparent) 38%,
+    transparent 68%);
+  mix-blend-mode: screen;
+}
+.pbn__card:hover .pbn__spot,
+.pbn__card:focus-within .pbn__spot { opacity: .9; }
+
+.pbn__card-star {
+  position: absolute;
+  left: -26px;
+  top: -26px;
+  z-index: 3;
+  pointer-events: none;
+  display: block;
+}
+
+.pbn__card-inner {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: 152px minmax(0, 1fr);
+  gap: 18px;
+  padding: 20px;
+  align-items: stretch;
+}
+
+.pbn__card-art {
+  position: relative;
+  width: 152px;
+  height: 152px;
+  border-radius: 18px;
+  align-self: center;
+  background: linear-gradient(150deg, rgb(255 255 255 / 0.12), rgb(255 255 255 / 0.03));
+  box-shadow: 0 18px 38px rgb(0 0 0 / 0.44), inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  overflow: visible;
+  transition: transform .3s var(--pbn-ease);
+}
+.pbn__card-art:hover { transform: translateY(-2px) scale(1.015); }
+.pbn__card-art img {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+  display: block;
+  z-index: 2;
+}
+.pbn__card-art img[hidden] { display: none !important; }
+.pbn__card-art img:not([hidden]) ~ .pbn__card-ph { display: none; }
+.pbn__card-ph {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 30px !important; height: 30px !important;
+  transform: translate(-50%, -50%);
+  color: rgb(255 255 255 / 0.5);
+  z-index: 2;
+}
+.pbn__vinyl {
+  position: absolute;
+  right: -13px;
+  top: 50%;
+  width: 118px; height: 118px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  z-index: 0;
+  background:
+    repeating-radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.055) 0 1px, transparent 1px 5px),
+    radial-gradient(circle at 50% 50%, #191a22 0 28%, #0a0b10 29% 100%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.55), inset 0 0 0 1px rgb(255 255 255 / 0.06);
+  transition: right .35s var(--pbn-ease);
+}
+.pbn__card-art:hover .pbn__vinyl { right: -34px; }
+#pbn[data-playing="true"] .pbn__vinyl { animation: pbn-vinyl-spin 5.2s linear infinite; }
+@keyframes pbn-vinyl-spin {
+  from { transform: translateY(-50%) rotate(0deg); }
+  to   { transform: translateY(-50%) rotate(360deg); }
+}
+
+.pbn__card-copy {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  display: flex; flex-direction: column; gap: 6px; padding-right: 20px;
+}
+.pbn__card-kicker {
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--pbn-faint);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.pbn__card-kicker span {
+  color: color-mix(in srgb, var(--pbn-c1) 68%, white);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pbn-c1) 10%, transparent);
+  letter-spacing: .04em;
+}
+.pbn__card-title {
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -.035em;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(100deg, #fff 0%, color-mix(in srgb, var(--pbn-c1) 58%, white) 52%, color-mix(in srgb, var(--pbn-c3) 52%, white) 100%);
+  background-size: 160% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: pbn-title-flow 9s ease-in-out infinite alternate;
+}
+@keyframes pbn-title-flow { from { background-position: 0% 0; } to { background-position: 100% 0; } }
+.pbn__card-sub {
+  font-size: 11.5px;
+  color: var(--pbn-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pbn__lyric {
+  margin: 3px 0 0;
+  min-height: 48px;
+  display: grid;
+  gap: 1px;
+  align-content: start;
+  overflow: hidden;
+}
+.pbn__lyric-cur {
+  font-size: 14.5px;
+  line-height: 1.42;
+  color: color-mix(in srgb, var(--pbn-c1) 26%, white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity .24s;
+}
+.pbn__lyric-tr {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--pbn-c2) 24%, var(--pbn-faint));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pbn__lyric-tr:empty { display: none; }
+.pbn__lyric-next {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: rgb(255 255 255 / 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pbn__lyric-next:empty { display: none; }
+
+.pbn__card-times {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  color: var(--pbn-faint);
+  font-variant-numeric: tabular-nums;
+}
+.pbn__card-times > span:first-child { color: var(--pbn-ink); }
+.pbn__card-time-bar {
+  position: relative;
+  flex: 1;
+  height: 2px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.12);
+  overflow: hidden;
+}
+.pbn__card-time-bar i {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--pbn-c2), var(--pbn-c1));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--pbn-c1) 60%, transparent);
+}
+
+.pbn__card-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 3px;
+}
+.pbn__card-vol { display: flex; align-items: center; gap: 6px; color: var(--pbn-faint); flex: 1; min-width: 0; }
+.pbn__card-vol .ico { width: 14px; height: 14px; flex: none; }
+.pbn__card-vol-track {
+  position: relative;
+  flex: 1;
+  height: 18px;
+  cursor: pointer;
+  touch-action: none;
+  min-width: 40px;
+}
+.pbn__card-vol-track::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.14);
+}
+.pbn__card-vol-track i {
+  position: absolute;
+  left: 0; top: 50%;
+  height: 2px;
+  width: 0;
+  transform: translateY(-50%);
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--pbn-c2), var(--pbn-c1));
+  pointer-events: none;
+}
+#pbn-card-vol-num {
+  font-family: var(--font-mono, monospace);
+  font-size: 9.5px;
+  width: 25px;
+  text-align: right;
+  color: var(--pbn-muted);
+}
+.pbn__card-mute {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--pbn-faint);
+  flex: none;
+}
+.pbn__card-mute:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.07); }
+.pbn__card-open {
+  flex: none;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  letter-spacing: .04em;
+  color: var(--pbn-muted);
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.09);
+  white-space: nowrap;
+}
+.pbn__card-open:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.09); }
+
+.pbn__card-x {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  z-index: 6;
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--pbn-faint);
+  background: rgb(255 255 255 / 0.04);
+  opacity: .8;
+}
+.pbn__card-x:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.10); opacity: 1; }
+.pbn__card-x .ico { width: 14px; height: 14px; }
+
+/* 点击火花：固定铺满视口，永不接事件 */
+.pbn__sparks {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 9;
+  pointer-events: none;
+  display: block;
+}
+
+/* ---------- 窄屏 ---------------------------------------------------------- */
+@media (max-width: 900px) {
+  body.pbn-on { --pbn-h: 100px; }
+  .pbn__inner {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "now tail"
+      "center center";
+    grid-template-rows: 1fr auto;
+    column-gap: 8px;
+    row-gap: 0;
+    padding: 6px 13px calc(17px + env(safe-area-inset-bottom, 0px));
+  }
+  .pbn__now { grid-area: now; }
+  .pbn__tail { grid-area: tail; gap: 2px; }
+  .pbn__center {
+    grid-area: center;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 2px;
+    transform: none;
+  }
+  .pbn__hint { display: none; }
+  .pbn__title { font-size: 13px; }
+  .pbn__sub { font-size: 10.5px; }
+  .pbn__orb { width: 34px; height: 34px; }
+  .pbn__mode { height: 34px; padding: 0 8px; }
+  .pbn__mode span { display: none; }
+  .pbn__grip { width: 26px; height: 34px; }
+  .pbn__card-wrap { right: 12px; left: 12px; width: auto; }
+  .pbn__card-inner { grid-template-columns: 112px minmax(0, 1fr); gap: 14px; padding: 16px; }
+  .pbn__card-art { width: 112px; height: 112px; }
+  .pbn__vinyl { width: 90px; height: 90px; right: -8px; }
+  .pbn__card-title { font-size: 18px; }
+  .pbn__lyric { min-height: 42px; }
+  .pbn__lyric-cur { font-size: 12.5px; }
+  .pbn__arc { right: -30px; }
+  .pbn__coach { bottom: calc(100% + 10px); font-size: 10px; gap: 4px 10px; padding: 8px 11px; }
+}
+
+@media (max-width: 560px) {
+  .pbn__grip { display: none; }
+  .pbn__badge { display: none; }
+  .pbn__art { width: 42px; height: 42px; }
+  #pbn:hover .pbn__art,
+  #pbn:focus-within .pbn__art,
+  #pbn[data-expanded="true"] .pbn__art { width: 46px; height: 46px; }
+  .pbn__card-inner {
+    grid-template-columns: 88px minmax(0, 1fr);
+    gap: 12px;
+    padding: 14px;
+  }
+  .pbn__card-art { width: 88px; height: 88px; }
+  .pbn__vinyl { display: none; }
+  .pbn__card-title { font-size: 16px; }
+  .pbn__card-open { display: none; }
+  .pbn__card-copy { padding-right: 14px; }
+  .pbn__lyric-tr { display: none; }
+}
+
+/* 触屏没有 hover：栏高同样固定，展开唱片卡也不再改变栏高。 */
+@media (hover: none) {
+  #pbn:hover { --pbn-h-cur: var(--pbn-h); }
+  .pbn__card:hover .pbn__spot { opacity: .35; }
+}
+
+/* 横屏矮窗口：卡片限高可滚，不把页面顶穿 */
+@media (max-height: 560px) {
+  .pbn__card-wrap { max-height: calc(100vh - var(--pbn-h) - 28px); overflow-y: auto; }
+  .pbn__card-wrap::-webkit-scrollbar { width: 0; }
+}
+
+/* ---------- prefers-reduced-motion --------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  #pbn,
+  #pbn *,
+  #pbn *::before,
+  #pbn *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+  #pbn.pbn--no-webgl::before { animation: none !important; }
+  #pbn[data-playing="true"] .pbn__art-ring,
+  #pbn[data-playing="true"] .pbn__vinyl { animation: none !important; }
+  .pbn__card-title { animation: none !important; background-position: 0 0; }
+  .pbn__head-halo { animation: none !important; opacity: .5; }
+  .pbn__card { transform: none !important; }
+  .pbn__card-tilt { transform: none !important; }
+}

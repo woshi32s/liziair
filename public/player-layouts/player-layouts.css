@@ -1,0 +1,620 @@
+/* ==========================================================================
+   播放页排版 · player-layouts.css
+   --------------------------------------------------------------------------
+   3 套只作用于 #view-now 的整体版式 + 1 个「默认」：
+     默认 / 左右对半（02）/ 上下分屏（04）/ 极小封面（06）。
+   全部是纯 CSS：不动 DOM、不复制 id、不 reparent 任何节点。
+   由 body 上的 .now-layout-02 / -04 / -06 驱动；默认不带类 = 原版。
+   只在 body.is-now（播放页激活）时生效，别的视图完全不受影响。
+
+   共享修正（[class*="now-layout-"]）：
+     · 关掉 app.css 里 `.now__art > *` 的 nowRise 动画 —— 它的 fill:both 会把
+       transform 永久钉成 none，和下面用 transform 定位的元素打架。
+     · 关掉 alignArtToLyrics() 写在 .now__art 上的 inline translateY（!important）。
+     · 强制歌词面板可见：即使 is-lyrics-open 被意外关掉，排版也不会突然空掉。
+     · 顶栏容器不吃点击，只有按钮吃 —— 贴顶摆放的封面/歌词不会被透明 header 挡住。
+     · 跟拍点缩放**保留**（下面用更高优先级重新声明 discPulse）—— 之前误关掉后
+       四个版式的封面都不跟拍，播放页看起来是死的。
+   ========================================================================== */
+
+/* ==========================================================================
+   设置页 · 播放页排版选择器
+   ========================================================================== */
+.nl-picker { padding-top: 10px; }
+
+.nl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+
+.nl-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: oklch(100% 0 0 / 0.55);
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+.nl-card:hover { border-color: oklch(21% 0.022 270 / 0.22); transform: translateY(-1px); }
+.nl-card.is-on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  background: oklch(100% 0 0 / 0.8);
+}
+.nl-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.nl-card.is-on .nl-card__text b { color: var(--accent-ink); }
+
+.nl-card__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.nl-card__text b { font-size: 12.5px; font-weight: var(--fw-semi); color: var(--ink); line-height: 1.25; }
+.nl-card__text em {
+  font-style: normal; font-size: 10.5px; line-height: 1.3; color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* 小线框：每个卡片里都是同 5 个抽象块，靠 data-preview 决定位置。
+   art=封面 meta=歌名 ctl=控制键 ly=歌词 dock=底部进度 */
+.nlw {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  overflow: hidden;
+  background: oklch(96.3% 0.008 270);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+.nlw > i { position: absolute; display: block; border-radius: 2px; }
+.nlw-art { background: linear-gradient(135deg, oklch(78% 0.055 24), oklch(67% 0.06 282)); }
+.nlw-meta { height: 4px; background: oklch(44% 0.02 270 / 0.72); }
+.nlw-ctl  { height: 3px; background: oklch(55% 0.02 270 / 0.5); }
+.nlw-ly   { background: repeating-linear-gradient(to bottom, oklch(46% 0.02 270 / 0.55) 0 2px, transparent 2px 8px); }
+.nlw-dock { left: 0; right: 0; bottom: 0; height: 7px; border-radius: 0; background: oklch(58% 0.03 270 / 0.25); }
+
+/* 默认：左封面 + 右歌词 */
+.nlw[data-preview="default"] .nlw-art { left: 9%; top: 12%; width: 36%; height: 52%; border-radius: 4px; }
+.nlw[data-preview="default"] .nlw-ly { right: 8%; top: 22%; width: 38%; height: 40%; }
+.nlw[data-preview="default"] .nlw-meta { left: 9%; top: 72%; width: 30%; }
+.nlw[data-preview="default"] .nlw-ctl { left: 9%; top: 82%; width: 22%; }
+
+/* 02 左右对半 */
+.nlw[data-preview="02"] .nlw-art { left: 0; top: 0; width: 50%; height: 88%; border-radius: 0; }
+.nlw[data-preview="02"] .nlw-ly { right: 6%; top: 24%; width: 40%; height: 44%; }
+.nlw[data-preview="02"] .nlw-meta { left: 7%; bottom: 20%; width: 30%; }
+.nlw[data-preview="02"] .nlw-ctl { left: 7%; bottom: 11%; width: 22%; }
+
+/* 04 上下分屏 */
+.nlw[data-preview="04"] .nlw-art { left: 10%; right: 10%; top: 8%; height: 38%; border-radius: 4px; }
+.nlw[data-preview="04"] .nlw-ly { left: 10%; right: 10%; top: 53%; height: 30%; }
+.nlw[data-preview="04"] .nlw-meta { left: 10%; top: 46%; width: 24%; }
+.nlw[data-preview="04"] .nlw-ctl { right: 10%; top: 46%; width: 20%; }
+
+/* 06 极小封面 */
+.nlw[data-preview="06"] .nlw-art { left: 7%; top: 12%; width: 20%; height: 28%; border-radius: 3px; }
+.nlw[data-preview="06"] .nlw-meta { left: 31%; top: 15%; width: 30%; }
+.nlw[data-preview="06"] .nlw-ly { left: 18%; right: 18%; top: 47%; height: 34%; }
+.nlw[data-preview="06"] .nlw-ctl { left: 38%; bottom: 12%; width: 24%; }
+
+.nl-foot { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.nl-foot__now { margin-right: auto; font-size: 12px; color: var(--ink-3); }
+.nl-foot__go {
+  height: 34px; padding: 0 14px;
+  border-radius: var(--r-full);
+  background: var(--accent); color: oklch(99% 0 0);
+  font-size: 12.5px; font-weight: var(--fw-semi);
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+.nl-foot__go:hover { filter: brightness(1.06); }
+.nl-foot__go:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
+
+/* ==========================================================================
+   播放页抽屉 · 「调整参数」顶部的版式 chip
+   不用 .diy，避免触发 app.js 里针对滑杆的初始化；2 列紧凑暗色胶囊。
+   ========================================================================== */
+.nld {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px 0 12px;
+}
+.nld__t {
+  padding-inline: var(--sp-2);
+  font-size: var(--text-2xs);
+  font-weight: var(--fw-semi);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.nld__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.nld__b {
+  min-height: 34px;
+  padding: 4px 8px;
+  border: 1px solid oklch(21% 0.022 270 / 0.08);
+  border-radius: 10px;
+  background: oklch(21% 0.022 270 / 0.05);
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: var(--fw-med);
+  line-height: 1.2;
+  text-align: center;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.nld__b:hover { background: oklch(21% 0.022 270 / 0.1); color: var(--ink); }
+.nld__b.is-on {
+  background: oklch(21% 0.022 270 / 0.88);
+  border-color: transparent;
+  color: oklch(98% 0.004 270);
+}
+.nld__b:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ==========================================================================
+   播放页 · 3 套版式 + 默认
+   ========================================================================== */
+
+/* ---- 封面不跟拍：用户明确要求播放页封面不要任何抖动/脉动。
+   app.css 里 `.disc.is-beat { animation: discPulse }` 会在每拍把封面
+   放大 3.5%，看着像在震，这里统一关掉，四个版式一起生效。 */
+
+/* ---- 自定义排版的公共修正 ---- */
+body.is-now[class*="now-layout-"] #view-now .now__art > *,
+body.is-now[class*="now-layout-"] #view-now .now__lyrics {
+  animation: none !important;
+}
+body.is-now[class*="now-layout-"] #view-now .now__art {
+  transform: none !important;
+}
+body.is-now[class*="now-layout-"] #view-now .now__lyrics {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transform: none !important;
+}
+body.is-now[class*="now-layout-"] #view-now .now__bar { pointer-events: none; }
+body.is-now[class*="now-layout-"] #view-now .now__bar > * { pointer-events: auto; }
+
+/* 封面保持静止：排在所有 animation 规则之后，确保 discPulse 不会在
+   任何版式下把封面弹一下。 */
+body.is-now #view-now .disc.is-beat {
+  animation: none !important;
+}
+
+/* 默认版式：.disc 上的 nowRise 是 fill:both，动画结束后 transform 被永久
+   钉在 none —— 播放态 scale(1.02) 和跟拍 discPulse 都被它压住（自定义
+   版式靠上面的 animation:none 躲开了，默认版式没躲）。
+   这里直接把 disc 的进场动画摘掉：留着的话，每拍 is-beat 被加上再摘掉，
+   animation 列表从 discPulse 变回 nowRise 会让 nowRise 重新从头播一次
+   （实测 opacity 0.08 → 1，封面每拍闪一下）。meta / transport / 歌词的
+   nowRise 不受影响，封面只是不再单独上浮。 */
+body.is-now:not([class*="now-layout-"]) #view-now .now__art > .disc {
+  animation: none;
+}
+
+/* --------------------------------------------------------------------------
+   02 · 左右对半
+   封面占左半页、歌词占右半页，中间一条细线；两列都通高。
+   -------------------------------------------------------------------------- */
+body.is-now.now-layout-02 #view-now .now__stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
+  padding: 0;
+  align-items: stretch;
+}
+body.is-now.now-layout-02 #view-now .now__art {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  padding: 10px clamp(20px, 4vw, 56px) 16px;
+  gap: 16px;
+  justify-content: center;
+  min-width: 0;
+  border-right: 1px solid oklch(100% 0 0 / 0.1);
+}
+body.is-now.now-layout-02 #view-now .disc {
+  width: min(calc(32vw * var(--diy-cover, 1)), calc(46vh * var(--diy-cover, 1)));
+  border-radius: 18px;
+}
+body.is-now.now-layout-02 #view-now .now__meta {
+  width: 100%;
+  text-align: left;
+}
+body.is-now.now-layout-02 #view-now .now__transport {
+  width: 100%;
+  justify-content: flex-start;
+}
+body.is-now.now-layout-02 #view-now .now__lyrics {
+  position: relative;
+  width: auto;
+  height: 100%;
+  padding: 18px clamp(20px, 3vw, 48px);
+  background: linear-gradient(90deg, oklch(6% 0.01 270 / 0.28), transparent 72%);
+}
+
+/* --------------------------------------------------------------------------
+   04 · 上下分屏
+   上半页是「封面 + 歌名/控制」的横向 hero，下半页整幅歌词。
+   -------------------------------------------------------------------------- */
+body.is-now.now-layout-04 #view-now .now__stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 10px;
+  padding: 64px clamp(16px, 4vw, 48px) 12px;
+}
+body.is-now.now-layout-04 #view-now .now__art {
+  width: auto;
+  max-width: none;
+  margin: 0;
+  min-height: 0;
+  padding: 0 clamp(0px, 2vw, 18px) 10px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  gap: 8px clamp(20px, 4vw, 48px);
+  align-content: center;
+  align-items: center;
+  border-bottom: 1px solid oklch(100% 0 0 / 0.1);
+}
+body.is-now.now-layout-04 #view-now .disc {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  width: min(calc(28vw * var(--diy-cover, 1)), calc(32vh * var(--diy-cover, 1)));
+  border-radius: 16px;
+}
+body.is-now.now-layout-04 #view-now .now__meta {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: end;
+  text-align: left;
+}
+body.is-now.now-layout-04 #view-now .now__transport {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: start;
+  justify-content: flex-start;
+}
+body.is-now.now-layout-04 #view-now .now__lyrics {
+  position: relative;
+  width: auto;
+  height: 100%;
+  padding: 4px clamp(0px, 2vw, 18px);
+  display: flex;
+  flex-direction: column;
+}
+/* 下半页只有舞台的一半高：把「5 排窗口」按比例收小，当前句才不会贴边 */
+body.is-now.now-layout-04 #view-now .lyrics {
+  --ly-font: calc(clamp(24px, 4.2vh, 38px) * var(--diy-ly, 1));
+  --ly-row: calc(var(--ly-font) * 1.24 * var(--diy-lh, 1) + 4.8vh);
+  height: calc(var(--ly-row) * 4.4);
+  padding: calc(var(--ly-row) * 2.2) 0;
+}
+body.is-now.now-layout-04 #view-now .ly { font-size: var(--ly-font); }
+
+/* --------------------------------------------------------------------------
+   06 · 极小封面
+   左上角一枚 96px 小封面，中间大面积留给歌词，控制键浮在底部正中。
+   -------------------------------------------------------------------------- */
+body.is-now.now-layout-06 #view-now .now__stage {
+  position: relative;
+  display: block;
+  padding: 0;
+}
+body.is-now.now-layout-06 #view-now .now__art { display: contents; }
+body.is-now.now-layout-06 #view-now .disc {
+  position: absolute;
+  top: 104px;
+  left: clamp(20px, 5vw, 64px);
+  z-index: 3;
+  width: calc(96px * var(--diy-cover, 1));
+  height: calc(96px * var(--diy-cover, 1));
+  border-radius: 14px;
+}
+body.is-now.now-layout-06 #view-now .now__meta {
+  position: absolute;
+  top: 104px;
+  left: calc(clamp(20px, 5vw, 64px) + 96px * var(--diy-cover, 1) + 16px);
+  right: clamp(20px, 4vw, 48px);
+  z-index: 3;
+  text-align: left;
+}
+body.is-now.now-layout-06 #view-now .now__title { font-size: clamp(18px, 1.8vw, 24px); }
+body.is-now.now-layout-06 #view-now .now__transport {
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  z-index: 4;
+  width: auto;
+  justify-content: center;
+  padding: 6px 14px;
+  border-radius: var(--r-full);
+  background: oklch(100% 0 0 / 0.07);
+}
+body.is-now.now-layout-06 #view-now .ntr-side { flex: 0 0 auto; gap: 8px; }
+body.is-now.now-layout-06 #view-now .now__lyrics {
+  position: absolute;
+  inset: max(24vh, 150px) 18vw 16vh;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+/* 歌词列必须和面板同高：之前固定 5.2 行会比面板高，父级 overflow:hidden
+   在 mask 还没透明的地方直接裁断，于是上下都是硬边。
+   这里让窗口=面板，上下各一半高做滚动缓冲，再把羽化放宽到 16%。 */
+body.is-now.now-layout-06 #view-now .lyrics {
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: max(0px, calc((100vh - var(--sp-4) - var(--dock-h) -
+    max(24vh, 150px) - 16vh) / 2)) 0;
+  -webkit-mask-image: linear-gradient(to bottom,
+    transparent 0%, #000 16%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(to bottom,
+    transparent 0%, #000 16%, #000 84%, transparent 100%);
+}
+body.is-now.now-layout-06 #view-now .ly { text-align: center; }
+body.is-now.now-layout-06 #view-now .ly__main { transform-origin: center; }
+
+/* ==========================================================================
+   窄屏兜底：3 套版式都收成「顶部一行小封面 + 下方整幅歌词」
+   桌面上的差异化保留在 >900px；这里优先保证不横向滚动、控件全部可点。
+   断点必须和 app.css 的 @media (max-width:900px) 一致：那边一到 900px
+   就把舞台收成单列并给 .now__art 加 flex-direction:row，860 的兜底会晚
+   40px 才接管，861–900px 这段 02 的封面会被挤到屏幕外（实测 x=-134）。
+   ========================================================================== */
+@media (max-width: 900px) {
+  /* 默认版式：舞台在 ≤900px 是单列（封面行在上、歌词在下），
+     alignArtToLyrics() 的「封面下移到歌词中线」这时没有意义 —— 它会把
+     封面行 inline translateY 推到 ~600px，直接压在歌词上。 */
+  body.is-now:not([class*="now-layout-"]) #view-now .now__art {
+    transform: none !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .now__stage {
+    position: relative !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    padding: 64px 12px 10px !important;
+    min-height: 0 !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .now__art {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 6px 0 8px !important;
+    gap: 12px !important;
+    border: 0 !important;
+    background: none !important;
+    box-shadow: none !important;
+    order: 1;
+  }
+  body.is-now[class*="now-layout-"] #view-now .disc {
+    position: static !important;
+    inset: auto !important;
+    margin: 0 !important;
+    width: calc(68px * var(--diy-cover, 1)) !important;
+    height: calc(68px * var(--diy-cover, 1)) !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+    aspect-ratio: 1 !important;
+    transform: none !important;
+    border: 0 !important;
+    border-radius: 10px !important;
+    display: block !important;
+    grid-column: auto !important;
+    grid-row: auto !important;
+    opacity: 1 !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .disc::before,
+  body.is-now[class*="now-layout-"] #view-now .disc::after { display: none !important; }
+  body.is-now[class*="now-layout-"] #view-now .now__meta {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    text-align: left !important;
+    width: auto !important;
+    max-width: none !important;
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    grid-column: auto !important;
+    grid-row: auto !important;
+    order: 0;
+  }
+  body.is-now[class*="now-layout-"] #view-now .now__title {
+    font-size: 18px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .now__sub { font-size: 12px !important; }
+  body.is-now[class*="now-layout-"] #view-now .now__transport {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: none !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 2px !important;
+    flex: none !important;
+    order: 2;
+    grid-column: auto !important;
+    grid-row: auto !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .ntr-side { flex: 0 0 auto !important; gap: 2px !important; }
+  body.is-now[class*="now-layout-"] #view-now .ntr {
+    width: 30px !important; height: 30px !important; border-radius: 9px !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .ntr .ico { width: 15px !important; height: 15px !important; }
+  body.is-now[class*="now-layout-"] #view-now .ntr--play { width: 38px !important; height: 38px !important; }
+  body.is-now[class*="now-layout-"] #view-now .ntr--play .ico { width: 17px !important; height: 17px !important; }
+
+  body.is-now[class*="now-layout-"] #view-now .now__lyrics {
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    height: auto !important;
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 4px 0 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: none !important;
+    overflow: hidden !important;
+    order: 2;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .lyrics {
+    --ly-font: calc(clamp(22px, 4.8vw, 32px) * var(--diy-ly, 1));
+    --ly-row: calc(var(--ly-font) * 1.24 * var(--diy-lh, 1) + 4.8vh);
+    flex: 0 0 auto !important;
+    height: calc(var(--ly-row) * 5.2) !important;
+    margin-block: auto !important;
+    padding: calc(var(--ly-row) * 2.6) 4px !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .ly {
+    text-align: left !important;
+    font-size: var(--ly-font) !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .ly__main { transform-origin: left center !important; }
+
+  /* 顶栏在触屏上没有 hover，直接常显 */
+  body.is-now[class*="now-layout-"] #view-now .now__bar { opacity: 1 !important; }
+}
+
+/* ==========================================================================
+   触屏 1280×573（安卓 WebView）· 三套版式各自的防重叠修正
+   --------------------------------------------------------------------------
+   为什么不能用 @media (max-width: 900px)：安卓壳把 WebView 的布局视口钉在
+   1280×573，900 的断点在真机上永远不成立，之前写在里面的 transform:none
+   和窄屏兜底因此完全没生效。
+
+   这里用「粗指针 + body.touch-ui」作为命中条件（app.js 按 __liziAndroid /
+   pointer:coarse 加类），并限制在 >900px：≤900 仍交给上面的窄屏兜底，
+   不改变那一段的单列行为。三套版式各修各的，不合并成默认版式。
+   ========================================================================== */
+@media (min-width: 901px) and (pointer: coarse) {
+  /* 02 · 左右对半：两列各自成轨，封面列不许被 alignArtToLyrics() 下移，
+     也不许把内容溢出到右列；歌词面板裁在自己的列里。 */
+  body.touch-ui.is-now.now-layout-02 #view-now .now__stage {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: stretch;
+    overflow: hidden;
+  }
+  body.touch-ui.is-now.now-layout-02 #view-now .now__art {
+    transform: none !important;
+    min-width: 0;
+    min-height: 0;
+  }
+  body.touch-ui.is-now.now-layout-02 #view-now .disc { max-width: 100%; }
+  body.touch-ui.is-now.now-layout-02 #view-now .now__lyrics {
+    transform: none !important;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* 04 · 上下分屏：上半行只装封面 + 歌名/控制，下半行只装歌词。
+     - 封面列用 100cqh 封顶（.now__art 是 size container），封面再大也不会
+       长到下半行；这是「封面被 DIY 放大后压到歌词」的真正来源。
+     - .lyrics 的窗口固定成面板高度（原来是 4.4 行，比面板高 2px，靠父级
+       overflow:hidden 硬裁），当前句仍在面板中线，上下各留 1.5 行滚动缓冲。 */
+  body.touch-ui.is-now.now-layout-04 #view-now .now__stage {
+    grid-template-rows: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    overflow: hidden;
+  }
+  body.touch-ui.is-now.now-layout-04 #view-now .now__art {
+    transform: none !important;
+    min-height: 0;
+    overflow: hidden;
+    align-self: stretch;
+    container-type: size;
+  }
+  body.touch-ui.is-now.now-layout-04 #view-now .disc {
+    width: min(calc(28vw * var(--diy-cover, 1)), calc(32vh * var(--diy-cover, 1)), 100cqh);
+    max-width: 100%;
+  }
+  body.touch-ui.is-now.now-layout-04 #view-now .now__lyrics {
+    transform: none !important;
+    min-height: 0;
+    overflow: hidden;
+  }
+  body.touch-ui.is-now.now-layout-04 #view-now .lyrics {
+    height: 100% !important;
+    max-height: 100% !important;
+    box-sizing: border-box;
+    margin: 0 !important;
+    padding: calc(var(--ly-row) * 1.5) 0 !important;
+  }
+
+  /* 06 · 极小封面：歌词面板的左上边界按封面实际尺寸算，封面放大也不会
+     和面板相交；top 从 150 抬到封面下沿 + 24，面板整体仍留在舞台内。 */
+  body.touch-ui.is-now.now-layout-06 #view-now .now__stage { overflow: hidden; }
+  body.touch-ui.is-now.now-layout-06 #view-now .now__lyrics {
+    top: max(24vh, calc(104px + 96px * var(--diy-cover, 1) + 24px));
+    left: max(18vw, calc(clamp(20px, 5vw, 64px) + 96px * var(--diy-cover, 1) + 24px));
+    right: 18vw;
+    bottom: 16vh;
+    overflow: hidden;
+  }
+  body.touch-ui.is-now.now-layout-06 #view-now .lyrics {
+    height: 100% !important;
+    max-height: 100% !important;
+    min-height: 0;
+    box-sizing: border-box;
+    margin: 0;
+    padding: calc(var(--ly-row) * 1.5) 0 !important;
+  }
+}
+
+@media (max-width: 480px) {
+  body.is-now[class*="now-layout-"] #view-now .disc {
+    width: calc(56px * var(--diy-cover, 1)) !important;
+    height: calc(56px * var(--diy-cover, 1)) !important;
+  }
+  body.is-now[class*="now-layout-"] #view-now .ntr { width: 27px !important; height: 27px !important; }
+  body.is-now[class*="now-layout-"] #view-now .ntr .ico { width: 14px !important; height: 14px !important; }
+  body.is-now[class*="now-layout-"] #view-now .ntr--play { width: 34px !important; height: 34px !important; }
+  body.is-now[class*="now-layout-"] #view-now .ntr--play .ico { width: 16px !important; height: 16px !important; }
+  body.is-now[class*="now-layout-"] #view-now .now__stage { padding-top: 60px !important; }
+}
+
+/* 选择器在窄屏下也保持两列，预览线框不挤压 */
+@media (max-width: 560px) {
+  .nl-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .nl-card { padding: 6px; }
+  .nl-card__text em { display: none; }
+}

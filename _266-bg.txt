@@ -1,0 +1,117 @@
+const BG_FS = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 o;
+uniform vec3 uEye, uRight, uUp, uFwd;
+uniform float uTan, uAsp, uT, uBass, uAct, uCut;
+uniform sampler2D uGlyph, uRamp;
+uniform vec4 uBox;
+
+float h21(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  float a = h21(i), b = h21(i + vec2(1.0, 0.0)), c = h21(i + vec2(0.0, 1.0)), d = h21(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+/* 顺坡（往下淌）与横坡两个方向；灯的方位；影子落的方向 */
+const vec2 FLW = vec2(0.2148, -0.9766);
+const vec2 CRS = vec2(0.9766, 0.2148);
+const vec3 LG  = vec3(-0.706, 0.604, 0.170);   /* 很低的一盏灯（约 10°） */
+const vec3 L2  = vec3(-0.400, 0.480, 0.782);   /* 高处那盏，管明暗 */
+const vec2 SD  = vec2(0.7595, -0.6505);
+
+vec4 gtex(vec2 w){
+  vec2 uv = (w - uBox.xy) / uBox.zw;
+  if (uv.x < -0.02 || uv.x > 1.02 || uv.y < -0.02 || uv.y > 1.02) return vec4(0.0);
+  return texture(uGlyph, uv);
+}
+/* 高度场：G 通道就是蜡堆起来的高度（0.024 = 埂顶） */
+float gh(vec2 w){ return gtex(w).g * 0.0240; }
+
+void main(){
+  vec2 nd = vUV * 2.0 - 1.0;
+  vec3 dir = normalize(uRight * (nd.x * uTan * uAsp) + uUp * (nd.y * uTan) + uFwd);
+  vec3 Vv = -dir;
+
+  vec3 col = vec3(0.0135, 0.0108, 0.0085);
+  col += vec3(0.0205, 0.0152, 0.0102) * pow(max(0.0, 1.0 - length(nd * vec2(0.84, 1.0))), 2.6);
+
+  /* 摊在斜面上的那层薄蜡 —— 流纹本身也是蜡，只是很薄 */
+  float tq = -uEye.z / min(dir.z, -0.010);
+  vec2 wq = uEye.xy + dir.xy * tq;
+  float H = gh(wq)
+          + 0.0019 * vnoise(vec2(dot(wq, CRS) * 190.0, dot(wq, FLW) * 5.0))
+          + 0.0008 * vnoise(vec2(dot(wq, CRS) * 560.0, dot(wq, FLW) * 15.0));
+
+  /* 屏幕导数反解世界梯度：高度场是连续的，所以这条链是干净的 */
+  vec2 dxw = dFdx(wq), dyw = dFdy(wq);
+  float hx = dFdx(H), hy = dFdy(H);
+  float det = dxw.x * dyw.y - dxw.y * dyw.x;
+  vec2 g = (abs(det) > 1e-13) ? vec2((hx * dyw.y - hy * dxw.y) / det, (hy * dxw.x - hx * dyw.x) / det) : vec2(0.0);
+  g = clamp(g, vec2(-9.0), vec2(9.0));
+  vec3 N = normalize(vec3(-g, 1.0));
+
+  if (dir.z < -0.008) {
+    float t = -uEye.z / dir.z;
+    if (t > 0.02 && t < 26.0) {
+      vec2 w = uEye.xy + dir.xy * t;
+      vec2 uv = (w - uBox.xy) / uBox.zw;
+      vec4 g4 = gtex(w);
+      float m = g4.g;        /* 高度 */
+      float crest = g4.r;    /* 埂顶那道亮脊 */
+      float bead = g4.b;     /* 泪珠顶上的一点高光 */
+
+      float pr = 1.0, pass = 1.0;
+      if (uv.x > -0.08 && uv.x < 1.08 && uv.y > -0.08 && uv.y < 1.08) {
+        pr = texture(uRamp, vec2(clamp(uv.x, 0.002, 0.998), 0.5)).r;
+        pass = 1.0 - smoothstep(uCut - 0.02, uCut + 0.045, uv.x);
+      }
+      float lit = smoothstep(0.02, 0.52, pr);      /* 唱到这儿，这截蜡才堆起来 */
+
+      float wax   = smoothstep(0.10, 0.50, m);                       /* 有蜡的地方 */
+      float ridge = smoothstep(0.52, 0.86, m) * (0.35 + 0.65 * lit); /* 埂 */
+
+      /* —— 长影：灯很低，埂就是一道坝，影子往右下拖出去 —— */
+      float sh = 0.0;
+      if (uv.y > -1.05 && uv.y < 1.15 && uv.x > -0.45 && uv.x < 2.10) {
+        for (int i = 1; i <= 9; i++) {
+          float s = float(i) * 0.0155;
+          float need = s * 0.178;
+          sh = max(sh, smoothstep(need * 0.60, need * 1.55, gh(w + SD * s)));
+        }
+      }
+
+      vec3 Ldn = normalize(LG);
+      float ndl = max(dot(N, normalize(L2)), 0.0);
+      float ndlLow = max(dot(N, Ldn), 0.0);
+      vec3 Hv = normalize(normalize(L2) + Vv);
+      float spec = pow(max(dot(N, Hv), 0.0), 30.0);
+      float spec2 = pow(max(dot(N, normalize(Ldn + Vv)), 0.0), 60.0);
+      float fres = pow(1.0 - max(dot(N, Vv), 0.0), 3.0);
+
+      /* 冷掉的蜡哑，被烤到的地方还亮着一层油 */
+      vec3 alb = mix(vec3(0.062, 0.045, 0.030), vec3(0.93, 0.805, 0.615), wax * 0.94 + 0.06);
+      vec3 c = alb * (0.14 + 0.92 * ndl) * (1.0 - 0.80 * sh);
+
+      /* 蜡是半透的：光从埂里透过来，边缘一层暖橙 */
+      c += vec3(0.62, 0.30, 0.11) * (wax * 0.30 + ridge * 0.34) * (0.35 + 0.65 * ndlLow) * (1.0 - 0.6 * sh);
+      /* 油亮的高光：埂顶、泪珠、还没干的那截 */
+      c += vec3(1.0, 0.955, 0.885) * spec * (0.10 + 0.80 * ridge + 0.60 * bead + 0.18 * wax);
+      c += vec3(1.0, 0.90, 0.70) * spec2 * (0.25 + 0.75 * wax);
+      c += vec3(1.0, 0.92, 0.78) * fres * (0.04 + 0.34 * wax);
+      /* 埂顶那道被灯压出来的亮脊 */
+      c += vec3(1.0, 0.930, 0.820) * crest * 0.62 * (0.30 + 0.70 * ndl) * (1.0 - 0.65 * sh);
+      /* 还没凝住的那一截：湿、亮、形状还软 */
+      c = mix(c, c * 0.70 + vec3(1.0, 0.88, 0.70) * (spec * 0.9 + 0.045), (1.0 - pass) * (0.22 + 0.55 * wax));
+      /* 淌下来的前缘，那道还没收住的亮边 */
+      float front = exp(-pow((uv.x - uCut) / 0.013, 2.0));
+      c += vec3(1.0, 0.86, 0.62) * front * 0.075;
+
+      col = c;
+    }
+  }
+
+  float n = h21(vUV * 640.0 + uT * 0.5);
+  col += (n - 0.5) * 0.004;
+  o = vec4(max(col, vec3(0.0)), 1.0);
+}`;/* 背景：斜面上一片薄蜡。字是蜡埂 —— 蜡被挡住、堆得最高、把光拦成一条长影 */

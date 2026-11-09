@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<!-- 真机视口：不做 1280 缩放。viewport-fit=cover 让刘海/圆角屏能铺满，
+     安全区由 CSS 的 env(safe-area-inset-*) 单独处理。 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#f7f7fa">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>LIZI</title>
+<!-- 字体和桌面同一条异步加载：连不上 Google Fonts 时用系统字体兜底，
+     绝不阻塞页面（桌面版曾因为字体阻塞白屏十几秒，这里沿用同样的写法）。 -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="./mobile.css">
+</head>
+<body class="m-body">
+
+<!-- 图标：只留手机版用得到的几个，内联 sprite 避免额外请求 -->
+<svg class="m-defs" aria-hidden="true" focusable="false">
+  <symbol id="mi-play" viewBox="0 0 24 24"><path d="M7.5 4.8 19 12l-11.5 7.2z"/></symbol>
+  <symbol id="mi-pause" viewBox="0 0 24 24"><rect x="7.2" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.2" y="5" width="3.6" height="14" rx="1.2"/></symbol>
+  <symbol id="mi-next" viewBox="0 0 24 24"><path d="M6.5 5.2 15 12l-8.5 6.8z"/><rect x="16.2" y="5" width="2.4" height="14" rx="1"/></symbol>
+  <symbol id="mi-prev" viewBox="0 0 24 24"><path d="M17.5 5.2 9 12l8.5 6.8z"/><rect x="5.4" y="5" width="2.4" height="14" rx="1"/></symbol>
+  <symbol id="mi-note" viewBox="0 0 24 24"><path d="M9 18.2V5.4l9-2v12.2"/><circle cx="6.6" cy="18.4" r="2.6"/><circle cx="15.6" cy="15.8" r="2.6"/></symbol>
+  <symbol id="mi-down" viewBox="0 0 24 24"><path d="M5 9.5 12 16.5 19 9.5"/></symbol>
+  <symbol id="mi-back" viewBox="0 0 24 24"><path d="M15.5 5 8 12l7.5 7"/></symbol>
+</svg>
+
+<!-- 背景：当前封面的一张放大图 + 纸色纱。不用 filter:blur ——
+     手机软件光栅下整层模糊每帧重画，是返回大厅卡死的同类开销。 -->
+<div class="m-backdrop" id="m-backdrop" aria-hidden="true">
+  <img id="m-backdrop-img" alt="" decoding="async">
+  <div class="m-backdrop__veil"></div>
+</div>
+
+<!-- ============================ 大厅 ============================ -->
+<main class="m-view m-hall" id="m-hall">
+  <header class="m-top">
+    <div class="m-brand">LIZI<em>mobile</em></div>
+    <!-- 搜索/设置还没接，先不放占位按钮：界面上出现的每个按钮都得有真实行为 -->
+  </header>
+
+  <div class="m-scroll" id="m-scroll">
+    <!-- 海报：目前/上次播放 -->
+    <section class="m-hero" id="m-hero">
+      <div class="m-hero__art">
+        <img id="m-hero-img" alt="" decoding="async">
+        <span class="m-hero__ph" id="m-hero-ph" aria-hidden="true"><svg class="m-ico"><use href="#mi-note"/></svg></span>
+        <div class="m-hero__shade" aria-hidden="true"></div>
+        <div class="m-hero__meta">
+          <p class="m-hero__tag" id="m-hero-tag">上次播放</p>
+          <h1 class="m-hero__title" id="m-hero-title">还没有播放</h1>
+          <p class="m-hero__artist" id="m-hero-artist">从下面的推荐开始</p>
+        </div>
+        <button class="m-hero__play" id="m-hero-play" aria-label="播放">
+          <svg class="m-ico m-ico--solid m-ico--when-play" aria-hidden="true"><use href="#mi-play"/></svg>
+          <svg class="m-ico m-ico--solid m-ico--when-pause" aria-hidden="true"><use href="#mi-pause"/></svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- 每日推荐：圆形卡环，拖动旋转（桌面 hall 的环形推荐手感） -->
+    <section class="m-sec m-sec--ring">
+      <h2 class="m-sec__title">为你推荐<span class="m-sec__hint" id="m-ring-hint">拖动圆环</span></h2>
+      <div class="m-ring-view" id="m-ring-view">
+        <div class="m-ring" id="m-ring"></div>
+      </div>
+    </section>
+
+    <!-- 形态：横滑卡片，点开进横屏 -->
+    <section class="m-sec">
+      <h2 class="m-sec__title">形态<span class="m-sec__hint">进入后请横屏</span></h2>
+      <div class="m-rail m-rail--stage" id="m-rail-stage"></div>
+    </section>
+  </div>
+</main>
+
+<!-- ============================ 迷你播放条 ============================ -->
+<div class="m-bar" id="m-bar" hidden>
+  <div class="m-bar__prog" aria-hidden="true"><i class="m-bar__paint" id="m-bar-paint"></i></div>
+  <div class="m-bar__row">
+    <button class="m-bar__art" id="m-bar-open" aria-label="打开播放页">
+      <img id="m-bar-img" alt="" decoding="async">
+      <span class="m-bar__ph" id="m-bar-ph" aria-hidden="true"><svg class="m-ico"><use href="#mi-note"/></svg></span>
+    </button>
+    <button class="m-bar__text" id="m-bar-text">
+      <span class="m-bar__title" id="m-bar-title">未播放</span>
+      <span class="m-bar__artist" id="m-bar-artist">—</span>
+    </button>
+    <button class="m-icbtn m-icbtn--play" id="m-bar-play" aria-label="播放">
+      <svg class="m-ico m-ico--solid m-ico--when-play" aria-hidden="true"><use href="#mi-play"/></svg>
+      <svg class="m-ico m-ico--solid m-ico--when-pause" aria-hidden="true"><use href="#mi-pause"/></svg>
+    </button>
+    <button class="m-icbtn" id="m-bar-next" aria-label="下一首">
+      <svg class="m-ico m-ico--solid" aria-hidden="true"><use href="#mi-next"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- ============================ 竖屏播放页 ============================ -->
+<section class="m-view m-now" id="m-now" hidden>
+  <div class="m-now__bg" id="m-now-bg" aria-hidden="true"></div>
+  <header class="m-now__top">
+    <button class="m-icbtn m-icbtn--d" id="m-now-back" aria-label="返回大厅">
+      <svg class="m-ico m-ico--s" aria-hidden="true"><use href="#mi-down"/></svg>
+    </button>
+    <span class="m-now__fmt" id="m-now-fmt"></span>
+    <button class="m-icbtn m-icbtn--d" id="m-now-mode" aria-label="播放模式">顺序</button>
+  </header>
+
+  <div class="m-now__body">
+    <div class="m-now__art"><img id="m-now-img" alt="" decoding="async"></div>
+    <h2 class="m-now__title" id="m-now-title">未播放</h2>
+    <p class="m-now__artist" id="m-now-artist">—</p>
+    <div class="m-now__lyric" id="m-now-lyric" aria-live="off">—</div>
+  </div>
+
+  <div class="m-now__ctrl">
+    <button class="m-now__btn" id="m-now-prev" aria-label="上一首">
+      <svg class="m-ico m-ico--solid" aria-hidden="true"><use href="#mi-prev"/></svg>
+    </button>
+    <button class="m-now__btn m-now__btn--play" id="m-now-play" aria-label="播放">
+      <svg class="m-ico m-ico--solid m-ico--when-play" aria-hidden="true"><use href="#mi-play"/></svg>
+      <svg class="m-ico m-ico--solid m-ico--when-pause" aria-hidden="true"><use href="#mi-pause"/></svg>
+    </button>
+    <button class="m-now__btn" id="m-now-next" aria-label="下一首">
+      <svg class="m-ico m-ico--solid" aria-hidden="true"><use href="#mi-next"/></svg>
+    </button>
+  </div>
+
+  <!-- 底部渐变 dock：桌面播放页的同款招牌件 -->
+  <footer class="m-dock" id="m-dock">
+    <button class="m-dock__art" id="m-dock-art" aria-label="播放/暂停">
+      <img id="m-dock-img" alt="" decoding="async">
+      <span class="m-dock__cue" aria-hidden="true">
+        <svg class="m-ico m-ico--solid m-ico--when-play"><use href="#mi-play"/></svg>
+        <svg class="m-ico m-ico--solid m-ico--when-pause"><use href="#mi-pause"/></svg>
+      </span>
+    </button>
+    <div class="m-dock__bar" id="m-dock-bar" role="slider" aria-label="播放进度" tabindex="0">
+      <div class="m-dock__paint" id="m-dock-paint"></div>
+      <div class="m-dock__head" id="m-dock-head"></div>
+      <span class="m-dock__time m-dock__time--cur" id="m-dock-cur">0:00</span>
+      <span class="m-dock__time m-dock__time--total" id="m-dock-total">0:00</span>
+    </div>
+  </footer>
+</section>
+
+<!-- ============================ 横屏形态 ============================ -->
+<section class="m-view m-stage" id="m-stage" hidden>
+  <iframe id="m-stage-frame" allow="autoplay; fullscreen; encrypted-media" title="形态"></iframe>
+  <div class="m-stage__hud" id="m-stage-hud">
+    <button class="m-stage__btn" id="m-stage-back">
+      <svg class="m-ico m-ico--s" aria-hidden="true"><use href="#mi-back"/></svg><span>返回</span>
+    </button>
+    <span class="m-stage__name" id="m-stage-name"></span>
+    <span class="m-stage__spacer" aria-hidden="true"></span>
+  </div>
+</section>
+
+<!-- 方向引导：只有我们自己让用户转，用户不用猜 -->
+<div class="m-rotate" id="m-rotate" hidden>
+  <div class="m-rotate__phone" aria-hidden="true"><i class="m-rotate__screen"></i></div>
+  <p class="m-rotate__text" id="m-rotate-text">请横屏观看</p>
+</div>
+
+<!-- 播放器内核复用桌面：api.js → beat.js → glide.js → player.js。
+     不引 app.js / app.css —— 那两套绑死桌面 DOM。 -->
+<script src="../api.js"></script>
+<script src="../beat.js"></script>
+<script src="../audio/glide.js" defer></script>
+<script src="../player.js"></script>
+<script src="./mobile.js"></script>
+</body>
+</html>

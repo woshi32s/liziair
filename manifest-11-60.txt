@@ -1,0 +1,50 @@
+011|plasma|等离子体|WebGL|经典等离子体，色相缓缓流动。
+012|raymarch-cave|光行洞穴|WebGL|光线行进，穿越无尽洞穴。
+013|water-ripple|水波涟漪|WebGL|点击即涟漪，折射荡漾。
+014|kaleidoscope|万花筒|WebGL|镜像万花筒，鼠标轻旋图案。
+015|liquid-metal|液态金属|WebGL|熔融金属流淌，光影游移。
+016|aurora|极光|WebGL|噪声织就的极光帷幕。
+017|truchet-glow|瓷砖光河|WebGL|瓷砖连通成河，光点奔流不息。
+018|infinite-zoom|无限缩放|WebGL|自相似图案，无尽下潜。
+019|ink-clouds|墨云|WebGL|域扭曲噪声，晕染如墨。
+020|grid-horizon|网格地平线|WebGL|合成波网格与不落之日。
+021|kinetic-type|动态字|DOM|文字弹簧跟随，鼠标一碰就跳舞。
+022|text-scramble|乱码解码|DOM|悬停即解码，字符渐次归位。
+023|outline-pulse|轮廓呼吸|DOM|空心大字，随呼吸明灭。
+024|marquee-wall|字幕墙|DOM|无限字幕墙，速度随鼠标游走。
+025|ascii-cam|字符相机|Canvas 2D|摄像头画面化作字符现场转写。
+026|split-flap|翻页字牌|DOM|机场翻页牌，翻出时间与句子。
+027|code-rain|代码雨|Canvas 2D|数字之雨中落下真实话语。
+028|wave-text|波浪文字|SVG|文字沿正弦起伏，鼠标激起浪花。
+029|gradient-mask|文字之窗|CSS|流动的渐变，只透过文字可见。
+030|glitch-title|故障标题|DOM|RGB 错位的数字故障美学。
+031|css-cube|魔方画廊|CSS|纯 CSS 三维魔方，可拖拽旋转。
+032|neumorph-panel|拟态面板|CSS|拟态控制台，旋钮开关一应俱全。
+033|loader-museum|加载博物馆|CSS|十二种纯 CSS 加载动画展览。
+034|css-sunset|纯 CSS 落日|CSS|分层剪影，落日沉入海面。
+035|gooey-button|液态按钮|SVG|黏液质感的按钮群，触碰相融。
+036|tilt-cards|透视卡片|CSS|光标所至，卡片微倾生光。
+037|drift-gallery|流动画廊|CSS|画作在水平方向无尽漂流。
+038|css-hourglass|沙漏|CSS|纯 CSS 沙漏，细沙长流。
+039|morph-blob|变形细胞|CSS|圆角平滑变形，细胞般呼吸。
+040|iso-room|等距房间|CSS|等距视角的房间，昼夜悄悄交替。
+041|spirograph|万花尺|Canvas 2D|参数方程绘制繁花曲线，滑杆调参。
+042|phyllotaxis|向日葵|Canvas 2D|黄金角螺旋，一粒粒生长。
+043|lissajous|示波之美|Canvas 2D|李萨如曲线在示波器上起舞。
+044|moire|摩尔纹|Canvas 2D|两组圆环干涉出摩尔纹，鼠标驱动。
+045|voronoi|泰森多边形|Canvas 2D|漂移点阵编织的沃罗诺伊图。
+046|hyperbolic|双曲镶嵌|Canvas 2D|庞加莱圆盘中的无限镶嵌。
+047|fourier-draw|傅里叶绘笔|Canvas 2D|手绘轨迹，傅里叶圆环复现。
+048|sierpinski|分形深渊|Canvas 2D|谢尔宾斯基三角，无尽放大。
+049|double-pendulum|混沌摆|Canvas 2D|双摆混沌，轨迹自成一幅画。
+050|superformula|超公式|Canvas 2D|一组公式，变形出万物轮廓。
+051|lsystem-tree|生长之树|Canvas 2D|分形树随风水摇曳生长。
+052|elementary-ca|元胞自动机|Canvas 2D|Rule 30/90/110 演化探索器。
+053|life-trails|生命游戏|Canvas 2D|康威生命演化，色彩留痕。
+054|noise-mountains|噪声山脉|Canvas 2D|视差山脉自噪声中隆起。
+055|recursive-squares|递归方块|Canvas 2D|递归细分，点击即重生。
+056|marching-terrain|等高行军|Canvas 2D|行进方块绘制流动等高线。
+057|truchet-dots|瓷砖奔流|Canvas 2D|瓷砖轨道上的光点流水。
+058|lightning|闪电树|Canvas 2D|点击之处，雷光炸裂成枝。
+059|coral-growth|珊瑚生长|Canvas 2D|差分生长，珊瑚缓缓开枝。
+060|galaxy|星系|Canvas 2D|旋臂粒子汇聚成星系。

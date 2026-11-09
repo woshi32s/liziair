@@ -1,0 +1,10 @@
+# Spotify 边车的本地状态
+
+node_modules/
+.port
+.log
+*.log
+
+# 自己注册的 Spotify App 凭证 / 授权后的 token
+.client.json
+.auth-token.json

@@ -1,0 +1,507 @@
+/* ==========================================================================
+   音效面板（eq-ui.js 专用，自注入）
+   --------------------------------------------------------------------------
+   造型照项目语言：纯白、1px hairline、墨色曲线、只有选中节点用网易云红。
+   没有阴影、没有圆角卡片、没有发光。竖滑杆全部对齐在同一条基线上 ——
+   7 段放在 grid 里，刻度、滑轨、dB 读数三行共用同一套行高。
+   ========================================================================== */
+
+/* ==========================================================================
+   整页视图 #view-audio
+   和 hall / browse / lab 同一套约定：top:0 + 自己留出顶栏高度 + 纯白底，
+   内容往上滚时从玻璃顶栏下面经过（所以 app.js 里也接进了 bindTopbarScroll）。
+   ========================================================================== */
+.view--audio {
+  top: 0;
+  bottom: var(--player-h, 92px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #fff;
+  padding-top: calc(var(--topbar-h, 64px) + var(--sp-5, 20px));
+  padding-bottom: var(--sp-6, 24px);
+  overscroll-behavior: contain;
+}
+.audio-page { padding: 0 var(--gutter, 32px) var(--sp-9, 56px); }
+
+.eqx {
+  --eq-ink: var(--ink, oklch(21% 0.022 270));
+  --eq-rule: var(--rule, oklch(21% 0.022 270 / 0.09));
+  --eq-accent: oklch(62% 0.22 12);
+  color: var(--eq-ink);
+  font-family: var(--font-body, "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif);
+  max-width: 1180px;
+  padding: 0 0 8px;
+}
+
+/* ---------- 头部 ---------- */
+.eqx__head { padding-bottom: var(--sp-4, 16px); }
+.eqx__title {
+  margin: 0;
+  font-size: clamp(22px, 2.2vw, 30px);
+  font-weight: 600;
+  letter-spacing: -.035em;
+  line-height: 1.1;
+}
+.eqx__sub { margin: 7px 0 0; font-size: 13px; color: var(--ink-3, oklch(58% 0.014 270)); }
+
+/* ---------- 分区 ---------- */
+.eqx__sec {
+  border-top: 1px solid var(--eq-rule);
+  padding-top: var(--sp-4, 16px);
+  margin-top: var(--sp-4, 16px);
+}
+.eqx__sec:first-of-type { margin-top: 0; }
+.eqx__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+.eqx__row--end { align-items: flex-start; gap: var(--sp-4, 16px); margin-top: 10px; }
+.eqx__h {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  flex: none;
+  min-width: 52px;
+}
+.eqx__note {
+  margin: 0;
+  flex: 1 1 320px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3, oklch(58% 0.014 270));
+}
+.eqx__actual {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--ink-2, oklch(44% 0.018 270));
+  margin-left: auto;
+  text-align: right;
+}
+.eqx__actual b { font-weight: 500; color: var(--eq-ink); }
+.eqx__actual b.is-warn { color: var(--eq-accent); font-weight: 500; }
+
+/* ---------- 通用小按钮 ---------- */
+.eqx__btn {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--ink-2, oklch(44% 0.018 270));
+  background: transparent;
+  border: 1px solid var(--eq-rule);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 140ms, border-color 140ms, background 140ms;
+  white-space: nowrap;
+}
+.eqx__btn:hover { color: var(--eq-ink); border-color: oklch(21% 0.022 270 / 0.35); }
+.eqx__btn:active { background: oklch(21% 0.022 270 / 0.05); }
+.eqx__btn:disabled { opacity: .5; cursor: default; }
+.eqx__btn--mode[aria-pressed="true"] { color: #fff; background: var(--eq-ink); border-color: var(--eq-ink); }
+
+/* ---------- 总开关 ---------- */
+.eqx__sw {
+  position: relative;
+  width: 34px; height: 19px;
+  flex: none;
+  border: 1px solid oklch(21% 0.022 270 / 0.28);
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: background 160ms, border-color 160ms;
+}
+.eqx__sw > i {
+  position: absolute; top: 2px; left: 2px;
+  width: 13px; height: 13px;
+  border-radius: 999px;
+  background: var(--ink-3, oklch(58% 0.014 270));
+  transition: transform 180ms var(--ease-out, cubic-bezier(.22,1,.36,1)), background 160ms;
+}
+.eqx__sw[aria-checked="true"] { background: var(--eq-ink); border-color: var(--eq-ink); }
+.eqx__sw[aria-checked="true"] > i { transform: translateX(15px); background: #fff; }
+.eqx__state {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px; color: var(--ink-3);
+  flex: none;
+}
+.eqx__sw:disabled { opacity: .42; cursor: not-allowed; }
+
+/* ---------- 自动过渡 ---------- */
+.eqx__glide-state {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  color: var(--ink-2, oklch(44% 0.018 270));
+  margin-left: auto;
+  text-align: right;
+  flex: none;
+}
+.eqx.is-glide-off #glide-len,
+.eqx.is-glide-off #glide-curve { opacity: .45; }
+
+/* ---------- 音质格子 ---------- */
+.eqx__chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.eqx__chips button {
+  display: flex; align-items: baseline; gap: 7px;
+  height: 34px; padding: 0 12px;
+  border: 1px solid var(--eq-rule);
+  border-radius: 3px;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 140ms, background 140ms;
+}
+.eqx__chips button b { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.eqx__chips button em {
+  font-style: normal;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--ink-4, oklch(72% 0.01 270));
+}
+.eqx__chips button u {
+  text-decoration: none;
+  font-size: 9.5px;
+  letter-spacing: .02em;
+  color: var(--ink-4, oklch(72% 0.01 270));
+  border-left: 1px solid var(--eq-rule);
+  padding-left: 7px;
+}
+.eqx__chips button:hover { border-color: oklch(21% 0.022 270 / 0.3); }
+.eqx__chips button.is-on { border-color: var(--eq-ink); background: oklch(21% 0.022 270 / 0.04); }
+.eqx__chips button.is-on b { color: var(--eq-ink); }
+
+/* ---------- 均衡器工具条 ---------- */
+.eqx__row--eq { gap: var(--sp-3, 12px); }
+.eqx__ctl { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.eqx__sel {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11.5px; color: var(--ink-3);
+}
+/* [hidden] 会被 display:inline-flex 顶掉，必须显式关掉 */
+.eqx__sel[hidden] { display: none; }
+.eqx__sel select {
+  height: 28px;
+  padding: 0 24px 0 8px;
+  font-size: 12px;
+  color: var(--eq-ink);
+  background: #fff;
+  border: 1px solid var(--eq-rule);
+  border-radius: 3px;
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, oklch(58% 0.014 270) 50%),
+                    linear-gradient(135deg, oklch(58% 0.014 270) 50%, transparent 50%);
+  background-position: right 12px top 12px, right 8px top 12px;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
+}
+.eqx__sel select:focus-visible { outline: 1px solid var(--eq-ink); outline-offset: 1px; }
+
+.eqx.is-off .eqbands,
+.eqx.is-off .eq-simple__foot { opacity: .42; pointer-events: none; }
+
+/* ---------- 7 段竖滑杆 ---------- */
+.eq-simple { margin-top: var(--sp-4, 16px); }
+/* 7 段收在一个约 860px 的带子里：每个推子 ~120px 宽，才有"推子"的手感。
+   铺满 1140px 时每段之间空得像一张表格，反而不像均衡器。左边一列是 dB 标尺，
+   和高级画布的纵轴用同一套刻度，两种模式切换时眼睛不用重新找零位。 */
+.eqbands-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 860px;
+}
+.eqbands__scale {
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 172px;              /* 必须等于 .eqband 的拖轨行高，刻度才对得上 */
+  margin-top: 18px;           /* 让开 dB 读数那一行 */
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  color: var(--ink-4, oklch(72% 0.01 270));
+}
+.eqbands__scale span {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  line-height: 1;
+}
+.eqbands__scale span:nth-child(1) { top: 0; }
+.eqbands__scale span:nth-child(2) { top: 25%; }
+.eqbands__scale span:nth-child(3) { top: 50%; }
+.eqbands__scale span:nth-child(4) { top: 75%; }
+.eqbands__scale span:nth-child(5) { top: 100%; }
+.eqbands {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0;
+  padding-bottom: 6px;
+  border-left: 1px solid var(--eq-rule);
+  border-right: 1px solid var(--eq-rule);
+}
+.eqband {
+  display: grid;
+  grid-template-rows: 18px 172px 18px;
+  justify-items: center;
+  align-items: stretch;
+  min-width: 0;
+}
+.eqband__db {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--ink-2);
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.eqband.is-boost .eqband__db { color: var(--eq-ink); font-weight: 500; }
+.eqband.is-cut .eqband__db { color: var(--ink-3); }
+.eqband__hz {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  line-height: 18px;
+}
+.eqband__track {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  cursor: ns-resize;
+  touch-action: none;
+  outline: none;
+}
+/* 0dB 中线：整条拖轨唯一的一条横线，滑杆的"零位"就是它 */
+.eqband__track::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  height: 1px;
+  background: oklch(21% 0.022 270 / 0.16);
+}
+/* 竖向导轨 */
+.eqband__track::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 0; bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--eq-rule);
+}
+.eqband__zero { display: none; }
+.eqband__fill {
+  position: absolute;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  bottom: calc(var(--fill-b, 50%));
+  height: var(--fill-h, 0%);
+  background: oklch(21% 0.022 270 / 0.35);
+  pointer-events: none;
+}
+.eqband.is-boost .eqband__fill,
+.eqband.is-cut .eqband__fill { background: var(--eq-ink); }
+.eqband__thumb {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--v, 0.5) * 100%);
+  width: 28px;
+  height: 3px;
+  transform: translate(-50%, 50%);
+  background: var(--eq-ink);
+  pointer-events: none;
+  transition: transform 90ms var(--ease-out, cubic-bezier(.22,1,.36,1));
+}
+.eqband__track:hover .eqband__thumb,
+.eqband__track.is-drag .eqband__thumb,
+.eqband__track:focus-visible .eqband__thumb { transform: translate(-50%, 50%) scaleX(1.14); }
+.eqband__track:focus-visible { box-shadow: none; }
+.eqband__track:focus-visible::before { background: oklch(21% 0.022 270 / 0.55); height: 1px; }
+
+.eq-simple__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4, 16px);
+  border-top: 1px solid var(--eq-rule);
+  padding-top: 10px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.eqw { display: inline-flex; align-items: center; gap: 9px; }
+.eqw__lab { font-size: 11.5px; color: var(--ink-3); }
+.eqw__val {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px; color: var(--ink-2); min-width: 30px;
+}
+.eqw__input {
+  -webkit-appearance: none; appearance: none;
+  width: 128px; height: 14px; background: transparent; cursor: ew-resize;
+}
+.eqw__input::-webkit-slider-runnable-track {
+  height: 1px; background: oklch(21% 0.022 270 / 0.2);
+}
+.eqw__input::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 3px; height: 13px; margin-top: -6px;
+  background: var(--eq-ink); border: 0; border-radius: 1px;
+}
+.eqx__preamp, .eqx__haas {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.eqx__haas { color: var(--ink-4, oklch(72% 0.01 270)); }
+.eqx__haas[hidden] { display: none; }
+
+/* ---------- 高级模式：曲线编辑器 ---------- */
+.eq-adv { margin-top: var(--sp-4, 16px); }
+.eq-adv[hidden] { display: none; }
+.eq-adv__bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  flex-wrap: wrap;
+}
+.eq-adv__sp { flex: 1; }
+.eq-adv__count, .eq-adv__sel {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.eq-adv__sel { color: var(--ink-2); min-width: 0; }
+.eq-canvas-wrap {
+  position: relative;
+  height: 330px;
+  border: 1px solid var(--eq-rule);
+  background: #fff;
+  overflow: hidden;
+}
+#eq-canvas { display: block; width: 100%; height: 100%; cursor: crosshair; outline: none; }
+#eq-canvas:focus-visible { outline: none; }
+.eq-adv__hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--ink-4, oklch(72% 0.01 270));
+  line-height: 1.5;
+}
+.eq-adv__hint--dim { margin-top: 3px; color: oklch(72% 0.01 270 / 0.85); }
+
+/* ---------- 页脚（信号链 + 存储位置） ---------- */
+.eqx__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4, 16px);
+  flex-wrap: wrap;
+  margin-top: var(--sp-6, 24px);
+  padding-top: var(--sp-3, 12px);
+  border-top: 1px solid var(--eq-rule);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10.5px;
+  color: var(--ink-4, oklch(72% 0.01 270));
+  line-height: 1.6;
+}
+
+/* ==========================================================================
+   播放页：半页覆盖（从底部滑出，只有顶部圆角，≈52% 视口高）
+   ========================================================================== */
+.eqsheet {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+}
+.eqsheet[hidden] { display: none; }
+.eqsheet__scrim {
+  position: absolute;
+  inset: 0;
+  background: oklch(21% 0.022 270 / 0.26);
+  opacity: 0;
+  transition: opacity 260ms var(--ease-out, cubic-bezier(.22,1,.36,1));
+  pointer-events: auto;
+  -webkit-backdrop-filter: blur(1.5px);
+  backdrop-filter: blur(1.5px);
+}
+.eqsheet.is-open .eqsheet__scrim { opacity: 1; }
+.eqsheet__panel {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 52vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border-radius: 14px 14px 0 0;
+  transform: translateY(100%);
+  transition: transform 320ms var(--ease-out, cubic-bezier(.22,1,.36,1));
+  pointer-events: auto;
+  will-change: transform;
+}
+.eqsheet.is-open .eqsheet__panel { transform: translateY(0); }
+.eqsheet__bar {
+  position: relative;
+  flex: none;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--eq-rule);
+}
+.eqsheet__grip {
+  position: absolute;
+  top: 7px; left: 50%;
+  width: 38px; height: 3px;
+  margin-left: -19px;
+  border-radius: 999px;
+  background: oklch(21% 0.022 270 / 0.18);
+  cursor: grab;
+  touch-action: none;
+  /* 抓取热区放大到整条顶部，不然 3px 的条太难抓 */
+  padding: 0;
+}
+.eqsheet__grip::after {
+  content: "";
+  position: absolute;
+  left: -40px; right: -40px; top: -7px; bottom: -13px;
+}
+.eqsheet__grip:active { cursor: grabbing; }
+.eqsheet__t { margin: 0; font-size: 13px; font-weight: 500; letter-spacing: .02em; }
+.eqsheet__x {
+  position: absolute;
+  right: 10px;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  color: var(--ink-3);
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.eqsheet__x:hover { color: var(--eq-ink); background: oklch(21% 0.022 270 / 0.05); }
+.eqsheet__host {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 24px 24px;
+  overscroll-behavior: contain;
+}
+
+/* 半页里同一套内容的紧凑版：隐藏大标题、压低画布和滑杆高度 */
+.eqsheet .eqx__head { display: none; }
+.eqsheet .eqx { padding-bottom: 0; }
+.eqsheet .eqx__sec:first-of-type { border-top: 0; padding-top: 8px; margin-top: 0; }
+.eqsheet .eqband { grid-template-rows: 16px 104px 16px; }
+.eqsheet .eqband__db, .eqsheet .eqband__hz { line-height: 16px; }
+.eqsheet .eqbands__scale { height: 104px; margin-top: 16px; }
+.eqsheet .eqbands { max-width: 620px; }
+.eqsheet .eq-canvas-wrap { height: 190px; }
+.eqsheet .eqx__sub { display: none; }
+.eqsheet .eqbands { gap: 2px; }
+
+@media (max-width: 900px) {
+  .eqsheet__host { padding: 4px 14px 18px; }
+  .eqx__title { font-size: 20px; }
+  .eqband { grid-template-rows: 16px 120px 16px; }
+  .eq-canvas-wrap { height: 230px; }
+}

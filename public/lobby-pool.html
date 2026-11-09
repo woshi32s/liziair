@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI · 池核大厅</title>
+<!-- 只引同源 tokens.css；绝不引外链字体（会卡住内联脚本） -->
+<link rel="stylesheet" href="tokens.css">
+<style>
+/* ============================================================
+   池核大厅 · v1
+   一个空泳池。瓷砖就是卡片，缝就是网格。
+   要点：不要把卡片做成「面板」——不要大阴影、不要大圆角、不要边框高光。
+        漂在水里的瓷砖，边缘是柔的，光是从上面下来的。
+   ============================================================ */
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  :root{
+    --tile-hi:   #f7fcfb;
+    --tile:      #e9f4f3;
+    --tile-lo:   #d6ebe9;
+    --grout:     rgba(96,146,144,.20);
+    --grout-hi:  rgba(96,146,144,.34);
+    --water:     rgba(255,255,255,.72);
+    --teal:      #4c8f8b;
+    --teal-deep: #2c6f6c;
+    --ink:       #1e2f2e;
+    --ink-2:     #4a6361;
+    --ink-3:     #7d9694;
+  }
+  body{
+    font-family:var(--font-body);
+    color:var(--ink);
+    overflow:hidden;
+    user-select:none;
+    -webkit-font-smoothing:antialiased;
+    /* 池壁：上亮下暗的青色，光从左上方来 */
+    background:
+      radial-gradient(140% 100% at 26% -14%, #ffffff 0%, rgba(255,255,255,0) 58%),
+      linear-gradient(178deg, var(--tile-hi) 0%, var(--tile) 42%, var(--tile-lo) 100%);
+  }
+
+  /* ---------- 水：两层缓慢漂移的光斑（caustics） ---------- */
+  .water,.water--b{
+    position:fixed; inset:-12%; pointer-events:none; z-index:0;
+    filter:blur(26px); mix-blend-mode:screen;
+  }
+  .water{
+    background:
+      radial-gradient(26% 20% at 18% 26%, rgba(255,255,255,.95), transparent 70%),
+      radial-gradient(22% 26% at 62% 18%, rgba(214,247,244,.85), transparent 72%),
+      radial-gradient(30% 22% at 84% 62%, rgba(255,255,255,.8), transparent 74%),
+      radial-gradient(24% 18% at 36% 74%, rgba(206,244,241,.8), transparent 72%);
+    animation:drift-a 34s ease-in-out infinite alternate;
+  }
+  .water--b{
+    background:
+      radial-gradient(18% 26% at 74% 34%, rgba(255,255,255,.75), transparent 70%),
+      radial-gradient(28% 18% at 24% 56%, rgba(222,250,247,.7), transparent 74%),
+      radial-gradient(20% 22% at 48% 88%, rgba(255,255,255,.6), transparent 72%);
+    animation:drift-b 47s ease-in-out infinite alternate;
+    opacity:.8;
+  }
+  @keyframes drift-a{
+    0%{transform:translate3d(-2%,-1.5%,0) scale(1.04)}
+    50%{transform:translate3d(1.6%,1.2%,0) scale(1.1)}
+    100%{transform:translate3d(-1%,2%,0) scale(1.06)}
+  }
+  @keyframes drift-b{
+    0%{transform:translate3d(2%,1%,0) scale(1.08)}
+    100%{transform:translate3d(-2.4%,-1.6%,0) scale(1.02)}
+  }
+
+  /* ---------- 水线：池壁上那道折光的亮带 ----------
+     放在最上层（z 5）**横穿所有瓷砖**，这是最像「水下」的一笔：
+     现实中水线就是会盖在池壁的瓷砖上。 */
+  .waterline{
+    position:fixed; left:0; right:0; top:37%; height:2px; z-index:5; pointer-events:none;
+    opacity:.85;
+    background:linear-gradient(90deg,
+      rgba(255,255,255,0) 0%, rgba(255,255,255,.9) 18%,
+      rgba(255,255,255,.65) 52%, rgba(255,255,255,.95) 78%, rgba(255,255,255,0) 100%);
+    filter:blur(1.4px);
+    box-shadow:0 0 26px 7px rgba(255,255,255,.55), 0 -14px 40px rgba(255,255,255,.28);
+  }
+  .waterline::after{
+    content:''; position:absolute; left:0; right:0; top:2px; height:70px;
+    background:linear-gradient(180deg, rgba(255,255,255,.30), rgba(255,255,255,0) 82%);
+  }
+
+  /* ---------- 顶栏：像泳池的标识牌，越小越淡越好 ---------- */
+  .top{
+    position:relative; z-index:6; height:64px;
+    display:flex; align-items:center; gap:14px; padding:0 30px;
+  }
+  .mark{
+    font-family:var(--font-mono); font-size:var(--text-sm);
+    letter-spacing:.42em; text-transform:uppercase; color:var(--ink);
+  }
+  .mark b{ font-weight:500 }
+  .top__sep{ width:1px; height:12px; background:var(--grout-hi) }
+  .top__sub{
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    letter-spacing:.24em; text-transform:uppercase; color:var(--ink-3);
+  }
+  .top__sp{ flex:1 }
+  .hint{
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3);
+  }
+  .hint b{ color:var(--ink-2); font-weight:500 }
+  .reset{
+    appearance:none; border:0; background:transparent; cursor:pointer;
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    letter-spacing:.16em; text-transform:uppercase; color:var(--ink-3);
+    padding:6px 2px; transition:color var(--dur-fast) var(--ease-out);
+  }
+  .reset:hover{ color:var(--ink) }
+
+  /* ---------- 网格 ---------- */
+  .stage{
+    position:absolute; inset:64px 0 0; padding:0 30px 26px;
+    overflow-y:auto; overflow-x:hidden; scrollbar-width:thin;
+  }
+  .grid{ position:relative; width:100%; z-index:3 }
+
+  /* 网格线**只在拖拽时**出现。
+     平时如果一直画着，会从半透明瓷砖底下透出来，把一块大瓷砖切成好几格
+     —— 那正是「一块湿瓷砖」变成「一堆小面板」的原因。 */
+  .guide{
+    position:absolute; inset:0; pointer-events:none; z-index:1;
+    opacity:0; transition:opacity var(--dur-med) var(--ease-out);
+  }
+  .guide.is-on{ opacity:1 }
+  .guide span{
+    position:absolute;
+    border:1px solid var(--grout-hi);
+    border-radius:9px;
+    background:transparent;
+  }
+
+  /* ---------- 瓷砖 = 卡片 ---------- */
+  .tile{
+    position:absolute; top:0; left:0;
+    border-radius:9px;
+    overflow:hidden;
+    /* 湿瓷砖：极淡的白，靠一点点明暗差和柔边浮起来，不用投影 */
+    background:linear-gradient(168deg,
+      rgba(255,255,255,.60) 0%,
+      rgba(248,253,252,.42) 48%,
+      rgba(226,243,241,.34) 100%);
+    border:1px solid rgba(255,255,255,.72);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.85),
+      inset 0 -18px 30px -22px rgba(120,170,168,.35);
+    backdrop-filter:blur(3px) saturate(1.04);
+    transition:
+      left var(--dur-slow) var(--ease-out), top var(--dur-slow) var(--ease-out),
+      width var(--dur-slow) var(--ease-out), height var(--dur-slow) var(--ease-out),
+      background var(--dur-med) var(--ease-out), border-color var(--dur-med) var(--ease-out);
+  }
+  .tile:hover{
+    background:linear-gradient(168deg,
+      rgba(255,255,255,.76) 0%,
+      rgba(250,254,254,.58) 48%,
+      rgba(230,246,244,.46) 100%);
+    border-color:rgba(255,255,255,.95);
+  }
+  .tile.is-resizing{ transition:none; z-index:40; border-color:rgba(255,255,255,1) }
+  .tile__in{
+    position:relative; z-index:2; height:100%;
+    display:flex; flex-direction:column; padding:16px 18px;
+  }
+
+  /* 瓷砖的编号：像泳道的牌子 */
+  .lane{
+    display:flex; align-items:center; gap:7px;
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    letter-spacing:.22em; text-transform:uppercase; color:var(--ink-3);
+  }
+  .lane em{ font-style:normal; color:var(--teal); opacity:.85 }
+
+  /* 改尺寸的把柄：一根很短的斜线，不要做成按钮 */
+  .grip{
+    position:absolute; right:7px; bottom:7px; z-index:6;
+    width:26px; height:26px; display:grid; place-items:center;
+    cursor:nwse-resize; opacity:0; color:var(--ink-3);
+    transition:opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  }
+  .tile:hover .grip, .tile.is-resizing .grip{ opacity:.9 }
+  .grip:hover{ color:var(--teal-deep) }
+
+  /* ================= 各块内容 ================= */
+
+  /* —— 正在播放：一块沉在水里的深色瓷砖 —— */
+  .tile--now{
+    background:linear-gradient(168deg,
+      rgba(38,86,84,.90) 0%,
+      rgba(28,64,63,.93) 52%,
+      rgba(20,48,47,.95) 100%);
+    border-color:rgba(255,255,255,.18);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.22),
+      inset 0 -30px 60px -30px rgba(0,0,0,.5);
+    color:rgba(240,252,251,.96);
+  }
+  .tile--now:hover{ background:linear-gradient(168deg,
+      rgba(42,94,92,.92) 0%, rgba(30,68,67,.94) 52%, rgba(22,52,51,.96) 100%) }
+  /* 水下涟漪：一圈圈极淡的环，慢慢呼吸 */
+  /* 水下压力波：间隔要拉大、亮度要压低，否则会变成「靶心」 */
+  .ripple{
+    position:absolute; inset:-45%; z-index:0; pointer-events:none; opacity:.26;
+    background:
+      repeating-radial-gradient(circle at 30% 36%,
+        rgba(220,252,250,.16) 0 1px, transparent 1px 46px),
+      repeating-radial-gradient(circle at 76% 70%,
+        rgba(200,246,242,.10) 0 1px, transparent 1px 71px);
+    animation:breathe 17s ease-in-out infinite alternate;
+    filter:blur(1.2px);
+  }
+  @keyframes breathe{
+    0%{transform:scale(1); opacity:.18}
+    100%{transform:scale(1.12); opacity:.32}
+  }
+  /* 大号泳道数字，像池底印的深度标记 */
+  .now__mark{
+    position:absolute; right:16px; bottom:6px; z-index:1;
+    font-family:var(--font-mono); font-size:96px; line-height:1;
+    letter-spacing:-.03em; color:rgba(226,252,250,.06);
+    pointer-events:none; user-select:none;
+  }
+  .tile--now .lane{ color:rgba(236,252,250,.5) }
+  .tile--now .lane em{ color:rgba(236,252,250,.85) }
+  .now__body{ margin-top:auto; display:flex; align-items:flex-end; gap:18px; position:relative; z-index:2 }
+  .now__art{
+    width:126px; height:126px; flex:none; border-radius:7px;
+    background:
+      radial-gradient(120% 120% at 26% 20%, #9fd8d4 0%, transparent 58%),
+      radial-gradient(110% 110% at 80% 82%, #3f7f7c 0%, transparent 62%),
+      linear-gradient(160deg, #6fb3ae, #1d4a48);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.22), inset 0 0 40px rgba(0,0,0,.35);
+  }
+  .now__meta{ min-width:0; flex:1; padding-bottom:6px }
+  .now__title{
+    margin:0 0 4px; font-size:var(--text-xl); font-weight:400;
+    letter-spacing:.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    color:#f2fdfc;
+  }
+  .now__sub{
+    margin:0 0 14px; font-family:var(--font-mono); font-size:var(--text-2xs);
+    letter-spacing:.1em; color:rgba(236,252,250,.56);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .now__bar{ height:1px; background:rgba(255,255,255,.20); position:relative }
+  .now__bar i{
+    position:absolute; left:0; top:-1px; height:3px; width:37%;
+    background:rgba(240,255,254,.92); border-radius:2px;
+    box-shadow:0 0 10px 1px rgba(240,255,254,.5);
+  }
+  .now__time{
+    display:flex; justify-content:space-between; margin-top:8px;
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    color:rgba(236,252,250,.44); letter-spacing:.08em;
+  }
+  .now__ctl{ position:absolute; right:18px; top:16px; z-index:3; display:flex; gap:4px; align-items:center }
+  .cbtn{
+    appearance:none; border:0; background:transparent; color:rgba(240,255,254,.66);
+    width:30px; height:30px; display:grid; place-items:center; cursor:pointer;
+    transition:color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+  }
+  .cbtn:hover{ color:#fff; transform:scale(1.08) }
+  .cbtn--play{ width:38px; height:38px; color:#eafffe }
+
+  /* —— 搜索：一条线，不要盒子 —— */
+  .tile--search .tile__in{ justify-content:center; gap:9px }
+  .sline{
+    display:flex; align-items:center; gap:11px;
+    padding:0 0 9px; border-bottom:1px solid var(--grout-hi);
+    transition:border-color var(--dur-fast) var(--ease-out);
+  }
+  .sline:hover{ border-color:var(--teal) }
+  .sline svg{ color:var(--teal); opacity:.7; flex:none }
+  .sline input{
+    flex:1; min-width:0; border:0; background:transparent; outline:0;
+    font-family:var(--font-body); font-size:var(--text-lg); font-weight:300;
+    color:var(--ink); letter-spacing:.01em;
+  }
+  .sline input::placeholder{ color:var(--ink-3) }
+  .skbd{
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    color:var(--ink-3); letter-spacing:.1em;
+  }
+  .swords{
+    display:flex; gap:16px; font-family:var(--font-mono);
+    font-size:var(--text-2xs); color:var(--ink-3); letter-spacing:.06em;
+  }
+  .swords span{ cursor:pointer; transition:color var(--dur-fast) var(--ease-out) }
+  .swords span:hover{ color:var(--teal-deep) }
+
+  /* —— 每日推荐：像排水口的几行编号 —— */
+  .tile--daily .tile__in{ gap:0 }
+  .dlist{ display:flex; flex-direction:column; justify-content:space-evenly; flex:1; min-height:0; margin-top:6px }
+  .drow{ display:flex; align-items:center; gap:11px; cursor:pointer }
+  .dnum{
+    font-family:var(--font-mono); font-size:var(--text-2xs); color:var(--ink-3);
+    letter-spacing:.1em; width:16px; flex:none;
+  }
+  .dtxt{ min-width:0; flex:1 }
+  .dtxt b{
+    display:block; font-size:var(--text-sm); font-weight:400;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink);
+  }
+  .dtxt span{
+    display:block; font-family:var(--font-mono); font-size:var(--text-2xs);
+    color:var(--ink-3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .dcap{
+    width:30px; height:30px; border-radius:5px; flex:none;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.5);
+  }
+
+  /* —— 精选：四块不同深度的水 —— */
+  .tile--picks .tile__in{ gap:12px }
+  .prow{ display:flex; gap:10px; flex:1; min-height:0 }
+  .pick{ flex:1; min-width:0; display:flex; flex-direction:column; gap:7px; cursor:pointer }
+  .pick__art{
+    flex:1; min-height:0; border-radius:6px; position:relative; overflow:hidden;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.45), inset 0 -20px 30px -20px rgba(0,0,0,.3);
+    transition:transform var(--dur-med) var(--ease-out);
+  }
+  .pick:hover .pick__art{ transform:translateY(-2px) }
+  .pick__t{
+    font-family:var(--font-mono); font-size:var(--text-2xs);
+    color:var(--ink-3); letter-spacing:.08em;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
+  /* —— 工具箱：四个很小的字，不要图标按钮 —— */
+  .tile--tools .tile__in{ gap:8px }
+  .tl{ display:flex; flex-direction:column; justify-content:space-evenly; flex:1; margin-top:2px }
+  .tl div{
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:var(--text-xs); color:var(--ink-2); cursor:pointer;
+    padding:3px 0; border-bottom:1px solid transparent;
+    transition:color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+  }
+  .tl div:hover{ color:var(--teal-deep); border-color:var(--grout) }
+  .tl i{ font-family:var(--font-mono); font-style:normal; font-size:var(--text-2xs); color:var(--ink-3) }
+
+  /* —— 我的信息 —— */
+  .tile--me .tile__in{ gap:10px }
+  .me{ display:flex; align-items:center; gap:11px; margin-top:2px }
+  .me__ava{
+    width:40px; height:40px; border-radius:50%; flex:none;
+    background:radial-gradient(72% 72% at 34% 28%, #a8dcd8, #2f6f6c);
+    box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.75);
+  }
+  .me__n{ min-width:0 }
+  .me__n b{ display:block; font-size:var(--text-md); font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .me__n span{
+    display:block; font-family:var(--font-mono); font-size:var(--text-2xs);
+    color:var(--ink-3); margin-top:2px; letter-spacing:.06em;
+  }
+  .me__depth{
+    margin-top:auto; display:flex; align-items:baseline; gap:8px;
+    font-family:var(--font-mono); color:var(--ink-3);
+  }
+  .me__depth b{ font-size:var(--text-xs); font-weight:400; color:var(--teal-deep); letter-spacing:.06em }
+  .me__depth span{ font-size:var(--text-2xs); letter-spacing:.1em }
+</style>
+</head>
+<body>
+
+<div class="water"></div>
+<div class="water water--b"></div>
+<div class="waterline"></div>
+
+<header class="top">
+  <span class="mark"><b>LIZI</b></span>
+  <span class="top__sep"></span>
+  <span class="top__sub">Pool</span>
+  <span class="top__sp"></span>
+  <span class="hint">拖 <b>右下角</b> 改尺寸</span>
+  <button class="reset" id="reset">重置</button>
+</header>
+
+<main class="stage">
+  <div class="grid" id="grid">
+    <div class="guide" id="guide"></div>
+  </div>
+</main>
+
+<script>
+/* ============================================================
+   布局引擎（和卡片版同一套，已验证：不重叠 / 可缩放 / 记住布局）
+   视觉层换成池核：瓷砖 + 缝 + 水光。
+   ============================================================ */
+const COLS = 3, ROWS = 4, GAP = 12;
+const KEY = 'lizi.pool.tiles.v1';
+
+const DEF = [
+  { id:'now',    w:2, h:2, kind:'now',    lane:'01', name:'正在播放' },
+  { id:'search', w:2, h:1, kind:'search', lane:'02', name:'搜索' },
+  { id:'daily',  w:1, h:2, kind:'daily',  lane:'03', name:'每日推荐' },
+  { id:'picks',  w:2, h:1, kind:'picks',  lane:'04', name:'精选' },
+  { id:'tools',  w:1, h:1, kind:'tools',  lane:'05', name:'工具箱' },
+  { id:'me',     w:1, h:1, kind:'me',     lane:'06', name:'我的' },
+];
+
+const DAILY = [
+  { t:'雨停了以后', s:'惘闻', g:'linear-gradient(150deg,#8ec9c4,#3c7673)' },
+  { t:'城市找猪',   s:'木马', g:'linear-gradient(150deg,#a8cfd6,#437d88)' },
+  { t:'漫长的告别', s:'声音玩具', g:'linear-gradient(150deg,#9fd0bd,#3f7a68)' },
+  { t:'不万能的喜剧', s:'落日飞车', g:'linear-gradient(150deg,#a9c6dc,#4a6f8d)' },
+];
+/* 四块「不同深度的水」：越深越暗，像泳池的分道 */
+const PICKS = [
+  { t:'1.2m', g:'linear-gradient(165deg,#bfe6e2,#6faeaa)' },
+  { t:'1.6m', g:'linear-gradient(165deg,#9fd4d0,#3f8b86)' },
+  { t:'2.0m', g:'linear-gradient(165deg,#7ab9b6,#2e6d6a)' },
+  { t:'2.4m', g:'linear-gradient(165deg,#5f9e9c,#1d5050)' },
+];
+
+const I = {
+  search:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>',
+  play:'<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8.5 5.2v13.6L19 12z"/></svg>',
+  prev:'<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7.5 5h1.8v14H7.5zM20 5v14l-9.2-7z"/></svg>',
+  next:'<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M14.7 5h1.8v14h-1.8zM4 5l9.2 7L4 19z"/></svg>',
+  slope:'<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"><path d="M11 4.6 4.6 11M11 8.6 8.6 11"/></svg>',
+};
+
+function inner(c) {
+  if (c.kind === 'now') return `
+    <div class="ripple"></div>
+    <div class="now__mark">01</div>
+    <div class="now__ctl">
+      <button class="cbtn">${I.prev}</button>
+      <button class="cbtn cbtn--play">${I.play}</button>
+      <button class="cbtn">${I.next}</button>
+    </div>
+    <div class="tile__in">
+      <div class="lane"><em>${c.lane}</em>${c.name}</div>
+      <div class="now__body">
+        <div class="now__art"></div>
+        <div class="now__meta">
+          <h2 class="now__title">宝船</h2>
+          <p class="now__sub">二手玫瑰 / 乐队的夏天</p>
+          <div class="now__bar"><i></i></div>
+          <div class="now__time"><span>1:24</span><span>3:41</span></div>
+        </div>
+      </div>
+    </div>`;
+
+  if (c.kind === 'search') return `
+    <div class="tile__in">
+      <div class="lane"><em>${c.lane}</em>${c.name}</div>
+      <div class="sline">
+        ${I.search}
+        <input placeholder="想听什么？" readonly>
+        <span class="skbd">⌘K</span>
+      </div>
+      <div class="swords">
+        <span>宝船</span><span>草东</span><span>伍佰</span><span>雨天</span>
+      </div>
+    </div>`;
+
+  if (c.kind === 'daily') return `
+    <div class="tile__in">
+      <div class="lane"><em>${c.lane}</em>${c.name}</div>
+      <div class="dlist">
+        ${DAILY.map((d, i) => `
+          <div class="drow">
+            <span class="dnum">${String(i + 1).padStart(2, '0')}</span>
+            <div class="dtxt"><b>${d.t}</b><span>${d.s}</span></div>
+            <div class="dcap" style="background:${d.g}"></div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  if (c.kind === 'picks') return `
+    <div class="tile__in">
+      <div class="lane"><em>${c.lane}</em>${c.name}</div>
+      <div class="prow">
+        ${PICKS.map((p) => `
+          <div class="pick">
+            <div class="pick__art" style="background:${p.g}"></div>
+            <div class="pick__t">${p.t}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  if (c.kind === 'tools') return `
+    <div class="tile__in">
+      <div class="lane"><em>${c.lane}</em>${c.name}</div>
+      <div class="tl">
+        <div>形态<i>24</i></div>
+        <div>歌词<i>3</i></div>
+        <div>定时<i>—</i></div>
+        <div>投屏<i>—</i></div>
+      </div>
+    </div>`;
+
+  if (c.kind === 'me') return `
+    <div class="tile__in">
+      <div class="lane"><em>${c.lane}</em>${c.name}</div>
+      <div class="me">
+        <div class="me__ava"></div>
+        <div class="me__n"><b>夜航船</b><span>4,281 tracks</span></div>
+      </div>
+      <div class="me__depth"><b>−1.2 m</b><span>今日 46 min</span></div>
+    </div>`;
+
+  return '';
+}
+
+const grid = document.getElementById('grid');
+const guide = document.getElementById('guide');
+const stage = document.querySelector('.stage');
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+let cards = DEF.map((d) => ({ ...d, x: 0, y: 0 }));
+let cw = 0, ch = 0, rows = ROWS;
+
+function save() {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(cards.map((c) => ({
+      id: c.id, w: c.w, h: c.h, x: c.x, y: c.y,
+    }))));
+  } catch {}
+}
+
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return false;
+    const saved = JSON.parse(raw);
+    if (!Array.isArray(saved) || saved.length !== DEF.length) return false;
+    const byId = new Map(saved.map((s) => [s.id, s]));
+    if (!DEF.every((d) => byId.has(d.id))) return false;
+    const restored = DEF.map((d) => {
+      const s = byId.get(d.id);
+      return { ...d, w: clamp(s.w | 0 || 1, 1, COLS), h: clamp(s.h | 0 || 1, 1, 8),
+        x: clamp(s.x | 0, 0, COLS - 1), y: Math.max(0, s.y | 0) };
+    });
+    let maxBottom = 0;
+    const occ = new Set();
+    for (const c of restored) {
+      if (c.x + c.w > COLS) return false;
+      maxBottom = Math.max(maxBottom, c.y + c.h);
+      for (let j = c.y; j < c.y + c.h; j++)
+        for (let i = c.x; i < c.x + c.w; i++) {
+          const k = i + ',' + j;
+          if (occ.has(k)) return false;
+          occ.add(k);
+        }
+    }
+    cards = restored;
+    rows = Math.max(ROWS, maxBottom);
+    return true;
+  } catch { return false; }
+}
+
+function tryPack(order, rowsN) {
+  const occ = new Array(COLS * rowsN).fill(false);
+  const pos = [];
+  const canPlace = (x, y, w, h) => {
+    if (x + w > COLS || y + h > rowsN) return false;
+    for (let j = y; j < y + h; j++)
+      for (let i = x; i < x + w; i++) if (occ[j * COLS + i]) return false;
+    return true;
+  };
+  for (const c of order) {
+    const w = clamp(c.w, 1, COLS), h = clamp(c.h, 1, rowsN);
+    let done = false;
+    for (let y = 0; y < rowsN && !done; y++)
+      for (let x = 0; x < COLS && !done; x++) {
+        if (!canPlace(x, y, w, h)) continue;
+        for (let j = y; j < y + h; j++)
+          for (let i = x; i < x + w; i++) occ[j * COLS + i] = true;
+        pos.push({ id: c.id, x, y, w, h });
+        done = true;
+      }
+    if (!done) return null;
+  }
+  return pos;
+}
+
+function pack(order) {
+  for (let rowsN = ROWS; rowsN <= 10; rowsN++) {
+    const pos = tryPack(order, rowsN);
+    if (!pos) continue;
+    rows = rowsN;
+    for (const p of pos) {
+      const c = cards.find((x) => x.id === p.id);
+      if (c) { c.x = p.x; c.y = p.y; c.w = p.w; c.h = p.h; }
+    }
+    return;
+  }
+}
+
+function place(el, c) {
+  el.style.width = (cw * c.w + GAP * (c.w - 1)) + 'px';
+  el.style.height = (ch * c.h + GAP * (c.h - 1)) + 'px';
+  el.style.left = (c.x * (cw + GAP)) + 'px';
+  el.style.top = (c.y * (ch + GAP)) + 'px';
+}
+
+function measure() {
+  const r = grid.getBoundingClientRect();
+  const availH = stage.clientHeight - 26;
+  cw = (r.width - GAP * (COLS - 1)) / COLS;
+  ch = (availH - GAP * (ROWS - 1)) / ROWS;
+}
+
+function render() {
+  measure();
+  grid.style.height = (rows * ch + GAP * (rows - 1)) + 'px';
+  for (const c of cards) {
+    const el = document.getElementById('tile-' + c.id);
+    if (el) place(el, c);
+  }
+  drawGuide();
+}
+
+function drawGuide() {
+  guide.style.width = grid.getBoundingClientRect().width + 'px';
+  guide.style.height = grid.style.height;
+  const need = rows * COLS;
+  while (guide.children.length < need) guide.appendChild(document.createElement('span'));
+  while (guide.children.length > need) guide.removeChild(guide.lastChild);
+  let k = 0;
+  for (let j = 0; j < rows; j++)
+    for (let i = 0; i < COLS; i++) {
+      const s = guide.children[k++];
+      s.style.width = cw + 'px';
+      s.style.height = ch + 'px';
+      s.style.left = (i * (cw + GAP)) + 'px';
+      s.style.top = (j * (ch + GAP)) + 'px';
+    }
+}
+
+function build() {
+  [...grid.querySelectorAll('.tile')].forEach((el) => el.remove());
+  for (const c of cards) {
+    const el = document.createElement('section');
+    el.className = 'tile tile--' + c.kind;
+    el.id = 'tile-' + c.id;
+    el.innerHTML = inner(c) + `<div class="grip" title="拖动改尺寸">${I.slope}</div>`;
+    grid.appendChild(el);
+    bindResize(el, c);
+  }
+}
+
+function bindResize(el, c) {
+  const grip = el.querySelector('.grip');
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX, startY = e.clientY;
+    const startW = c.w, startH = c.h;
+    el.classList.add('is-resizing');
+    guide.classList.add('is-on');
+    grip.setPointerCapture(e.pointerId);
+
+    const move = (ev) => {
+      const dw = Math.round((ev.clientX - startX) / (cw + GAP));
+      const dh = Math.round((ev.clientY - startY) / (ch + GAP));
+      const w = clamp(startW + dw, 1, COLS - c.x);
+      const h = clamp(startH + dh, 1, Math.max(rows - c.y, 1));
+      if (w === c.w && h === c.h) return;
+      c.w = w; c.h = h;
+      place(el, c);
+    };
+    const up = () => {
+      el.classList.remove('is-resizing');
+      guide.classList.remove('is-on');
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', up);
+      cards.sort((a, b) => (a === c ? -1 : b === c ? 1 : 0));
+      pack(cards);
+      render();
+      save();
+    };
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', up);
+  });
+}
+
+const hadSaved = loadSaved();
+build();
+if (hadSaved) render(); else { pack(cards); render(); }
+addEventListener('resize', render);
+
+document.getElementById('reset').addEventListener('click', () => {
+  localStorage.removeItem(KEY);
+  cards = DEF.map((d) => ({ ...d }));
+  rows = ROWS;
+  build();
+  pack(cards);
+  render();
+});
+
+window.__layout = () => cards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h }));
+</script>
+</body>
+</html>

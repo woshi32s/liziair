@@ -1,0 +1,416 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#000;overflow:hidden}
+@font-face{font-family:"K";src:url("stages/assets/507-kurobara.woff2") format("woff2");font-display:block}
+@font-face{font-family:"H";src:url("stages/assets/507-han-black.woff2") format("woff2");font-display:block}
+#stage{position:fixed;left:0;top:0}</style></head><body>
+<canvas id="stage" width="1600" height="900"></canvas>
+<script>
+/* ============================================================
+   507 chrome 引擎（WebGL2）
+   ------------------------------------------------------------
+   与参考图同一套原理：
+     字形 → 距离场 → 「圆管/斜面」高度场 → 求法线
+     → 法线查程序化 HDRI → 真实反射
+
+   关键：笔画内部的法线也必须连续变化（笔画当成半圆柱），
+   否则内部是平面，只会亮一圈边，永远不像铬。
+   ============================================================ */
+var CHROME = (function () {
+  "use strict";
+
+  var cv = document.createElement("canvas");
+  var gl = null;
+  var prog = null, vbo = null;
+  var texShape = null;
+  var U = {};
+  var ok = false;
+  var W = 2, H = 2;
+  var lastErr = "";
+
+  var VS = [
+    "#version 300 es",
+    "in vec2 aPos;",
+    "out vec2 vUv;",
+    "void main(){",
+    "  vUv = aPos * 0.5 + 0.5;",
+    "  gl_Position = vec4(aPos, 0.0, 1.0);",
+    "}"
+  ].join("\n");
+
+  var FS = [
+    "#version 300 es",
+    "precision highp float;",
+    "in vec2 vUv;",
+    "out vec4 fragColor;",
+    "",
+    "uniform sampler2D uShape;",
+    "uniform vec2  uRes;",
+    "uniform float uDepth;",
+    "uniform float uBevel;",
+    "uniform float uPhase;",
+    "uniform vec3  uRed;",
+    "uniform float uGain;",
+    "",
+    "const float PI = 3.14159265;",
+    "",
+    "float S(vec2 uv){",
+    "  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 0.0;",
+    "  return texture(uShape, uv).r;",
+    "}",
+    "",
+    /* 用环采样估「到边缘的距离」：
+       圆盘内平均覆盖率 e → 若边缘是直线，e 与 d 近似线性
+       返回 0（贴边）.. 1（深处） */
+    "float depthField(vec2 uv, float rad){",
+    "  vec2 px = 1.0 / uRes;",
+    "  float acc = 0.0;",
+    "  float wsum = 0.0;",
+    /* 两圈，内圈权重高 → 更平滑的距离过渡 */
+    "  for (int ring = 0; ring < 2; ring++){",
+    "    float rr = rad * (ring == 0 ? 0.55 : 1.0);",
+    "    float wgt = (ring == 0 ? 1.35 : 0.75);",
+    "    float sum = 0.0;",
+    "    const int N = 12;",
+    "    for (int i = 0; i < N; i++){",
+    "      float a = (float(i) + 0.5) * (2.0 * PI / float(N));",
+    "      sum += S(uv + vec2(cos(a), sin(a)) * px * rr);",
+    "    }",
+    "    acc += (sum / float(N)) * wgt;",
+    "    wsum += wgt;",
+    "  }",
+    "  return clamp(acc / wsum, 0.0, 1.0);",
+    "}",
+    "",
+    /* 程序化环境（摄影棚式）
+       铬字正脸朝观众时，反射的是正前方一大片亮幕 —— 所以 d.y≈0 附近必须亮。
+       之前的公式在中间留了黑带，导致字面大面积发暗。
+       现在的层次：亮棚（主）+ 上下渐变 + 一条地脚亮线 + 少量暗部。 */
+    "vec3 env(vec3 n){",
+    "  vec3 d = normalize(n);",
+    "",
+    /*  正前方的大亮幕：这是一片高频反射区，占字面大部分 */
+    "  float curtain = smoothstep(-0.55, -0.05, d.y) * smoothstep(0.72, 0.10, d.y);",
+    "",
+    /*  顶部天光（更亮一档） */
+    "  float sky = smoothstep(0.30, 0.80, d.y);",
+    "",
+    /*  地平线附近的硬亮线：铬标志性的那道 */
+    "  float horizon = exp(-pow((d.y - 0.10) / 0.055, 2.0));",
+    "",
+    /*  下方地脚反光，相位让它滑动 */
+    "  float slide = uPhase * 2.0 - 1.0;",
+    "  float lowBand = exp(-pow((d.y + 0.42 + slide * 0.30) / 0.16, 2.0));",
+    "",
+    /*  暗缝：只留很窄的一条，制造金属的层次，不要大面积 */
+    "  float darkSeam = exp(-pow((d.y + 0.16) / 0.035, 2.0));",
+    "",
+    /*  侧向补光 */
+    "  float sideGlow = pow(clamp(abs(d.x), 0.0, 1.0), 1.8) * 0.30;",
+    "",
+    "  float lit = curtain * 0.92",
+    "            + sky * 0.85",
+    "            + horizon * 1.25",
+    "            + lowBand * 0.95",
+    "            + sideGlow",
+    "            - darkSeam * 0.62;",
+    "",
+    /*  基体：铬的暗部接近黑，但占比要小 */
+    "  vec3 base   = vec3(0.035, 0.030, 0.028);",
+    "  vec3 shadow = vec3(0.16, 0.125, 0.10);",
+    "  vec3 warm   = vec3(0.78, 0.56, 0.28);",
+    "  vec3 silver = vec3(0.90, 0.88, 0.84);",
+    "  vec3 hot    = vec3(1.00, 0.995, 0.97);",
+    "",
+    "  vec3 col = base;",
+    "  col = mix(col, shadow, clamp(lit * 1.5, 0.0, 1.0));",
+    "  col = mix(col, warm,   smoothstep(0.30, 0.95, lit));",
+    "  col = mix(col, silver, smoothstep(1.05, 1.55, lit));",
+    "  col = mix(col, hot,    smoothstep(1.55, 2.05, lit));",
+    "",
+    /*  对比拉伸：铬的暗部要真的黑下去，亮部才炸得出来 */
+    "  float lum = dot(col, vec3(0.299, 0.587, 0.114));",
+    "  lum = smoothstep(0.06, 0.92, lum);",
+    "  col = mix(col * 0.45, col * 1.20, lum);",
+    "",
+    /*  红色环境：下方染上来（参考图里字的下半部是红的） */
+    "  float redLow = smoothstep(0.10, -0.95, d.y);",
+    "  col += uRed * redLow * redLow * 0.70;",
+    "",
+    /*  极窄镜面尖光 */
+    "  float spec = pow(clamp(d.y - 0.02, 0.0, 1.0), 26.0);",
+    "  col += vec3(1.0, 0.99, 0.96) * spec * 0.95;",
+    "",
+    "  return col;",
+    "}",
+    "",
+    /* 屏幕空间的环境补充：
+       平直面朝观众时反射的是「整个房间」——地平线会横穿表面。
+       只靠法线做不到这点（平面法线恒定 → 只有一个颜色），
+       所以按屏幕高度再叠一层房室结构。这是对真实反射的近似，
+       但正是让字面「不平」的关键。 */
+    "vec3 roomAt(vec2 uv, vec3 base){",
+    "  float y = uv.y;",
+    /*  房间地平线：一条亮带横穿，位置随相位轻微移动 */
+    "  float hz = 0.46 + (uPhase - 0.5) * 0.14;",
+    "  float floorLine = exp(-pow((y - hz) / 0.016, 2.0));",
+    "  float floorGlow = exp(-pow((y - hz) / 0.075, 2.0)) * 0.55;",
+    /*  上方天花板暗区 */
+    "  float ceil = smoothstep(hz, 1.02, y) * 0.55;",
+    /*  下方地板亮区（抛光地面把光反上来） */
+    "  float floorLit = smoothstep(hz, -0.05, y) * 0.42;",
+    "",
+    /*  一条条横向的柔光灯管：棚拍常见 */
+    "  float strips = 0.0;",
+    "  for (int i = 0; i < 3; i++){",
+    "    float sy = hz + 0.18 + float(i) * 0.21;",
+    "    strips += exp(-pow((y - sy) / 0.020, 2.0)) * (0.42 - float(i) * 0.10);",
+    "  }",
+    "",
+    "  vec3 c = base;",
+    "  c = mix(c, vec3(0.02, 0.018, 0.016), ceil * 0.75);",
+    "  c = mix(c, vec3(0.95, 0.92, 0.86), floorGlow * 0.85);",
+    "  c += vec3(1.0, 0.99, 0.95) * floorLine * 0.75;",
+    "  c += vec3(0.90, 0.86, 0.78) * strips;",
+    "  c = mix(c, c * 0.62 + base * 0.38, floorLit * 0.5);",
+    "",
+    /*  红场在下半部的地面反光里（参考图最明显的特征） */
+    "  float redFloor = smoothstep(hz + 0.10, -0.15, y);",
+    "  c += uRed * redFloor * 0.85;",
+    "",
+    "  return c;",
+    "}",
+    "",
+    "void main(){",
+    "  vec2 px = 1.0 / uRes;",
+    "",
+    /* ---------- ⅰ 挤出的侧面 ---------- */
+    /*  挤出方向：右下。反推：这个像素是不是属于「某个字形点往右下推出来」的区域 */
+    "  vec2 exDir = normalize(vec2(0.42, 1.0));",
+    "  float sideAlpha = 0.0;",
+    "  float sideT = 0.0;",
+    "  const int STEPS = 9;",
+    "  for (int i = 0; i < STEPS; i++){",
+    "    float t = (float(i) + 1.0) / float(STEPS);",
+    "    vec2 off = exDir * px * (uDepth * t);",
+    "    float c = S(vUv - off);",
+    "    if (c > sideAlpha){ sideAlpha = c; sideT = t; }",
+    "  }",
+    "",
+    /* ---------- ⅱ 正面 ---------- */
+    "  float cover = S(vUv);",
+    "  float rad = max(2.0, uBevel);",
+    "  float dfield = depthField(vUv, rad);",
+    "",
+    /*  距离场 → 高度：笔画内部当成半圆柱，越靠中间越高 */
+    "  float h = sqrt(clamp(dfield, 0.0, 1.0));",
+    "",
+    /*  法线 = 高度场梯度（用中心差分近似） */
+    "  float dR = depthField(vUv + vec2(px.x * 2.0, 0.0), rad);",
+    "  float dL = depthField(vUv - vec2(px.x * 2.0, 0.0), rad);",
+    "  float dU = depthField(vUv + vec2(0.0, px.y * 2.0), rad);",
+    "  float dD = depthField(vUv - vec2(0.0, px.y * 2.0), rad);",
+    "",
+    "  float gx = sqrt(clamp(dL,0.0,1.0)) - sqrt(clamp(dR,0.0,1.0));",
+    "  float gy = sqrt(clamp(dD,0.0,1.0)) - sqrt(clamp(dU,0.0,1.0));",
+    "",
+    /*  倾斜强度：决定笔画「圆」到什么程度。
+       太小 → 法线几乎都朝前 → 只反射地平线，整片发暗；
+       太大 → 全部斜掉 → 亮带乱窜。2.6 是试出来的平衡点。 */
+    "  float tilt = 2.6;",
+    "  vec3 nFace = normalize(vec3(gx * tilt * (2.0 / max(2.0, uBevel)), gy * tilt * (2.0 / max(2.0, uBevel)), 1.0));",
+    "",
+    /* ---------- ⅲ 合成 ---------- */
+    "  float a = max(cover, sideAlpha);",
+    "  if (a < 0.02) { fragColor = vec4(0.0, 0.0, 0.0, 0.0); return; }",
+    "",
+    /*  侧面用固定法线（朝右下外侧），正面用高度场法线 */
+    "  vec3 nSide = normalize(vec3(0.52, -0.62, 0.58));",
+    "  vec3 n = normalize(mix(nFace, nSide, step(cover, 0.5) * 0.9));",
+    "",
+    "  vec3 col = env(n);",
+    "",
+    /*  再叠加屏幕空间房室反射（让朝观众的平面也有层次） */
+    "  vec3 room = roomAt(vUv, col);",
+    "  float flatness = clamp(n.z, 0.0, 1.0);",
+    "  col = mix(col, room, flatness * 0.72);",
+    "",
+    /*  侧面越深越暗 */
+    "  float isSide = (1.0 - cover) * step(0.02, sideAlpha);",
+    "  col *= mix(1.0, 1.0 - sideT * 0.62, isSide);",
+    "",
+    /*  正面中心略微提亮，让金属有「鼓起来」的感觉 */
+    "  col *= mix(0.92, 1.10, clamp(dfield * 1.4, 0.0, 1.0) * cover);",
+    "",
+    /*  倒角棱线：贴边一圈的硬高光 */
+    "  float rim = smoothstep(0.30, 0.02, dfield) * cover;",
+    "  col += vec3(1.0, 0.98, 0.93) * pow(rim, 1.15) * 0.85;",
+    "",
+    /*  金属表面细颗粒（参考图那种锈蚀感），很轻 */
+    "  float g1 = fract(sin(dot(vUv * uRes, vec2(12.9898, 78.233))) * 43758.5453);",
+    "  float g2 = fract(sin(dot(vUv * uRes * 1.7, vec2(39.346, 11.135))) * 24634.6345);",
+    "  col *= 0.94 + (g1 * 0.6 + g2 * 0.4) * 0.13;",
+    "",
+    "  col *= uGain;",
+    "  fragColor = vec4(clamp(col, 0.0, 1.0), a);",
+    "}"
+  ].join("\n");
+
+  function compile(type, src) {
+    var s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      var log = gl.getShaderInfoLog(s);
+      gl.deleteShader(s);
+      throw new Error("shader: " + log);
+    }
+    return s;
+  }
+
+  function init() {
+    if (ok) return true;
+    try {
+      cv.width = 2; cv.height = 2;
+      gl = cv.getContext("webgl2", {
+        alpha: true, antialias: false, premultipliedAlpha: false,
+        preserveDrawingBuffer: true, depth: false, stencil: false
+      });
+      if (!gl) { lastErr = "no webgl2"; return false; }
+
+      var vs = compile(gl.VERTEX_SHADER, VS);
+      var fs = compile(gl.FRAGMENT_SHADER, FS);
+      prog = gl.createProgram();
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.bindAttribLocation(prog, 0, "aPos");
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        throw new Error("link: " + gl.getProgramInfoLog(prog));
+      }
+      gl.deleteShader(vs); gl.deleteShader(fs);
+
+      vbo = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+
+      U.shape = gl.getUniformLocation(prog, "uShape");
+      U.res = gl.getUniformLocation(prog, "uRes");
+      U.depth = gl.getUniformLocation(prog, "uDepth");
+      U.bevel = gl.getUniformLocation(prog, "uBevel");
+      U.phase = gl.getUniformLocation(prog, "uPhase");
+      U.red = gl.getUniformLocation(prog, "uRed");
+      U.gain = gl.getUniformLocation(prog, "uGain");
+
+      texShape = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texShape);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+      ok = true;
+      return true;
+    } catch (e) {
+      ok = false;
+      gl = null;
+      lastErr = String((e && e.message) || e);
+      return false;
+    }
+  }
+
+  function uploadShape(canvas2d, w, h) {
+    if (!ok || !gl) return false;
+    W = Math.max(1, Math.round(w));
+    H = Math.max(1, Math.round(h));
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+
+    gl.bindTexture(gl.TEXTURE_2D, texShape);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas2d);
+    return true;
+  }
+
+  /* 直接画到画布默认 framebuffer（画进 FBO 的话 canvas 永远是空的） */
+  function render(opts) {
+    if (!ok || !gl) return null;
+    var phase = opts.phase || 0;
+    var depth = opts.depth || 20;
+    var bevel = opts.bevel || 5;
+    var red = opts.red || [0.75, 0.06, 0.05];
+    var gain = opts.gain == null ? 1 : opts.gain;
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.useProgram(prog);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texShape);
+    gl.uniform1i(U.shape, 0);
+
+    gl.uniform2f(U.res, W, H);
+    gl.uniform1f(U.depth, depth);
+    gl.uniform1f(U.bevel, bevel);
+    gl.uniform1f(U.phase, phase);
+    gl.uniform3f(U.red, red[0], red[1], red[2]);
+    gl.uniform1f(U.gain, gain);
+
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.finish();
+    return cv;
+  }
+
+  return {
+    get available() { return ok; },
+    get error() { return lastErr; },
+    init: init,
+    upload: uploadShape,
+    render: render,
+    canvas: function () { return cv; }
+  };
+})();
+
+window.__run = async function(text, depth, bevel, phase, gain){
+  // 必须显式加载字体，否则 measureText/fillText 用的是回退字体
+  try {
+    await Promise.all([
+      document.fonts.load('900 190px "K"', text),
+      document.fonts.load('900 190px "H"', text)
+    ]);
+    await document.fonts.ready;
+  } catch(e) {}
+  var fontOk = document.fonts.check('900 190px "K"') || document.fonts.check('900 190px "H"');
+  var W = 1600, H = 900;
+  var st = document.getElementById('stage');
+  var sx = st.getContext('2d');
+  sx.fillStyle = '#000'; sx.fillRect(0,0,W,H);
+
+  // 1) 先把字形画进一张 2D canvas 当遮罩
+  var tmp = document.createElement('canvas');
+  tmp.width = W; tmp.height = H;
+  var g = tmp.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0,0,W,H);
+  g.fillStyle = '#fff';
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  var fs = 190;
+  g.font = '900 ' + fs + 'px "K","H","Arial Black",sans-serif';
+  // 压粗
+  g.lineWidth = fs * 0.022; g.lineJoin = 'miter';
+  g.strokeStyle = '#fff'; g.strokeText(text, W/2, H*0.5);
+  g.fillText(text, W/2, H*0.5);
+
+  if (!CHROME.available) CHROME.init();
+  if (!CHROME.available) return { err: 'no gl' };
+  if (!CHROME.upload(tmp, W, H)) return { err: 'fbo fail' };
+  var out = CHROME.render({ depth: depth||26, bevel: bevel||6, phase: phase||0.5, gain: gain==null?1:gain,
+                            red: [0.85,0.07,0.05], time: 0 });
+  if (!out) return { err: 'render null' };
+  sx.drawImage(out, 0, 0, W, H);
+  return { ok: true, w: out.width, h: out.height, fontOk: fontOk };
+};
+</script></body></html>

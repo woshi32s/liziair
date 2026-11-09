@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI Air · 设置页方案实验室</title>
+<meta name="description" content="LIZI Air 设置页四套改版方案的独立静态预览，不影响真实设置页。">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="labbar" aria-label="方案切换">
+  <div class="labbar__brand">
+    <span class="labbar__mark" aria-hidden="true">L</span>
+    <span class="labbar__title">设置页实验室</span>
+    <span class="labbar__tag">SETTINGS LAB</span>
+  </div>
+  <nav class="labbar__views" role="group" aria-label="切换方案">
+    <button class="labview is-on" type="button" data-view="a" aria-pressed="true"><b>A</b><span>控制台</span></button>
+    <button class="labview" type="button" data-view="b" aria-pressed="false"><b>B</b><span>白纸</span></button>
+    <button class="labview" type="button" data-view="c" aria-pressed="false"><b>C</b><span>杂志</span></button>
+    <button class="labview" type="button" data-view="d" aria-pressed="false"><b>D</b><span>横向</span></button>
+    <button class="labview labview--all" type="button" data-view="all" aria-pressed="false"><b>全部</b></button>
+  </nav>
+  <p class="labbar__hint"><kbd>1</kbd><span>–</span><kbd>4</kbd> 切换 <span class="sep">·</span> 静态预览</p>
+</header>
+
+<main id="lab" class="lab" aria-label="设置页方案预览"></main>
+
+<noscript>
+  <p class="noscript">这个预览页需要 JavaScript 来渲染四套方案。</p>
+</noscript>
+
+<script src="app.js"></script>
+</body>
+</html>

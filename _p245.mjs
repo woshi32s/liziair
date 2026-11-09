@@ -1,0 +1,13 @@
+import fs from "node:fs";
+const p = "_b-spec/245.mjs";
+let s = fs.readFileSync(p, "utf8");
+const rep = (a, b) => { if (!s.includes(a)) throw new Error("miss: " + a.slice(0, 70)); s = s.split(a).join(b); };
+rep("float spread = exp(-max(sd, 0.0)/0.075);", "float spread = exp(-max(sd, 0.0)/0.115);");
+rep("float heat = clamp(core*0.72 + spread*0.55, 0.0, 1.0);", "float heat = clamp(core*0.66 + spread*0.80, 0.0, 1.0);");
+rep("float band = exp(-pow((heat - 0.47)/0.035, 2.0));", "float band = exp(-pow((heat - 0.47)/0.055, 2.0));");
+rep("vec2 mc = fract(uv*260.0) - 0.5;", "vec2 mc = fract(uv*135.0 + h21(floor(uv*135.0))*0.7) - 0.5;");
+rep("float caps = smoothstep(0.42, 0.10, length(mc));", "float caps = smoothstep(0.30, 0.05, length(mc))*step(0.25, h21(floor(uv*135.0) + 7.0));");
+rep("col += mix(vec3(0.90,0.55,0.24), u_ac, 0.55)*band*0.32;", "col += mix(vec3(0.90,0.55,0.24), u_ac, 0.55)*band*0.46;");
+rep("plateAlpha: 0.86,", "plateAlpha: 0.82,");
+rep("g.strokeStyle = 'rgba(255,214,160,0.42)';\n  g.lineWidth = 1.4;", "g.strokeStyle = 'rgba(255,214,160,0.20)';\n  g.lineWidth = 3.0;");
+fs.writeFileSync(p, s); console.log("ok");

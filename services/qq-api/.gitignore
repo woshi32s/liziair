@@ -1,0 +1,11 @@
+# QQ 音乐边车自己的东西，一律不进版本库
+
+node_modules/
+.port
+.log
+*.log
+.auth-secret
+.auth-session.json
+
+# 设备身份（qq-device.json）：删了 QQ 会当成一台新设备，容易撞 20279 设备上限
+.auth-state/

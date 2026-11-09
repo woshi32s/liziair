@@ -1,0 +1,562 @@
+/* ==========================================================================
+   LIZI · 小卡浮层（holocard.css）
+   --------------------------------------------------------------------------
+   和工具箱其它浮层同一套语言：深色玻璃、1px 细线、紧凑标签、圆角、等宽数字。
+   性能约束：网格里的小卡一律不开 filter / backdrop-filter，也不挂 shader；
+   材质只有两层很轻的 CSS 近似（.hc-foil 彩虹膜 + .hc-glare 径向高光），
+   并且只用 mix-blend-mode: screen / overlay —— 不用 color-dodge（会爆白）。
+   专注视图的大卡写的是「全息材质：后面由 holo-shader.js 接管 .hc-face 的 canvas」，
+   小卡和 shader 没接上时，这两层 CSS 就是兜底。
+   ========================================================================== */
+
+.hc {
+  position: fixed;
+  inset: 0;
+  z-index: 280;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vw, 32px);
+  overflow: auto;
+  color-scheme: dark;
+  background: oklch(9% 0.018 272 / 0.64);
+  color: oklch(96% 0.004 270);
+}
+.hc[hidden] { display: none; }
+
+.hc *,
+.hc *::before,
+.hc *::after { box-sizing: border-box; }
+
+/* ---------- 外壳：深色玻璃 ---------- */
+.hc__sheet {
+  width: min(1080px, 100%);
+  max-height: min(92vh, 940px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg,
+      oklch(21% 0.024 274 / 0.94) 0%,
+      oklch(15% 0.020 274 / 0.97) 100%);
+  color: oklch(96% 0.004 270);
+  border: 1px solid oklch(100% 0 0 / 0.10);
+  border-radius: var(--r-lg, 20px);
+  box-shadow:
+    0 40px 100px -48px oklch(0% 0 0 / 0.9),
+    inset 0 1px 0 oklch(100% 0 0 / 0.06);
+}
+
+/* ---------- 头部 ---------- */
+.hc__head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4, 16px);
+  padding: var(--sp-5, 20px) var(--sp-6, 24px) var(--sp-4, 16px);
+  border-bottom: 1px solid oklch(100% 0 0 / 0.07);
+}
+.hc__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: var(--fw-semi, 600);
+  letter-spacing: -0.02em;
+  color: oklch(97% 0.003 270);
+}
+.hc__sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: oklch(72% 0.012 272);
+}
+.hc__x {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm, 10px);
+  background: transparent;
+  color: oklch(72% 0.012 272);
+  cursor: pointer;
+  transition: background var(--dur-fast, 140ms) var(--ease-out, ease),
+              color var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.hc__x:hover {
+  background: oklch(100% 0 0 / 0.07);
+  color: oklch(97% 0.003 270);
+}
+.hc__x:focus-visible {
+  outline: 2px solid oklch(85% 0.01 270);
+  outline-offset: 2px;
+}
+
+/* ---------- 工具条：来源 tab + 导入 ---------- */
+.hc__bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3, 12px);
+  padding: 11px var(--sp-6, 24px);
+  border-bottom: 1px solid oklch(100% 0 0 / 0.07);
+}
+
+.hc__tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid oklch(100% 0 0 / 0.10);
+  border-radius: var(--r-full, 999px);
+  background: oklch(100% 0 0 / 0.04);
+}
+.hc__tab {
+  height: 28px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-full, 999px);
+  background: transparent;
+  color: oklch(71% 0.012 272);
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background var(--dur-fast, 140ms) var(--ease-out, ease),
+              color var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.hc__tab:hover { color: oklch(90% 0.006 270); }
+.hc__tab.is-on {
+  background: oklch(100% 0 0 / 0.13);
+  color: oklch(98% 0.003 270);
+  box-shadow: inset 0 1px 0 oklch(100% 0 0 / 0.08);
+}
+.hc__tab:focus-visible {
+  outline: 2px solid oklch(85% 0.01 270);
+  outline-offset: 1px;
+}
+
+.hc__acts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  min-width: 0;
+}
+.hc__count {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: oklch(66% 0.012 272);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.hc__btn {
+  flex: none;
+  height: 30px;
+  padding: 0 13px;
+  border: 1px solid oklch(100% 0 0 / 0.20);
+  border-radius: var(--r-full, 999px);
+  background: oklch(100% 0 0 / 0.06);
+  color: oklch(95% 0.004 270);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background var(--dur-fast, 140ms) var(--ease-out, ease),
+              border-color var(--dur-fast, 140ms) var(--ease-out, ease),
+              opacity var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.hc__btn:hover:not(:disabled) {
+  background: oklch(100% 0 0 / 0.11);
+  border-color: oklch(100% 0 0 / 0.30);
+}
+.hc__btn:active:not(:disabled) { transform: scale(0.98); }
+.hc__btn:focus-visible {
+  outline: 2px solid oklch(85% 0.01 270);
+  outline-offset: 2px;
+}
+.hc__btn:disabled { opacity: 0.45; cursor: default; }
+.hc__file { display: none; }
+
+/* ---------- 网格 ---------- */
+.hc__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-5, 20px) var(--sp-6, 24px) var(--sp-4, 16px);
+  scrollbar-width: thin;
+  scrollbar-color: oklch(100% 0 0 / 0.18) transparent;
+}
+
+.hc__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 18px 14px;
+  transition: opacity 180ms var(--ease-out, ease);
+}
+/* 专注视图时，其余网格整体淡出 */
+.hc__grid.is-focusing {
+  opacity: 0.16;
+  pointer-events: none;
+}
+
+.hc__empty {
+  grid-column: 1 / -1;
+  padding: 46px 20px;
+  text-align: center;
+  border: 1px dashed oklch(100% 0 0 / 0.14);
+  border-radius: var(--r-md, 14px);
+  color: oklch(64% 0.012 272);
+}
+.hc__empty b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  font-weight: var(--fw-semi, 600);
+  color: oklch(84% 0.008 270);
+}
+.hc__empty span {
+  display: block;
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+/* ---------- 卡片 ---------- */
+.hc-card {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  margin: 0;
+  perspective: 900px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
+}
+.hc-card:focus-visible {
+  outline: 2px solid oklch(85% 0.01 270);
+  outline-offset: 3px;
+  border-radius: 14px;
+}
+.hc-card--big {
+  width: min(46vh, 320px);
+  cursor: default;
+}
+
+.hc-rotor {
+  position: absolute;
+  inset: 0;
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transition: transform 170ms var(--ease-out, ease);
+  will-change: auto;
+}
+.hc-card.is-tilt .hc-rotor { will-change: transform; }
+
+.hc-face {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;                 /* 圆角裁剪靠它；shader 的 canvas 也靠它裁 */
+  border-radius: 14px;
+  background: oklch(23% 0.024 274);
+  box-shadow:
+    0 18px 34px -22px oklch(0% 0 0 / 0.9),
+    inset 0 0 0 1px oklch(100% 0 0 / 0.10);
+}
+/* .hc-face 已是 position:absolute，shader 自己插的 canvas 用
+   position:absolute; inset:0; 就能正好铺满，不需要预埋 canvas。 */
+/* 没封面：用专辑名首字 + 一块深色渐变兜底，不留空白破图 */
+.hc-face.is-empty {
+  background:
+    radial-gradient(120% 90% at 24% 18%, oklch(38% 0.045 285), transparent 62%),
+    linear-gradient(145deg, oklch(30% 0.035 280), oklch(17% 0.022 274));
+}
+.hc-face.is-empty .hc-art { display: none; }
+.hc-face.is-empty::before {
+  content: attr(data-initial);
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 34px;
+  font-weight: var(--fw-semi, 600);
+  letter-spacing: 0.04em;
+  color: oklch(100% 0 0 / 0.30);
+}
+
+.hc-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* 占位材质 1：彩虹膜。shader 接上后专注视图里由 canvas 接管 */
+.hc-foil {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.62;
+  background-image:
+    linear-gradient(112deg,
+      transparent 28%,
+      oklch(70% 0.20 350 / 0.20) 38%,
+      oklch(88% 0.16 95 / 0.18) 46%,
+      oklch(80% 0.16 165 / 0.18) 54%,
+      oklch(72% 0.18 265 / 0.20) 62%,
+      transparent 74%),
+    conic-gradient(from 205deg at var(--mx, 50%) var(--my, 45%),
+      oklch(100% 0 0 / 0.10),
+      oklch(78% 0.18 345 / 0.13),
+      oklch(80% 0.16 200 / 0.13),
+      oklch(90% 0.14 95 / 0.11),
+      oklch(100% 0 0 / 0.10));
+  background-size: 220% 220%, 170% 170%;
+  background-position: var(--mx, 50%) var(--my, 45%), center;
+  mix-blend-mode: screen;           /* 不用 color-dodge：会爆白 */
+  transition: opacity 180ms var(--ease-out, ease);
+}
+.hc-card:hover .hc-foil { opacity: 0.8; }
+
+/* 占位材质 2：跟随指针的径向高光 */
+.hc-glare {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(120% 82% at var(--mx, 50%) var(--my, 32%),
+    oklch(100% 0 0 / 0.42) 0%,
+    oklch(100% 0 0 / 0.14) 34%,
+    transparent 66%);
+  mix-blend-mode: screen;
+  transition: opacity 180ms var(--ease-out, ease);
+}
+.hc-card:hover .hc-glare,
+.hc-card.is-tilt .hc-glare { opacity: 0.9; }
+
+/* shader 挂上之后由 canvas 接管，CSS 近似收起，避免两层材质叠加 */
+.hc-face.has-shader .hc-foil,
+.hc-face.has-shader .hc-glare { opacity: 0; }
+
+/* ---------- 卡面文字 ---------- */
+.hc-cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 3;
+  padding: 30px 10px 9px;
+  border-radius: 0 0 14px 14px;
+  background: linear-gradient(to top,
+    oklch(4% 0.01 270 / 0.88) 0%,
+    oklch(4% 0.01 270 / 0.58) 52%,
+    transparent 100%);
+  pointer-events: none;
+}
+.hc-name {
+  display: block;
+  overflow: hidden;
+  font-size: 11.5px;
+  font-weight: var(--fw-semi, 600);
+  line-height: 1.35;
+  color: oklch(99% 0.002 270);
+  letter-spacing: 0.005em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px oklch(0% 0 0 / 0.55);
+}
+.hc-meta {
+  display: block;
+  overflow: hidden;
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: oklch(100% 0 0 / 0.70);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-card--big .hc-cap { padding: 46px 16px 14px; }
+.hc-card--big .hc-name { font-size: 14px; }
+.hc-card--big .hc-meta { font-size: 11px; }
+
+/* ---------- 卡上动作：右上角，hover 才出现 ---------- */
+.hc-del,
+.hc-keep {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid oklch(100% 0 0 / 0.28);
+  border-radius: var(--r-full, 999px);
+  background: oklch(8% 0.012 272 / 0.72);
+  color: oklch(96% 0.004 270);
+  font: inherit;
+  font-size: 9.5px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity var(--dur-fast, 140ms) var(--ease-out, ease),
+              transform var(--dur-fast, 140ms) var(--ease-out, ease),
+              background var(--dur-fast, 140ms) var(--ease-out, ease);
+}
+.hc-del {
+  width: 22px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 18px;
+}
+.hc-card:hover .hc-del,
+.hc-card:hover .hc-keep,
+.hc-card:focus-within .hc-del,
+.hc-card:focus-within .hc-keep {
+  opacity: 1;
+  transform: none;
+}
+.hc-del:hover,
+.hc-keep:hover {
+  background: oklch(20% 0.02 272 / 0.92);
+  border-color: oklch(100% 0 0 / 0.48);
+}
+.hc-del:focus-visible,
+.hc-keep:focus-visible {
+  outline: 2px solid oklch(90% 0.01 270);
+  outline-offset: 2px;
+  opacity: 1;
+  transform: none;
+}
+/* 触屏没有 hover：动作常显，否则用户找不到删除 */
+@media (hover: none) {
+  .hc-del,
+  .hc-keep { opacity: 0.92; transform: none; }
+}
+
+/* ---------- 提示条 / 撤销 ---------- */
+.hc__msg {
+  flex: none;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 0 var(--sp-6, 24px) 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: oklch(66% 0.012 272);
+}
+.hc__msg.is-err {
+  color: oklch(93% 0.006 270);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: oklch(100% 0 0 / 0.35);
+}
+.hc__undo {
+  flex: none;
+  height: 22px;
+  padding: 0 10px;
+  border: 1px solid oklch(100% 0 0 / 0.26);
+  border-radius: var(--r-full, 999px);
+  background: transparent;
+  color: oklch(93% 0.006 270);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.hc__undo:hover { background: oklch(100% 0 0 / 0.09); }
+.hc__undo:focus-visible {
+  outline: 2px solid oklch(90% 0.01 270);
+  outline-offset: 2px;
+}
+
+/* ---------- 专注视图 ---------- */
+.hc__focus {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  place-items: center;
+  padding: clamp(24px, 5vh, 48px) 20px 20px;
+  background: oklch(7% 0.015 272 / 0.76);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 190ms var(--ease-out, ease),
+              visibility 0s linear 190ms;
+}
+.hc__focus.is-on {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition: opacity 190ms var(--ease-out, ease);
+}
+.hc__focus:focus { outline: none; }
+.hc__focus-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+/* 专注视图的大卡：尺寸给足；全息材质后面由 holo-shader.js 接管 .hc-face 的 canvas */
+.hc-card--big .hc-face {
+  box-shadow:
+    0 40px 90px -40px oklch(0% 0 0 / 0.95),
+    inset 0 0 0 1px oklch(100% 0 0 / 0.12);
+}
+.hc__focus-hint {
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: oklch(62% 0.012 272);
+}
+
+/* ---------- 响应式 ---------- */
+@media (max-width: 560px) {
+  .hc { padding: 0; }
+  .hc__sheet {
+    width: 100%;
+    max-height: 100%;
+    border: 0;
+    border-radius: 0;
+  }
+  .hc__head,
+  .hc__bar,
+  .hc__body { padding-left: var(--sp-4, 16px); padding-right: var(--sp-4, 16px); }
+  .hc__msg { padding-left: var(--sp-4, 16px); padding-right: var(--sp-4, 16px); }
+  .hc__sub { display: none; }
+  .hc__count { display: none; }
+  .hc__grid {
+    grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+    gap: 14px 10px;
+  }
+  .hc-card--big { width: min(72vw, 320px); }
+  .hc__focus { padding: 20px 16px 16px; }
+}
+
+/* ---------- 减少动态：关掉倾斜和所有过渡 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .hc__x,
+  .hc__tab,
+  .hc__btn,
+  .hc__grid,
+  .hc-rotor,
+  .hc-foil,
+  .hc-glare,
+  .hc-del,
+  .hc-keep,
+  .hc__focus { transition: none; }
+  .hc-rotor { transform: none; }
+}

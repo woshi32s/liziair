@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>fillrate</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#04030b}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block}
+#vig{position:fixed;inset:0;pointer-events:none;z-index:5}
+#vig.hidden{display:none}
+</style>
+</head><body>
+<canvas id="c"></canvas>
+<div id="vig" class="hidden"></div>
+<script>
+"use strict";
+/* 目的：量化"全屏像素覆盖"的成本，以及把整屏层挪到 DOM（合成器）之后还剩多少。
+   每个模式都做同样多的"内容"绘制，只有全屏层的归属不同。 */
+const cv = document.getElementById('c');
+const vig = document.getElementById('vig');
+const MODE = (location.hash || '#none').slice(1);
+const ALPHA = MODE.indexOf('alpha') >= 0;
+const ctx = cv.getContext('2d', { alpha: ALPHA });
+let W = 0, H = 0, DPR = 1;
+
+function gradFill(g, w, h) {
+  const rg = g.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.72);
+  rg.addColorStop(0, 'rgb(26,17,48)'); rg.addColorStop(0.55, 'rgb(10,7,22)'); rg.addColorStop(1, 'rgb(4,3,11)');
+  g.fillStyle = rg; g.fillRect(0, 0, w, h);
+}
+function vignette(g, w, h) {
+  const vg = g.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.22, w / 2, h / 2, Math.max(w, h) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.72)');
+  g.fillStyle = vg; g.fillRect(0, 0, w, h);
+}
+function resize() {
+  DPR = 1;
+  W = Math.max(1, window.innerWidth); H = Math.max(1, window.innerHeight);
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  /* CSS 侧的底 + 暗角（只在 resize 时算一次） */
+  const outer = Math.max(W, H) * 0.78, inner = Math.min(W, H) * 0.22;
+  document.body.style.background = 'radial-gradient(circle ' + (Math.max(W, H) * 0.72) + 'px at 50% 50%, rgb(26,17,48) 0px, rgb(10,7,22) ' + (Math.max(W, H) * 0.72 * 0.55) + 'px, rgb(4,3,11) ' + (Math.max(W, H) * 0.72) + 'px)';
+  vig.style.background = 'radial-gradient(circle ' + outer + 'px at 50% 50%, rgba(0,0,0,0) ' + inner + 'px, rgba(0,0,0,.72) ' + outer + 'px)';
+}
+resize(); addEventListener('resize', resize);
+
+/* 内容：一圈细线 + 一些文字（和 018 的"内容"量级类似，约 0.4M 像素覆盖） */
+function content(t0) {
+  const cx = W / 2, cy = H / 2;
+  ctx.globalCompositeOperation = 'lighter';
+  for (let n = 0; n < 9; n++) {
+    const s = Math.pow(1.618034, -(n + (t0 * 0.4) % 1));
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(n * 0.9 + t0 * 0.05);
+    ctx.strokeStyle = 'rgba(200,180,255,0.35)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let r = 1; r <= 3; r++) { ctx.moveTo(300 * s * (0.5 + r * 0.17), 0); ctx.arc(0, 0, 300 * s * (0.5 + r * 0.17), 0, 6.28318); }
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+let last = performance.now(), t0 = 0;
+function frame(nowMs) {
+  const dt = Math.min(0.05, (nowMs - last) / 1000); last = nowMs; t0 += dt;
+  const cx = W / 2, cy = H / 2;
+
+  if (MODE.indexOf('css') >= 0) {
+    /* 底和暗角都在 DOM 上：canvas 透明，每帧只 clearRect */
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.clearRect(0, 0, W, H);
+    content(t0);
+    ctx.globalCompositeOperation = 'source-over';
+  } else if (MODE.indexOf('grads') >= 0) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    gradFill(ctx, W, H);
+    content(t0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    vignette(ctx, W, H);
+  } else if (MODE.indexOf('blits') >= 0) {
+    if (!window.__lay) {
+      const c1 = document.createElement('canvas'); c1.width = Math.round(W / 2); c1.height = Math.round(H / 2);
+      gradFill(c1.getContext('2d'), c1.width, c1.height);
+      const c2 = document.createElement('canvas'); c2.width = Math.round(W / 2); c2.height = Math.round(H / 2);
+      vignette(c2.getContext('2d'), c2.width, c2.height);
+      window.__lay = [c1, c2];
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(window.__lay[0], 0, 0, W, H);
+    content(t0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.drawImage(window.__lay[1], 0, 0, W, H);
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__stage = () => ({ mode: MODE, t: +t0.toFixed(2) });
+</script>
+</body></html>

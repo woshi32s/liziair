@@ -1,0 +1,8 @@
+{
+  "name": "lizi-spotify-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LIZI 的 Spotify 边车（零依赖；官方 OAuth PKCE + Web API 元数据；本期不接音频）",
+  "scripts": { "start": "node start.mjs" }
+}

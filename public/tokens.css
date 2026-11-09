@@ -1,0 +1,98 @@
+/* Hallmark · macrostructure: Workbench (app shell) · tone: atmospheric · anchor hue: 12 (网易云红)
+ *
+ * 令牌系统。页面里所有颜色和字体都必须引用这里的变量，不允许在别处内联色值。
+ * 色板用 OKLCH：L 感知均匀，调亮调暗不会跑色相。
+ */
+
+:root {
+  /* ---------------------------------------------------------------------
+     字体：3 个字族封顶（display + body + outlier）
+     Fraunces   只出现在品牌名和播放页大标题 —— 一个"印出来的"register
+     Geist      正文与全部 UI
+     Geist Mono 只用于时长、播放计数等数字
+     --------------------------------------------------------------------- */
+  --font-display: "Fraunces", "Songti SC", Georgia, serif;
+  --font-body: "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* ---------------------------------------------------------------------
+     字号级数：比率 1.25（大三度），基准 16px
+     --------------------------------------------------------------------- */
+  --text-2xs: 0.64rem;   /* 10.2 */
+  --text-xs:  0.75rem;   /* 12   */
+  --text-sm:  0.8125rem; /* 13   */
+  --text-md:  0.875rem;  /* 14   */
+  --text-base:1rem;      /* 16   */
+  --text-lg:  1.25rem;   /* 20   */
+  --text-xl:  1.5625rem; /* 25   */
+  --text-2xl: 1.9531rem; /* 31.3 */
+  --text-3xl: 2.4414rem; /* 39   */
+  --text-display: clamp(2rem, 3.2vw + 1rem, 3.25rem);
+
+  --fw-light: 300;
+  --fw-body: 400;
+  --fw-med: 500;
+  --fw-semi: 600;
+
+  /* ---------------------------------------------------------------------
+     间距：4pt 级数。整套留白都由这几个值拼出来，不要出现 7px / 13px 这种野值
+     --------------------------------------------------------------------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-9: 56px;
+  --sp-10: 72px;
+
+  /* 圆角 */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-full: 999px;
+
+  /* ---------------------------------------------------------------------
+     颜色：纸面是浅色，文字是墨色，accent 只有一个（网易云红）
+     --------------------------------------------------------------------- */
+  --paper:        oklch(96.5% 0.008 264);
+  --paper-2:      oklch(99% 0.003 264);
+  --ink:          oklch(21% 0.022 270);
+  --ink-2:        oklch(44% 0.018 270);
+  --ink-3:        oklch(58% 0.014 270);
+  --accent:       oklch(62% 0.22 12);
+  --accent-ink:   oklch(52% 0.21 12);
+  --rule:         oklch(21% 0.022 270 / 0.09);
+
+  /* 玻璃：底色和描边分开控制，方便深色封面时切到 dark 变体 */
+  --glass-tint:   oklch(100% 0 0 / 0.30);
+  --glass-edge:   oklch(100% 0 0 / 0.62);
+  --glass-tint-strong: oklch(100% 0 0 / 0.46);
+
+  /* 背景取色（JS 会按封面动态覆写这三个） */
+  --tone-a: oklch(72% 0.16 264);
+  --tone-b: oklch(76% 0.14 190);
+  --tone-c: oklch(80% 0.13 340);
+
+  /* 动效：只用这三条缓动，不用浏览器默认 ease */
+  --ease-out:   cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in:    cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 140ms;
+  --dur-med:  260ms;
+  --dur-slow: 420ms;
+
+  /* 布局 */
+  --shell-max: 1480px;
+  --gutter: var(--sp-7);
+  --side-w: 268px;
+  --player-h: 92px;
+  --topbar-h: 64px;
+}
+
+@media (max-width: 900px) {
+  :root { --gutter: var(--sp-4); --side-w: 232px; --player-h: 104px; }
+}

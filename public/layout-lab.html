@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LIZI · 播放页排版实验室（20 版）</title>
+<style>
+  :root{
+    --cover: url("/api/img?url=http%3A%2F%2Fp2.music.126.net%2Fpdpmj0csBR_nUM7c2xr6pA%3D%3D%2F109951174135616642.jpg%3Fparam%3D500y500");
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:36px 30px 90px;background:#f2f2f5;color:#15151a;
+       font-family:-apple-system,"SF Pro Text","PingFang SC","Microsoft YaHei",system-ui,sans-serif}
+  header{max-width:1560px;margin:0 auto 26px}
+  h1{font-size:21px;margin:0 0 6px;letter-spacing:-.01em}
+  .lead{margin:0;color:#6b6b76;font-size:13.5px;line-height:1.7}
+  .grid{max-width:1560px;margin:0 auto;display:grid;gap:24px 20px;
+        grid-template-columns:repeat(auto-fill,minmax(440px,1fr))}
+  .card{margin:0}
+  .cap{display:flex;gap:8px;align-items:baseline;margin:0 0 8px;font-size:13px;color:#3a3a44}
+  .cap b{font-variant-numeric:tabular-nums;color:#9a9aa6;font-weight:600;min-width:20px}
+
+  .screen{position:relative;width:100%;aspect-ratio:16/10;overflow:hidden;border-radius:16px;
+          background:#0f0f14;color:#fff;container-type:size;isolation:isolate;
+          box-shadow:0 10px 28px rgba(20,20,30,.16);font-family:inherit}
+
+  /* 公共部件 */
+  .bg{position:absolute;inset:0;background:var(--cover) center/cover;opacity:.4;
+      filter:blur(3.2cqw) saturate(1.25);transform:scale(1.18);display:none}
+  .veil{position:absolute;inset:0;display:none;
+        background:linear-gradient(180deg,rgba(10,10,16,.25),rgba(10,10,16,.78))}
+  .cover{position:absolute;background:var(--cover) center/cover;border-radius:2.2cqw;
+         box-shadow:0 2cqw 5cqw rgba(0,0,0,.5)}
+  .lyr{position:absolute}
+  .lyr p{margin:0;font-size:3.1cqw;line-height:1.34;font-weight:600;letter-spacing:-.01em;
+         color:rgba(255,255,255,.32);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .lyr p.on{color:#fff;text-shadow:0 .6cqw 2.4cqw rgba(0,0,0,.45)}
+  .meta{position:absolute}
+  .meta h3{margin:0;font-size:2.5cqw;font-weight:600;letter-spacing:-.01em;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .meta span{display:block;margin-top:.5cqw;font-size:1.9cqw;color:rgba(255,255,255,.55);
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ctl{position:absolute;display:flex;align-items:center;gap:1.6cqw}
+  .ctl .b{width:6.4cqw;height:6.4cqw;border-radius:50%;display:grid;place-items:center;
+          background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:#fff}
+  .ctl .b.play{width:8.4cqw;height:8.4cqw;background:#fff;color:#15151a;border:0;
+               box-shadow:0 1.2cqw 3cqw rgba(0,0,0,.45)}
+  .ctl svg{width:2.7cqw;height:2.7cqw;fill:currentColor}
+  .ctl .play svg{width:3.3cqw;height:3.3cqw}
+  .bar{position:absolute;left:0;right:0;bottom:0;height:.9cqw;background:rgba(255,255,255,.14)}
+  .bar i{position:absolute;inset:0 auto 0 0;width:38%;
+         background:linear-gradient(90deg,#f0a8bf,#93a9ea)}
+
+  /* 01 左封面 / 右歌词 / 中心对齐 */
+  .v01 .cover{left:4cqw;top:12cqh;width:30cqw;height:30cqw}
+  .v01 .meta{left:4cqw;top:64cqh;width:30cqw;text-align:center}
+  .v01 .ctl{left:4cqw;top:76cqh;width:30cqw;justify-content:center}
+  .v01 .lyr{left:39cqw;right:4cqw;top:50cqh;transform:translateY(-50%)}
+
+  /* 02 左封面 / 右歌词 / 顶对齐 */
+  .v02 .cover{left:4cqw;top:14cqh;width:30cqw;height:30cqw}
+  .v02 .meta{left:4cqw;top:66cqh;width:30cqw}
+  .v02 .ctl{left:4cqw;top:77cqh;width:30cqw}
+  .v02 .lyr{left:39cqw;right:4cqw;top:14cqh}
+
+  /* 03 小封面 / 大字歌词 */
+  .v03 .cover{left:4cqw;top:28cqh;width:22cqw;height:22cqw}
+  .v03 .lyr{left:30cqw;right:4cqw;top:50cqh;transform:translateY(-50%)}
+  .v03 .lyr p{font-size:3.6cqw}
+  .v03 .meta{left:4cqw;top:66cqh;width:22cqw}
+  .v03 .meta h3{font-size:2.1cqw}
+  .v03 .ctl{left:4cqw;top:77cqh;width:22cqw;transform:scale(.82);transform-origin:left top}
+
+  /* 04 封面居中上 / 歌词在下居中 */
+  .v04 .cover{left:50%;top:5cqh;transform:translateX(-50%);width:20cqw;height:20cqw}
+  .v04 .lyr{left:10cqw;right:10cqw;top:40cqh;text-align:center}
+  .v04 .lyr p{text-align:center;font-size:2.9cqw}
+  .v04 .meta{left:50%;bottom:17cqh;transform:translateX(-50%);text-align:center}
+  .v04 .ctl{left:50%;bottom:4cqh;transform:translateX(-50%)}
+
+  /* 05 左右等分（封面满高） */
+  .v05 .cover{left:0;top:0;width:46cqw;height:100cqh;border-radius:0}
+  .v05 .lyr{left:50cqw;right:4cqw;top:50cqh;transform:translateY(-50%)}
+  .v05 .lyr p{font-size:2.9cqw}
+  .v05 .meta{left:50cqw;bottom:14cqh;right:4cqw}
+  .v05 .ctl{left:50cqw;bottom:3cqh}
+
+  /* 06 镜像：歌词左 / 封面右 */
+  .v06 .cover{right:4cqw;top:12cqh;width:30cqw;height:30cqw}
+  .v06 .meta{right:4cqw;top:64cqh;width:30cqw;text-align:right}
+  .v06 .ctl{right:4cqw;top:76cqh;width:30cqw;justify-content:flex-end}
+  .v06 .lyr{left:4cqw;right:39cqw;top:50cqh;transform:translateY(-50%);text-align:right}
+  .v06 .lyr p{text-align:right}
+
+  /* 07 小封面嵌在歌词左上 */
+  .v07 .cover{left:5cqw;top:9cqh;width:15cqw;height:15cqw;border-radius:1.6cqw}
+  .v07 .lyr{left:5cqw;right:6cqw;top:36cqh}
+  .v07 .lyr p{font-size:3.4cqw}
+  .v07 .meta{left:22cqw;top:9cqh;right:6cqw}
+  .v07 .ctl{left:22cqw;bottom:8cqh}
+
+  /* 08 封面模糊铺满 / 歌词居中浮层 */
+  .v08 .bg,.v08 .veil{display:block}
+  .v08 .lyr{left:12cqw;right:12cqw;top:50cqh;transform:translateY(-50%);text-align:center}
+  .v08 .lyr p{text-align:center;font-size:3.1cqw}
+  .v08 .meta{left:50%;bottom:14cqh;transform:translateX(-50%);text-align:center}
+  .v08 .ctl{left:50%;bottom:3cqh;transform:translateX(-50%)}
+
+  /* 09 封面清晰铺满 + 暗角 / 歌词左对齐 */
+  .v09 .bg{display:block;opacity:.85;filter:none;transform:none}
+  .v09 .veil{display:block;background:linear-gradient(90deg,rgba(8,8,12,.82) 0%,rgba(8,8,12,.35) 55%,rgba(8,8,12,.1))}
+  .v09 .lyr{left:6cqw;right:48cqw;top:20cqh}
+  .v09 .meta{left:6cqw;bottom:20cqh;right:48cqw}
+  .v09 .ctl{left:6cqw;bottom:8cqh}
+
+  /* 10 圆形唱片 */
+  .v10 .cover{border-radius:50%;left:5cqw;top:15cqh;width:29cqw;height:29cqw;
+              box-shadow:0 0 0 1cqw rgba(255,255,255,.06),0 2cqw 5cqw rgba(0,0,0,.5)}
+  .v10 .lyr{left:39cqw;right:4cqw;top:50cqh;transform:translateY(-50%)}
+  .v10 .meta{left:5cqw;top:68cqh;width:29cqw;text-align:center}
+  .v10 .ctl{left:5cqw;top:79cqh;width:29cqw;justify-content:center}
+
+  /* 11 上封面 / 控制夹在中间 / 下歌词 */
+  .v11 .cover{left:50%;top:6cqh;transform:translateX(-50%);width:27cqw;height:27cqw}
+  .v11 .ctl{right:7cqw;top:26cqh;flex-direction:column}
+  .v11 .lyr{left:9cqw;right:9cqw;top:50cqh;text-align:center}
+  .v11 .lyr p{text-align:center;font-size:2.9cqw}
+  .v11 .meta{left:9cqw;bottom:7cqh;right:9cqw;text-align:center}
+
+  /* 12 双栏歌词 */
+  .v12 .cover{left:4cqw;bottom:5cqh;width:14cqw;height:14cqw;border-radius:1.6cqw}
+  .v12 .lyr{left:4cqw;right:4cqw;top:12cqh;column-count:2;column-gap:4cqw}
+  .v12 .lyr p{font-size:2.6cqw;margin-bottom:1.6cqw}
+  .v12 .meta{left:20cqw;bottom:16cqh;right:4cqw}
+  .v12 .ctl{left:20cqw;bottom:4cqh}
+
+  /* 13 杂志式：大标题 + 小封面 + 歌词 */
+  .v13 .cover{right:5cqw;top:6cqh;width:20cqw;height:20cqw}
+  .v13 .meta{left:5cqw;top:7cqh;right:28cqw}
+  .v13 .meta h3{font-size:4cqw;line-height:1.15;font-weight:700;white-space:normal}
+  .v13 .lyr{left:5cqw;right:33cqw;top:42cqh}
+  .v13 .ctl{left:5cqw;bottom:6cqh}
+
+  /* 14 双卡片 */
+  .v14 .cover{left:5cqw;top:16cqh;width:28cqw;height:28cqw;border-radius:2.4cqw}
+  .v14 .lyr{left:37cqw;right:5cqw;top:14cqh;bottom:20cqh;
+            background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.1);
+            border-radius:2.4cqw;padding:4cqw 3.4cqw;backdrop-filter:blur(2cqw)}
+  .v14 .lyr p{font-size:2.8cqw}
+  .v14 .meta{left:5cqw;top:60cqh;width:28cqw;text-align:center}
+  .v14 .ctl{left:5cqw;top:72cqh;width:28cqw;justify-content:center}
+  .v14 .bar{left:37cqw;right:5cqw;bottom:6cqh;border-radius:999px;height:.8cqw;overflow:hidden}
+
+  /* 15 极简：只有歌词 + 顶部细进度 */
+  .v15 .cover,.v15 .meta,.v15 .ctl{display:none}
+  .v15 .lyr{left:14cqw;right:14cqw;top:50cqh;transform:translateY(-50%);text-align:center}
+  .v15 .lyr p{text-align:center;font-size:3.6cqw;color:rgba(255,255,255,.24)}
+  .v15 .bar{top:0;bottom:auto;height:.5cqw;background:rgba(255,255,255,.1)}
+
+  /* 16 歌词为主 + 底部小方图 */
+  .v16 .cover{left:50%;bottom:3cqh;transform:translateX(-50%);width:9cqw;height:9cqw;border-radius:1.2cqw}
+  .v16 .lyr{left:12cqw;right:12cqw;top:28cqh;text-align:center}
+  .v16 .lyr p{text-align:center;font-size:3.2cqw}
+  .v16 .meta{left:50%;top:6cqh;transform:translateX(-50%);text-align:center}
+  .v16 .ctl{left:50%;bottom:24cqh;transform:translateX(-50%)}
+
+  /* 17 左封面 + 大行距歌词 */
+  .v17 .cover{left:4cqw;top:30cqh;width:24cqw;height:24cqw;transform:translateY(-50%)}
+  .v17 .lyr{left:33cqw;right:5cqw;top:50cqh;transform:translateY(-50%)}
+  .v17 .lyr p{font-size:2.7cqw;line-height:2.3}
+  .v17 .meta{left:4cqw;top:52cqh;width:24cqw}
+  .v17 .ctl{left:4cqw;top:66cqh;width:24cqw}
+
+  /* 18 封面右上小 / 歌词占左 */
+  .v18 .cover{right:4cqw;top:5cqh;width:17cqw;height:17cqw;border-radius:1.6cqw}
+  .v18 .lyr{left:5cqw;right:26cqw;top:26cqh}
+  .v18 .lyr p{font-size:3.3cqw}
+  .v18 .meta{left:5cqw;top:8cqh;right:26cqw}
+  .v18 .ctl{left:5cqw;bottom:6cqh}
+
+  /* 19 上下：大封面 + 歌词 + 右下控制 */
+  .v19 .cover{left:9cqw;top:5cqh;width:27cqw;height:27cqw}
+  .v19 .lyr{left:9cqw;right:9cqw;top:50cqh}
+  .v19 .lyr p{font-size:2.9cqw}
+  .v19 .meta{left:9cqw;bottom:13cqh;right:27cqw}
+  .v19 .ctl{right:5cqw;bottom:3cqh}
+
+  /* 20 时间轴 */
+  .v20 .cover{right:4cqw;top:7cqh;width:22cqw;height:22cqw}
+  .v20 .lyr{left:14cqw;right:30cqw;top:50cqh;transform:translateY(-50%)}
+  .v20 .lyr p{font-size:2.8cqw}
+  .v20 .lyr::before{content:"";position:absolute;left:-6cqw;top:1cqw;bottom:1cqw;width:1px;
+                    background:linear-gradient(180deg,transparent,rgba(255,255,255,.35),transparent)}
+  .v20 .meta{left:14cqw;bottom:6cqh;right:30cqw}
+  .v20 .ctl{left:4cqw;top:7cqh;flex-direction:column;gap:1.2cqw}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>LIZI · 播放页排版实验室</h1>
+  <p class="lead">
+    20 种排版，素材完全相同（同一张封面、同样 5 行歌词、同一条进度、同一组按钮），<b>只变布局</b>。<br>
+    挑一个编号告诉我就行；也可以说「12 的歌词 + 4 的封面」这种混搭。
+  </p>
+</header>
+
+<div class="grid">
+  <!-- 统一模板：每条 5 行歌词，第 2 行是当前行 -->
+  <!-- 01 -->
+  <figure class="card"><figcaption class="cap"><b>01</b><span>左封面 · 右歌词 · 中心对齐（当前版）</span></figcaption>
+    <div class="screen v01"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 02 -->
+  <figure class="card"><figcaption class="cap"><b>02</b><span>左封面 · 右歌词 · 歌词顶对齐</span></figcaption>
+    <div class="screen v02"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 03 -->
+  <figure class="card"><figcaption class="cap"><b>03</b><span>小封面 · 大字歌词（封面让位）</span></figcaption>
+    <div class="screen v03"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 04 -->
+  <figure class="card"><figcaption class="cap"><b>04</b><span>海报式：封面居中上 · 歌词在下</span></figcaption>
+    <div class="screen v04"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 05 -->
+  <figure class="card"><figcaption class="cap"><b>05</b><span>左右等分：封面占满左半 · 歌词右半</span></figcaption>
+    <div class="screen v05"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 06 -->
+  <figure class="card"><figcaption class="cap"><b>06</b><span>镜像：歌词左 · 封面右</span></figcaption>
+    <div class="screen v06"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 07 -->
+  <figure class="card"><figcaption class="cap"><b>07</b><span>小封面嵌在歌词左上 · 歌词占满宽</span></figcaption>
+    <div class="screen v07"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 08 -->
+  <figure class="card"><figcaption class="cap"><b>08</b><span>封面模糊铺满 · 歌词居中浮层</span></figcaption>
+    <div class="screen v08"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 09 -->
+  <figure class="card"><figcaption class="cap"><b>09</b><span>封面清晰铺满 + 暗角 · 歌词左对齐</span></figcaption>
+    <div class="screen v09"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 10 -->
+  <figure class="card"><figcaption class="cap"><b>10</b><span>圆形唱片封面 · 歌词右</span></figcaption>
+    <div class="screen v10"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 11 -->
+  <figure class="card"><figcaption class="cap"><b>11</b><span>上下：封面 · 控制夹中间 · 歌词在下</span></figcaption>
+    <div class="screen v11"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 12 -->
+  <figure class="card"><figcaption class="cap"><b>12</b><span>双栏歌词 · 左下小封面</span></figcaption>
+    <div class="screen v12"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 13 -->
+  <figure class="card"><figcaption class="cap"><b>13</b><span>杂志式：大标题 · 小封面 · 歌词左</span></figcaption>
+    <div class="screen v13"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了<br>我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 14 -->
+  <figure class="card"><figcaption class="cap"><b>14</b><span>双卡片：封面卡 · 歌词卡</span></figcaption>
+    <div class="screen v14"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 15 -->
+  <figure class="card"><figcaption class="cap"><b>15</b><span>极简：只有歌词 · 顶部细进度</span></figcaption>
+    <div class="screen v15"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 16 -->
+  <figure class="card"><figcaption class="cap"><b>16</b><span>歌词为主 · 封面缩成底部小方图</span></figcaption>
+    <div class="screen v16"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 17 -->
+  <figure class="card"><figcaption class="cap"><b>17</b><span>左封面 · 大行距歌词（呼吸感）</span></figcaption>
+    <div class="screen v17"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 18 -->
+  <figure class="card"><figcaption class="cap"><b>18</b><span>封面右上小图 · 歌词占左</span></figcaption>
+    <div class="screen v18"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 19 -->
+  <figure class="card"><figcaption class="cap"><b>19</b><span>上下结构 · 控制右下</span></figcaption>
+    <div class="screen v19"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+
+  <!-- 20 -->
+  <figure class="card"><figcaption class="cap"><b>20</b><span>时间轴：歌词吃一条竖线 · 封面右上</span></figcaption>
+    <div class="screen v20"><div class="bg"></div><div class="veil"></div>
+      <div class="lyr"><p>We don't have the power</p><p class="on">But we never say never</p><p>Sitting in a sandpit</p><p>Life is a short trip</p><p>Thermite's for the end</p></div>
+      <div class="cover"></div>
+      <div class="meta"><h3>机会到了我们出</h3><span>卡力老虎 · 商业与玩法</span></div>
+      <div class="ctl"><button class="b"><svg viewBox="0 0 24 24"><path d="M6 4h2v16H6zM20 4l-10 8 10 8z"/></svg></button><button class="b play"><svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z"/></svg></button><button class="b"><svg viewBox="0 0 24 24"><path d="M18 4h2v16h-2zM4 4l10 8L4 20z"/></svg></button></div>
+      <div class="bar"><i></i></div></div></figure>
+</div>
+
+</body>
+</html>
+
+
+
+
+

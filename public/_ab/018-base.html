@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>无限缩放</title>
+<style>
+  html,body{margin:0;height:100%;background:#04030b;overflow:hidden}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);
+        font:500 11px/1.5 ui-monospace,Consolas,monospace;
+        color:rgba(180,150,255,.30);letter-spacing:.08em;pointer-events:none;transition:opacity .6s}
+</style>
+</head>
+<body data-chrome="off">
+<canvas id="c"></canvas>
+<div id="hint">等待第一句…</div>
+<script>
+"use strict";
+/* ============================================================================
+   018 · 无限缩放歌词 —— 字在幂律递归里，越缩越小，永远缩不完
+
+   和 001-010 全都不同：没有粒子、没有物理，只有**同一个字的无穷嵌套**。
+   第 n 层画的是同一句词，位置绕中心沿对数螺线旋转、尺寸按
+   s = pow(R, -n) 收缩、亮度递减。R 取无理数，所以缩下去永远不会精确回到自己 ——
+   一直缩，一直有新的一层从中心冒出来，是**幂律的自相似**，不是循环动画。
+
+   关键机关：镜头的缩放量 z 每涨 1，所有层正好"顶替"下一层的位置
+   （s(z+1) = R*s(z)），画面毫无跳变地继续往里钻。
+
+   字用 strokeText 描边画（不是 fillText）：
+   缩放到 30 倍时 fillText 会去栅格化一块巨大的实心面，描边则一直是细线，快且好看。
+   另外每一层都被限制在自己的圆盘内（clip），越深的层越靠中心，
+   于是中心永远是一个"越来越小、越来越深"的洞。
+   ========================================================================== */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha: false });
+const hint = document.getElementById('hint');
+
+let W = 0, H = 0, DPR = 1;
+const RAT = 1.618034;      // 每往内一层缩小的比例
+const LVL = 9;
+
+/* ---------------- 状态 ---------------- */
+let lines = [];
+let accent = [150, 120, 255];
+let curIdx = -1, brewIdx = -1, lastT = -1;
+let clockT = 0, clockAt = 0, playing = false;
+let zoom = 0, spin = 0, pulse = 0, lum = 0;
+let last = performance.now(), t0 = 0;
+let bmp = null, bx = 0, by = 0;
+
+/* ---------------- 字形采样（只为拿到轮廓与边界，绘制用 strokeText） ---------------- */
+const off = document.createElement('canvas');
+const octx = off.getContext('2d', { willReadFrequently: true });
+
+function glyphPoints(text) {
+  const F = 100;
+  const maxW = Math.min(W * 0.8, 1300);
+  octx.font = '800 ' + F + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  let w = Math.ceil(octx.measureText(text).width) + 8;
+  const fs = w > maxW ? F * (maxW / w) : F;
+  octx.font = '800 ' + fs + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  w = Math.ceil(octx.measureText(text).width) + 8;
+  const h = Math.ceil(fs * 1.35);
+  off.width = w; off.height = h;
+  octx.clearRect(0, 0, w, h);
+  octx.font = '800 ' + fs + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  octx.textAlign = 'center'; octx.textBaseline = 'middle';
+  octx.fillStyle = '#fff';
+  octx.fillText(text, w / 2, h / 2);
+  const d = octx.getImageData(0, 0, w, h).data;
+  const pts = [];
+  const step = 3;
+  for (let y = 0; y < h; y += step)
+    for (let x = 0; x < w; x += step)
+      if (d[(y * w + x) * 4 + 3] > 128) pts.push(x - w / 2, y - h / 2);
+  return { pts: pts, w: w, h: h, fs: fs };
+}
+
+const anchors = [];
+for (let i = 0; i < 96; i++) {
+  const g = i * 2.399963;
+  const rr = 0.30 + 0.70 * (((i * 37) % 97) / 97);
+  anchors.push({ nx: Math.cos(g) * rr, ny: Math.sin(g) * rr * 0.66 });
+}
+function placeAnchor(a, hw, hh, gcx, gcy) {
+  const M = 60;
+  const x0 = M + hw - gcx, x1 = W - M - hw - gcx;
+  const y0 = M + hh - gcy, y1 = H - M - hh - gcy;
+  return {
+    x: x1 > x0 ? x0 + (a.nx * 0.5 + 0.5) * (x1 - x0) : W / 2 - gcx,
+    y: y1 > y0 ? y0 + (a.ny * 0.5 + 0.5) * (y1 - y0) : H / 2 - gcy
+  };
+}
+
+/* 每句的字形模板：文本 + 轮廓点（用来定尘埃密度与环半径） */
+let tpl = null;
+function buildTemplate(idx) {
+  if (idx < 0 || !lines[idx]) { tpl = null; return; }
+  const g = glyphPoints(lines[idx].text);
+  const pts = g.pts, pc = pts.length / 2;
+  if (!pc) { tpl = null; return; }
+  let bx0 = 1e9, bx1 = -1e9, by0 = 1e9, by1 = -1e9;
+  for (let k = 0; k < pts.length; k += 2) {
+    if (pts[k] < bx0) bx0 = pts[k];
+    if (pts[k] > bx1) bx1 = pts[k];
+    if (pts[k + 1] < by0) by0 = pts[k + 1];
+    if (pts[k + 1] > by1) by1 = pts[k + 1];
+  }
+  const hw = (bx1 - bx0) / 2, hh = (by1 - by0) / 2;
+  const A = placeAnchor(anchors[idx % anchors.length], hw, hh, (bx0 + bx1) / 2, (by0 + by1) / 2);
+  const M = Math.max(70, Math.min(W, H) * 0.075);   // 缩放时的边距，别把字截断
+  const cw = Math.max(40, W / 2 - M), ch = Math.max(40, H / 2 - M);
+  const k = Math.min(cw / Math.max(1, hw), ch / Math.max(1, hh));
+  /* 尘埃：沿轮廓等间隔取样（不是按扫描顺序），散布在字的四周 */
+  const ND = 240;
+  const dx = new Float32Array(ND), dy = new Float32Array(ND), ds = new Float32Array(ND);
+  for (let i = 0; i < ND; i++) {
+    const q = (Math.floor(i * pc / ND) % pc) * 2;
+    const ang = (i * 2.399963);
+    const rr = 1.05 + 0.85 * (((i * 53) % 89) / 89);
+    dx[i] = pts[q] * rr * k + Math.cos(ang) * 26;
+    dy[i] = pts[q + 1] * rr * k + Math.sin(ang) * 26;
+    ds[i] = 0.3 + 0.7 * (((i * 31) % 71) / 71);
+  }
+  tpl = {
+    text: lines[idx].text, fs: g.fs, hw: hw, hh: hh,
+    k: k, cx: (A.x - W / 2) * 0.28, cy: (A.y - H / 2) * 0.28,
+    dx: dx, dy: dy, ds: ds
+  };
+  rebuildBitmap();
+}
+
+/* ---------------- 中心的小位图（最内几层用它，避免超大栅格化） ---------------- */
+function rebuildBitmap() {
+  if (!tpl) { bmp = null; return; }
+  const S = 192;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g2 = c.getContext('2d');
+  const k = Math.min(S * 0.86 / Math.max(1, tpl.hw * 2), S * 0.86 / Math.max(1, tpl.hh * 2));
+  g2.setTransform(1, 0, 0, 1, 0, 0);
+  g2.clearRect(0, 0, S, S);
+  g2.translate(S / 2, S / 2);
+  g2.scale(k, k);
+  g2.font = '800 ' + tpl.fs + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  g2.textAlign = 'center'; g2.textBaseline = 'middle';
+  g2.fillStyle = '#fff';
+  g2.fillText(tpl.text, 0, 0);
+  bmp = c;
+  bx = (tpl.hw * 2 * k) / S;      // 位图里字占的横向比例
+  by = (tpl.hh * 2 * k) / S;
+}
+
+/* ---------------- 泛光 ---------------- */
+let bloom = null;
+function ensureBloom() {
+  if (!bloom) {
+    bloom = document.createElement('canvas');
+    bloom.width = Math.max(2, Math.round(W / 4));
+    bloom.height = Math.max(2, Math.round(H / 4));
+  }
+}
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = Math.max(1, window.innerWidth);
+  H = Math.max(1, window.innerHeight);
+  cv.width = Math.round(W * DPR);
+  cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  bloom = null;
+  if (tpl) buildTemplate(curIdx);
+}
+
+/* ---------------- 节奏 ---------------- */
+const now = () => clockT + (playing ? (performance.now() - clockAt) / 1000 : 0);
+
+/* ================= 节奏：1-10 的教训固化在这里 =================
+   ① 显示与酝酿分离 —— curIdx 只在句首切换，brewIdx 提前 lead 秒准备
+   ② 索引单调不回退 —— 时钟在 tick 之间外推、tick 一来会往回缩一点，
+      不锁单调的话句边界来回跳、同一句被反复重建
+   ③ 提前量自适应 —— 快歌早开始，慢歌不提前太多
+   ④ 只有拖进度条（时间明显倒退）才允许重置
+   ================================================================ */
+const LEAD = 1.3;
+function timing(T) {
+  if (!lines.length) return;
+  if (T < lastT - 0.6) {
+    curIdx = -1; brewIdx = -1;
+    tpl = null; bmp = null;            // 释放上一句的字形模板与位图
+  }
+  lastT = T;
+  let ci = curIdx;
+  while (ci + 1 < lines.length && T >= lines[ci + 1].t) ci++;
+  if (ci !== curIdx) {
+    curIdx = ci;
+    brewIdx = -1;
+    buildTemplate(ci);                 // 整条递归链同时换词
+    hint.style.opacity = lines.length ? (ci >= 0 ? '0' : '1') : '0.5';
+  }
+  const nx = curIdx + 1;
+  if (nx < lines.length && brewIdx !== nx) {
+    const gap = lines[nx].t - (curIdx >= 0 ? lines[curIdx].t : lines[nx].t - 4);
+    const lead = Math.min(LEAD, Math.max(0.45, gap * 0.55));
+    if (T >= lines[nx].t - lead) brewIdx = nx;
+  }
+}
+
+/* 每一层的配色：0 层偏紫 → 深层偏金（6 档，互斥分档，不逐层拼字符串）。
+   主色只用来给整个色阶做一点点偏移。 */
+let LVCOL = [];
+function buildPalette() {
+  const r0 = 0.70 * 178 + 0.30 * accent[0];
+  const g0 = 0.70 * 142 + 0.30 * accent[1];
+  const b0 = 0.70 * 255 + 0.30 * accent[2];
+  const r1 = 0.70 * 250 + 0.30 * accent[0];
+  const g1 = 0.70 * 230 + 0.30 * accent[1];
+  const b1 = 0.70 * 170 + 0.30 * accent[2];
+  LVCOL = [];
+  for (let i = 0; i < 6; i++) {
+    const q = i / 5;
+    const r = Math.round(r0 + (r1 - r0) * q);
+    const g = Math.round(g0 + (g1 - g0) * q);
+    const b = Math.round(b0 + (b1 - b0) * q);
+    LVCOL.push('rgba(' + r + ',' + g + ',' + b + ',' + (1.0 - q * 0.30).toFixed(2) + ')');
+  }
+}
+buildPalette();
+
+/* ---------------- 主循环 ---------------- */
+function frame(nowMs) {
+  const dt = Math.min(0.05, (nowMs - last) / 1000);
+  last = nowMs; t0 += dt;
+  const T = now();
+  timing(T);
+
+  pulse *= Math.exp(-dt * 2.6);
+  lum += ((playing ? 1 : 0.5) - lum) * Math.min(1, dt * 2.0);
+  const spd = 0.40 + (playing ? 0.10 : 0);
+  /* zoom 只保留小数部分：每涨满 1，所有层正好顶替下一层的位置
+     （s(z+1) = RAT * s(z)），所以取模之后画面毫无跳变地一直往里钻。
+     不取模的话 s 会一路缩到 0，半分钟后整块画布就空了。 */
+  zoom = (zoom + dt * spd * (1 + pulse * 0.9)) % 1;
+  spin += dt * (0.055 + pulse * 0.35);
+
+  const cx = W / 2, cy = H / 2;
+
+  /* ---- 底：深紫向中心变亮 ---- */
+  const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H) * 0.72);
+  bg.addColorStop(0, 'rgb(26,17,48)');
+  bg.addColorStop(0.55, 'rgb(10,7,22)');
+  bg.addColorStop(1, 'rgb(4,3,11)');
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const base = Math.max(W, H);
+  const pd = pulse;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(spin * 0.14);
+  ctx.globalCompositeOperation = 'lighter';
+
+  for (let n = 0; n < LVL; n++) {
+    let s = Math.pow(RAT, -(n + zoom));
+    if (s > 46) s = 46;
+    const disc = base * 0.34 * s;
+    if (disc < 5) break;
+
+    /* 这一层自己的缩放量（0~1）：取模之后用它算尘埃的呼吸与环的密度，
+       保证换层的一瞬间前后两层在视觉上是连续的 */
+    let zf = (zoom + n) % 1;
+    if (zf < 0) zf += 1;
+
+    const fade = Math.max(0, 1 - n * 0.075) * (0.62 + 0.38 * lum) * (1 + pd * 0.22);
+    const ang = n * 0.92 + spin;
+    const li = Math.min(LVCOL.length - 1, n);
+
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.rotate(ang);
+
+    /* --- 同心虚线环：跟着一起缩，制造无穷的深度刻度 --- */
+    ctx.lineWidth = Math.max(0.5, 1.0 * Math.min(1, s * 4));
+    ctx.strokeStyle = LVCOL[li];
+    ctx.globalAlpha = fade * 0.30;
+    ctx.setLineDash([Math.max(2, 8 * s), Math.max(3, 11 * s * (0.7 + 0.6 * zf))]);
+    ctx.beginPath();
+    for (let r = 1; r <= 3; r++) {
+      const rr = disc * (0.52 + r * 0.17);
+      ctx.moveTo(rr, 0);
+      ctx.arc(0, 0, rr, 0, 6.28318);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    /* --- 辐条：从这一层的圆盘射向外圈 --- */
+    ctx.globalAlpha = fade * 0.16;
+    ctx.lineWidth = Math.max(0.5, 1.4 * Math.min(1, s * 5));
+    ctx.beginPath();
+    for (let k = 0; k < 12; k++) {
+      const a = k * 0.5235988;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      ctx.moveTo(ca * disc * 0.52, sa * disc * 0.52);
+      ctx.lineTo(ca * disc * 0.98, sa * disc * 0.98);
+    }
+    ctx.stroke();
+
+    /* --- 尘埃：沿轮廓取样，跟着这一层一起缩 --- */
+    if (tpl) {
+      ctx.globalAlpha = fade * 0.5;
+      ctx.fillStyle = LVCOL[li];
+      ctx.beginPath();
+      for (let i = 0; i < tpl.dx.length; i++) {
+        const r = (tpl.ds[i] * 0.85 + 0.15) * s * 2.2 * (0.55 + 0.45 * zf);
+        const x = tpl.dx[i] * s, y = tpl.dy[i] * s;
+        ctx.moveTo(x + r, y);
+        ctx.arc(x, y, r, 0, 6.28318);
+      }
+      ctx.fill();
+    }
+
+    /* --- 这一层自己的字：限制在圆盘内，越深越小 --- */
+    if (tpl) {
+      const kk = tpl.k * s;
+      const fh = tpl.hh * 2 * kk, fw = tpl.hw * 2 * kk;
+      if (fh >= 5 && fw >= 5) {
+        const rr = disc * 0.46;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, rr, 0, 6.28318);
+        ctx.clip();
+        ctx.translate(tpl.cx * s, tpl.cy * s);
+        if (n >= 4 && bmp) {
+          /* 最内几层用位图，避免把字栅格化成几十倍大的实心面 */
+          const bw = fw / Math.max(1e-4, bx);
+          const bh = fh / Math.max(1e-4, by);
+          ctx.globalAlpha = fade * 0.95;
+          ctx.drawImage(bmp, -bw / 2, -bh / 2, bw, bh);
+        } else {
+          ctx.scale(kk, kk);
+          ctx.font = '800 ' + tpl.fs + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.lineJoin = 'round';
+          /* 描边而不是填充：缩放 30 倍时 fillText 要去栅格化巨大的实心面 */
+          ctx.globalAlpha = fade * 0.30;
+          ctx.lineWidth = 7 / kk * (1 + pd * 0.5);
+          ctx.strokeStyle = LVCOL[li];
+          ctx.strokeText(tpl.text, 0, 0);
+          ctx.globalAlpha = fade * 0.95;
+          ctx.lineWidth = 1.7 / kk;
+          ctx.strokeText(tpl.text, 0, 0);
+        }
+        ctx.restore();
+      }
+    }
+
+    ctx.restore();
+  }
+  ctx.restore();
+
+  /* ---- 泛光 ---- */
+  ensureBloom();
+  const bc = bloom.getContext('2d');
+  bc.globalCompositeOperation = 'source-over';
+  bc.globalAlpha = 1;
+  bc.clearRect(0, 0, bloom.width, bloom.height);
+  bc.drawImage(cv, 0, 0, bloom.width, bloom.height);
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.30 + pd * 0.16;
+  ctx.drawImage(bloom, 0, 0, W, H);
+  ctx.globalAlpha = 1;
+
+  /* ---- 暗角 + 中心的光 ---- */
+  const vg = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.22, cx, cy, Math.max(W, H) * 0.78);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,0.72)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.16 + 0.10 * Math.sin(t0 * 0.8) + pd * 0.18;
+  const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(W, H) * 0.20);
+  cg.addColorStop(0, 'rgba(196,170,255,1)');
+  cg.addColorStop(1, 'rgba(120,90,220,0)');
+  ctx.fillStyle = cg;
+  ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  requestAnimationFrame(frame);
+}
+
+resize();
+addEventListener('resize', resize);
+requestAnimationFrame(frame);
+
+/* ---- 与播放器通信 ---- */
+const ping = () => { try { parent.postMessage({ __c100: 1, type: 'activity' }, '*'); } catch (_) {} };
+addEventListener('pointermove', ping, { passive: true });
+addEventListener('pointerdown', ping, { passive: true });
+addEventListener('wheel', ping, { passive: true });
+addEventListener('keydown', ping);
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    try { parent.postMessage({ __c100: 1, type: 'key', payload: { key: 'Space' } }, '*'); } catch (_) {}
+  }
+}, true);
+
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.__c100 !== 1) return;
+  if (d.type === 'init') {
+    const p = d.payload || {};
+    lines = (p.lines || []).slice().sort((a, b) => a.t - b.t);
+    curIdx = -1; brewIdx = -1; lastT = -1;
+    tpl = null; bmp = null; zoom = 0;
+    if (p.accent && p.accent.length === 3) {
+      accent = [p.accent[0], p.accent[1], p.accent[2]];
+      buildPalette();
+    }
+    clockT = 0; clockAt = performance.now();
+    hint.textContent = lines.length ? '等待第一句…' : '这首没有歌词';
+    hint.style.opacity = lines.length ? '1' : '0.5';
+  } else if (d.type === 'tick') {
+    clockT = d.payload.time; clockAt = performance.now(); playing = !!d.payload.playing;
+  } else if (d.type === 'beat') {
+    /* 踩拍：整条递归链一起涨一下（相干），缩进速度短暂加快 */
+    pulse = Math.min(1.5, pulse + 0.4 + (d.payload.level || 0) * 0.5);
+  }
+});
+try { parent.postMessage({ __c100: 1, type: 'ready' }, '*'); } catch (_) {}
+
+window.__stage = () => ({
+  lines: lines.length, curIdx: curIdx, brewIdx: brewIdx,
+  levels: LVL, zoom: +zoom.toFixed(3), text: tpl ? tpl.text : '', t: +now().toFixed(2)
+});
+</script>
+</body>
+</html>

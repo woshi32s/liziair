@@ -1,0 +1,12 @@
+{
+  "name": "lizi-bodian-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LIZI 的波点音乐边车（纯协议库 + 本地 HTTP 壳，仅本机回环；需要 Node >= 24；上游包 AGPL-3.0）",
+  "engines": { "node": ">=24" },
+  "scripts": { "start": "node start.mjs" },
+  "dependencies": {
+    "bodian-music-api": "0.1.2"
+  }
+}

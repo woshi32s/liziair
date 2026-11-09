@@ -1,0 +1,10 @@
+# 酷狗边车自己的东西，一律不进版本库
+
+node_modules/
+.port
+.log
+*.log
+.auth-cookies.json
+
+# 设备身份（device.json）：删了酷狗会当成一台新设备
+.auth-state/

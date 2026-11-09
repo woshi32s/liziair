@@ -1,0 +1,134 @@
+/* ==========================================================================
+   LIZI · 桌面壳窗口控制（最小化 / 最大化 / 关闭）
+   只在桌面壳里显示（浏览器里 window.__desktop 不存在，这段 CSS 不生效——
+   由 JS 给 body 加 .is-desktop 才挂载，不会污染浏览器版）。
+   ========================================================================== */
+.win-controls {
+  position: fixed; top: 12px; right: 0; z-index: 80;
+  display: none;                 /* 浏览器版隐藏 */
+  height: 40px;
+  /* ⚠️ 这里**不能**是 drag。曾经写成 drag（想让三键之间的空隙也能拖窗口），
+     结果 Windows 上真实鼠标按下被当成「拖标题栏」吃掉：实测系统级点击落在按钮中心，
+     渲染进程收到 0 个 click（CDP 注入的点击却正常，所以一直没测出来）。
+     按钮本身写了 no-drag 也不管用 —— 只要祖先有 drag，非客户区命中就先于页面。
+     空隙不能拖窗口是可以接受的代价；顶栏其余部分仍然是 drag。 */
+  -webkit-app-region: no-drag;
+}
+body.is-desktop .win-controls { display: flex; }
+
+/* 窗口三键必须永远在最上层 —— 任何整屏浮层都不许把它们吞掉。
+   踩过：开场引导（.tour，z 300）盖住之后，三键中心点的 elementFromPoint 命中的是
+   .tour__dof，最小化 / 最大化 / 关闭全部失效（用户报的「窗口键不好用」）。
+   同理还有形态选择 120 / 弹窗 100 / 转场 200，所以直接抬到 900，高过全站所有浮层。 */
+body.is-desktop .win-controls { z-index: 900; }
+.win-controls button {
+  -webkit-app-region: no-drag;
+  width: 46px; height: 40px;
+  display: grid; place-items: center;
+  background: transparent; border: none; cursor: default;
+  color: var(--ink-2);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.win-controls button:hover { background: oklch(21% 0.022 270 / 0.08); color: var(--ink); }
+.win-controls button:active { background: oklch(21% 0.022 270 / 0.14); }
+.win-controls .win-close:hover { background: oklch(62% 0.22 12); color: oklch(100% 0 0); }
+.win-controls svg { width: 16px; height: 16px; stroke-width: 1.6; }
+
+/* 最大化 / 还原：两个图标都常驻 DOM，靠 #win-max.is-max 切换
+   （状态由主进程推的 win:state 决定，页面不猜；见 app.js） */
+.win-controls #win-max .ico-restore { display: none; }
+.win-controls #win-max.is-max .ico-max { display: none; }
+.win-controls #win-max.is-max .ico-restore { display: block; }
+
+/* 键盘焦点：三键是原生 <button>，Tab 能到；给一圈 1px 细线（不重设计，只补可见性） */
+.win-controls button:focus { outline: none; }
+.win-controls button:focus-visible { outline: 1px solid var(--accent); outline-offset: -3px; }
+
+/* 播放页是暗场，窗口按钮换成白色系 */
+body.is-now .win-controls button { color: oklch(100% 0 0 / 0.72); }
+body.is-now .win-controls button:hover { background: oklch(100% 0 0 / 0.12); color: oklch(100% 0 0); }
+body.is-now .win-controls .win-close:hover { background: oklch(62% 0.22 12); color: oklch(100% 0 0); }
+
+/* 播放页 / 形态页时 topbar 隐藏，顶部仍要能拖动窗口：
+   用一条独立的 14px 拖动带（见文件末尾 .drag-strip）。
+   ⚠️ 顶栏本身**不能**再挂 drag：它是 64px 高、整宽的，右上角会连带把窗口三键
+   也圈成「标题栏」。实测主界面里：在最小化/最大化/关闭上按住鼠标是在拖窗口，
+   页面收到的 click 数是 0（播放页 topbar 是 display:none，所以那边三键一直正常）。
+   代价：拖窗口只能抓顶部那条 14px 的拖动带 —— 但它在所有视图里都在，
+   而且三键能用比「顶栏也能拖」重要得多。 */
+body.is-desktop .topbar { -webkit-app-region: no-drag; }
+body.is-desktop .topbar button,
+body.is-desktop .topbar input,
+body.is-desktop .topbar .sw,
+body.is-desktop .topbar .search,
+body.is-desktop .topbar .brand { -webkit-app-region: no-drag; }
+
+/* 顶栏里的拖动层：只铺左段，右边界停在 138px —— 三键那 138px 里没有任何 drag 区域，
+   所以按钮的按下不会被当成标题栏。pointer-events:none 保证它不挡顶栏里的按钮/搜索。 */
+body.is-desktop .topbar__grip {
+  position: absolute;
+  top: 0; left: 0; right: 138px; height: var(--topbar-h);
+  -webkit-app-region: drag;
+  pointer-events: none;
+}
+
+/* 顶栏右侧给窗口按钮让位（三键共 138px），登录按钮才不会被盖住 */
+body.is-desktop .topbar__inner { padding-right: 190px; }
+/* 播放页：now__bar 是 fixed 全宽条，右侧按钮必须让出窗口三键（138px）。
+   app.css 的 padding 简写后加载、同优先级会盖掉这里，所以用更高优先级
+   （body.is-desktop.is-now）压住，160px = 138 键宽 + 22 间隙 */
+body.is-desktop.is-now .now__bar { padding-right: 160px; }
+
+/* 播放页顶部拖动：顶栏在播放页是 display:none，而 now__bar 靠 hover 显形，
+   不能把整条设成 drag（Electron 的拖动区可能吞掉 hover，按钮就弹不出来）。
+   单独留一条 14px 拖动带，盖在 now__bar 之上但不挡按钮（按钮从 y=20 起）。 */
+/* 全窗口拖动带：主页 / 播放页 / 形态页顶部 14px 都能按住拖窗口。
+   z-index 70：压在舞台（40）之上、窗口三键（80）之下；高度 14px 不会盖到
+   播放页顶栏（按钮从 y=20 起）和形态页操作条（内容从 y=16 起）。 */
+.drag-strip { display: none; }                       /* 浏览器版不挂载 */
+body.is-desktop .drag-strip {
+  display: block; position: fixed; top: 0; left: 0; right: 138px; height: 14px;
+  z-index: 890; -webkit-app-region: drag;
+}
+
+/* 登录位：贴在窗口三键左侧、与三键同高同款（46×40 平面按钮） */
+body.is-desktop .user-slot {
+  /* 12px = 和左侧按钮同一条垂直中线（顶栏 64，40px 高 → 12..52） */
+  position: fixed; top: 12px; right: 138px; z-index: 81;
+  -webkit-app-region: no-drag;
+}
+body.is-stage .user-slot { display: none; }         /* 形态全屏时不抢镜 */
+
+/* ==========================================================================
+   窗口动画（macOS / iOS 那种缩放感）—— 逻辑在 win-anim.js
+   --------------------------------------------------------------------------
+   窗口尺寸是系统瞬时改的，这里只把「跳变」补成一段动画：内容从缩放值弹回 1。
+   缩放原点 = 最大化按钮的中心（右上角），所以观感是从那颗按钮展开 / 收回。
+   只动 transform + opacity；body 上原本没有任何 transform，不会和别人打架。
+   ========================================================================== */
+body { transform-origin: calc(100% - 69px) 32px; }
+
+@keyframes winZoom {
+  from { transform: scale(var(--win-k, 0.96)); opacity: 0.9; }
+  to   { transform: scale(1); opacity: 1; }
+}
+body.win-zoom { animation: winZoom 300ms var(--ease-out) both; }
+
+@keyframes winShrink {
+  from { transform: scale(1); opacity: 1; }
+  to   { transform: scale(0.9); opacity: 0; }
+}
+body.win-shrink {
+  animation: winShrink 160ms var(--ease-in) both;
+  transform-origin: 50% 100%;      /* 最小化往"任务栏那一侧"收 */
+}
+
+@keyframes winPop {
+  from { transform: scale(0.94); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+body.win-pop { animation: winPop 280ms var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  body.win-zoom, body.win-shrink, body.win-pop { animation: none; }
+}

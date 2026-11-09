@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>摩尔纹</title>
+<style>
+  html,body{margin:0;height:100%;background:#05060a;overflow:hidden}
+  #c{position:fixed;inset:0;width:100%;height:100%;display:block}
+  /* 光雾层：原来是每帧一次全屏径向渐变 fillRect（1440×810 像素）。
+     它整帧不变、又是纯叠加的一层，交给合成器去合，canvas 侧一笔都不用画 */
+  #halo{position:fixed;inset:0;pointer-events:none;z-index:4}
+  #vig{position:fixed;inset:0;pointer-events:none;z-index:5;
+       background:radial-gradient(110% 90% at 50% 50%,transparent 40%,rgba(4,5,8,.34) 76%,rgba(3,4,7,.8))}
+  #grain{position:fixed;inset:0;pointer-events:none;z-index:6;opacity:.16;
+       background:repeating-linear-gradient(0deg,rgba(0,0,0,.34) 0 1px,transparent 1px 3px);
+       mix-blend-mode:multiply}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);z-index:9;
+        font:500 11px/1.5 ui-monospace,Consolas,monospace;
+        color:rgba(200,210,235,.30);letter-spacing:.08em;pointer-events:none;transition:opacity .6s}
+</style>
+</head>
+<body data-chrome="off">
+<canvas id="c"></canvas>
+<div id="halo"></div>
+<div id="vig"></div>
+<div id="grain"></div>
+<div id="hint">等待第一句…</div>
+<script>
+"use strict";
+/* ============================================================================
+   044 · 摩尔纹 —— 字是两片栅格错位之后**放大出来的干涉条纹**
+   ---------------------------------------------------------------------------
+   和已有 10 个的区别：这里不画一个点，也不画一条字的轮廓。
+   画面是两片周期栅格叠在一起（参考页的"两层透明胶片"），
+   肉眼看到的粗条纹是两片栅格周期之差被放大几百倍的结果 ——
+   所以**条纹本身不是被画出来的，是算出来的**。
+
+   机制：第二片栅格被字形的距离场**局部旋转 + 局部拉伸**。
+     · 第一片：整屏均匀竖线（预烘一条 Path2D，每帧只换变换）；
+     · 第二片：竖线在字形附近被转开最多 0.52 弧度、间距被拉开 12%，
+       转开的角度由"离笔画多远"决定，所以栅格夹角是一个连续场；
+     · 两片夹角 θ 处的摩尔条纹间距 = λ/(2·sin(θ/2)) ——
+       λ 只有 13px，θ 只有零点几弧度，条纹间距却是几十上百像素。
+       于是字的每一笔都被放大成一圈圈干涉条纹，
+       而字外两片栅格平行、条纹间距趋于无穷，只剩一片均匀的灰。
+   所以字是"干涉发生的地方"，不是"被涂亮的地方"。
+
+   为什么快：这条形态的帧时间**几乎全花在"每帧刷了多少像素"上**（实测把画布
+   分辨率减半，帧率翻 3 倍多），所以三件事都朝这个方向改：
+     · 底和光雾都是整帧不变的整屏层 → 搬到 DOM（body 背景 + #halo 覆盖层），
+       canvas 每帧只剩一次 clearRect；
+     · 竖线栅格原来两端各伸出屏幕外 1500px（99% 的线看不见）→ 按可见范围裁剪；
+     · 同心圆原来画到 1528px 半径，而最远的可见角只有 949px → 裁到可见范围，
+       并把手写体默认的 round 线帽/接头换成 butt/bevel（圆帽每段要多画两个小圆）。
+   两片栅格仍是预烘的 Path2D（第二片每句重建一次，不在帧里建）；每帧 6 次 stroke。
+   ========================================================================== */
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d', { alpha: true });
+const hint = document.getElementById('hint');
+const halo = document.getElementById('halo');
+const TAU = Math.PI * 2;
+
+let W = 0, H = 0, DPR = 1;
+const LAM = 13;                                  // 栅格间距
+
+let gratA = null, rings = null, gratB = null;
+
+/* ---- 字形距离场（一次建，之后每帧 O(1) 查表；坑⑯）---- */
+const CELL = 8;
+const SIG = 10;                                  // 影响半径（像素）
+let gw = 0, gh = 0, dist = null, wgt = null;
+let hasField = false;
+const box = { x0: 0, y0: 0, x1: 0, y1: 0 };
+let lastPts = null;
+
+let lines = [];
+let ax = 0, ay = 0, kick = 0, kickV = 0, sepBoost = 0, beatPulse = 0;
+
+function buildStatic() {
+  /* 竖线只需要覆盖屏幕本身。原来两端各伸出 ext=1528px，而屏幕半对角只有 826px ——
+     多出来的 99% 都在屏幕外，却要陪着一起光栅化。这里按"最大位移 + 最大转角"给够余量：
+     位移 |ax|≤68 / |ay|≤40，转角 |θ|≤0.01rad，所以横竖各留 90 / 80+8px 就绝对够 */
+  const ex = W / 2 + 90;
+  const ey = H / 2 + 80 + ex * 0.012;
+  const p = new Path2D();
+  for (let x = -ex; x <= ex; x += LAM) { p.moveTo(x, -ey); p.lineTo(x, ey); }
+  gratA = p;
+
+  /* 同心圆只画到"最远的可见角"为止：圆心偏了 (-96,+76)，缩放最大 1.02 */
+  const rext = Math.hypot(W / 2 + 96, H / 2 + 76) * 1.05;
+  const r = new Path2D();
+  for (let rr = 17; rr <= rext; rr += 17) { r.moveTo(rr, 0); r.arc(0, 0, rr, 0, TAU); }
+  rings = r;
+}
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  /* 全是细长线：butt/bevel 和 round 肉眼没差别，但圆帽/圆接头每段要多画两个小圆 */
+  ctx.lineCap = 'butt'; ctx.lineJoin = 'bevel';
+
+  /* 底 → body 的 CSS 背景；光雾 → #halo 覆盖层（两者都只在 resize 时算一次） */
+  const r = Math.max(W, H) * 0.72;
+  document.body.style.background =
+    'radial-gradient(circle ' + r.toFixed(1) + 'px at 50% 50%, #11141c 0px, #090b11 ' +
+    (r * 0.55).toFixed(1) + 'px, #05060a ' + r.toFixed(1) + 'px) no-repeat fixed';
+  const hr = Math.min(W, H) * 0.62;
+  halo.style.background =
+    'radial-gradient(circle ' + hr.toFixed(1) + 'px at 50% 50%, rgba(150,200,255,.07) 0px, rgba(90,130,220,.02) ' +
+    (hr * 0.62).toFixed(1) + 'px, rgba(0,0,0,0) ' + hr.toFixed(1) + 'px)';
+
+  buildStatic();
+  if (hasField && lastPts) { buildField(lastPts); buildB(); }
+}
+resize();
+addEventListener('resize', resize);
+
+/* ---- 字形采样（照抄交接说明）---- */
+const off = document.createElement('canvas');
+const octx = off.getContext('2d', { willReadFrequently: true });
+
+function glyphPoints(text) {
+  const F = 96;
+  const maxW = Math.min(W * 0.8, 1300);
+  octx.font = '800 ' + F + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  let w = Math.ceil(octx.measureText(text).width) + 8;
+  const fs = w > maxW ? F * (maxW / w) : F;
+  octx.font = '800 ' + fs + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  w = Math.ceil(octx.measureText(text).width) + 8;
+  const h = Math.ceil(fs * 1.35);
+  off.width = w; off.height = h;
+  octx.clearRect(0, 0, w, h);
+  octx.font = '800 ' + fs + 'px "PingFang SC","Microsoft YaHei",system-ui,sans-serif';
+  octx.textAlign = 'center'; octx.textBaseline = 'middle';
+  octx.fillStyle = '#fff';
+  octx.fillText(text, w / 2, h / 2);
+  const d = octx.getImageData(0, 0, w, h).data;
+  const pts = [];
+  const step = 2;                                // 必须 ≤ 颗粒直径
+  for (let y = 0; y < h; y += step)
+    for (let x = 0; x < w; x += step)
+      if (d[(y * w + x) * 4 + 3] > 128) pts.push(x - w / 2, y - h / 2);
+  return { pts, w, h };
+}
+
+function buildField(pts) {
+  gw = Math.ceil(W / CELL) + 1; gh = Math.ceil(H / CELL) + 1;
+  const n = gw * gh;
+  if (!dist || dist.length !== n) { dist = new Float32Array(n); wgt = new Float32Array(n); }
+  const INF = 1e6;
+  for (let i = 0; i < n; i++) dist[i] = INF;
+  const cx = W / 2, cy = H / 2;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (let i = 0; i < pts.length; i += 2) {
+    const sx = cx + pts[i], sy = cy + pts[i + 1];
+    const gx = (sx / CELL) | 0, gy = (sy / CELL) | 0;
+    if (gx >= 0 && gx < gw && gy >= 0 && gy < gh) dist[gy * gw + gx] = 0;
+    if (sx < x0) x0 = sx; if (sx > x1) x1 = sx;
+    if (sy < y0) y0 = sy; if (sy > y1) y1 = sy;
+  }
+  for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+    const i = y * gw + x; let v = dist[i];
+    if (x > 0 && dist[i - 1] + 1 < v) v = dist[i - 1] + 1;
+    if (y > 0 && dist[i - gw] + 1 < v) v = dist[i - gw] + 1;
+    if (x > 0 && y > 0 && dist[i - gw - 1] + 1.414 < v) v = dist[i - gw - 1] + 1.414;
+    if (x < gw - 1 && y > 0 && dist[i - gw + 1] + 1.414 < v) v = dist[i - gw + 1] + 1.414;
+    dist[i] = v;
+  }
+  for (let y = gh - 1; y >= 0; y--) for (let x = gw - 1; x >= 0; x--) {
+    const i = y * gw + x; let v = dist[i];
+    if (x < gw - 1 && dist[i + 1] + 1 < v) v = dist[i + 1] + 1;
+    if (y < gh - 1 && dist[i + gw] + 1 < v) v = dist[i + gw] + 1;
+    if (x < gw - 1 && y < gh - 1 && dist[i + gw + 1] + 1.414 < v) v = dist[i + gw + 1] + 1.414;
+    if (x > 0 && y < gh - 1 && dist[i + gw - 1] + 1.414 < v) v = dist[i + gw - 1] + 1.414;
+    dist[i] = v;
+  }
+  for (let i = 0; i < n; i++) {
+    const t = dist[i] * CELL / SIG;
+    wgt[i] = t < 3 ? Math.exp(-t * t) : 0;
+  }
+  box.x0 = x0; box.y0 = y0; box.x1 = x1; box.y1 = y1;
+  hasField = pts.length > 0;
+  lastPts = pts;
+}
+
+/* 距离场查询：返回 0~1 的"离笔画多近" */
+function S(x, y) {
+  const gx = (x / CELL) | 0, gy = (y / CELL) | 0;
+  if (gx < 0 || gx >= gw || gy < 0 || gy >= gh) return 0;
+  return wgt[gy * gw + gx];
+}
+
+/* ---- 第二片栅格：被距离场局部旋转 + 拉伸（每句重建一次，不在帧里建）---- */
+function buildB() {
+  if (!hasField) { gratB = null; return; }
+  const M = SIG * 5;                              // 边距 ≥ 5σ，场在边界已经归零，不会有硬边
+  const x0 = Math.floor((box.x0 - M) / LAM) * LAM;
+  const x1 = box.x1 + M, y0 = box.y0 - M, y1 = box.y1 + M;
+  const STEP = 13;
+  const p = new Path2D();
+  for (let xb = x0; xb <= x1; xb += LAM) {
+    const mid = (y0 + y1) * 0.5;
+    let x = xb + 0.12 * S(xb, mid) * (xb - W / 2);   // 局部间距拉伸
+    let y = y0;
+    p.moveTo(x, y);
+    let guard = 0;
+    while (y < y1 && guard++ < 400) {
+      const ang = 0.52 * S(x, y);                    // 局部转角（0 → 0.52 弧度）
+      x += -Math.sin(ang) * STEP;
+      y += Math.cos(ang) * STEP;
+      p.lineTo(x, y);
+    }
+  }
+  gratB = p;
+}
+
+/* ================= 节奏：1-10 的教训固化在这里 =================
+   ① 显示与酝酿分离 —— curIdx 只在句首切换，brewIdx 提前 lead 秒准备
+   ② 索引单调不回退 —— 时钟在 tick 之间外推、tick 一来会往回缩一点，
+      不锁单调的话句边界来回跳、同一句被反复重建
+   ③ 提前量自适应 —— 快歌早开始，慢歌不提前太多
+   ④ 只有拖进度条（时间明显倒退）才允许重置
+   ================================================================ */
+let curIdx = -1, brewIdx = -1, lastT = -1;
+const LEAD = 1.3;
+let pendPts = null, pendIdx = -1;
+
+function brewLine(i) { pendPts = glyphPoints(lines[i].text).pts; pendIdx = i; }
+function startLine(i) {
+  if (pendIdx !== i) brewLine(i);
+  buildField(pendPts || []);
+  buildB();                                       // 上一片栅格在这里被整块丢掉（坑③）
+  pendPts = null; pendIdx = -1;
+  kickV = 55;                                     // 换句时两片栅格错开一下，条纹扫过整块字
+}
+function timing(T) {
+  if (!lines.length) return;
+  if (T < lastT - 0.6) {
+    curIdx = -1; brewIdx = -1;
+    pendPts = null; pendIdx = -1; hasField = false;
+    gratB = null; lastPts = null;
+  }
+  lastT = T;
+  let ci = curIdx;
+  while (ci + 1 < lines.length && T >= lines[ci + 1].t) ci++;
+  if (ci !== curIdx) {
+    curIdx = ci;
+    brewIdx = -1;
+    if (ci >= 0) startLine(ci);
+    hint.style.opacity = lines.length ? (ci >= 0 ? '0' : '1') : '0.5';
+  }
+  const nx = curIdx + 1;
+  if (nx < lines.length && brewIdx !== nx) {
+    const gap = lines[nx].t - (curIdx >= 0 ? lines[curIdx].t : lines[nx].t - 4);
+    const lead = Math.min(LEAD, Math.max(0.45, gap * 0.55));
+    if (T >= lines[nx].t - lead) { brewIdx = nx; brewLine(nx); }
+  }
+}
+
+/* ---- 与播放器通信 ---- */
+const ping = () => { try { parent.postMessage({ __c100: 1, type: 'activity' }, '*'); } catch (_) {} };
+addEventListener('pointermove', ping, { passive: true });
+addEventListener('pointerdown', ping, { passive: true });
+addEventListener('wheel', ping, { passive: true });
+addEventListener('keydown', ping);
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    try { parent.postMessage({ __c100: 1, type: 'key', payload: { key: 'Space' } }, '*'); } catch (_) {}
+  }
+}, true);
+
+let clockT = 0, clockAt = 0, playing = false;
+const now = () => clockT + (playing ? (performance.now() - clockAt) / 1000 : 0);
+
+addEventListener('message', (e) => {
+  const d = e.data;
+  if (!d || d.__c100 !== 1) return;
+  if (d.type === 'init') {
+    const p = d.payload || {};
+    lines = (p.lines || []).slice().sort((a, b) => a.t - b.t);
+    curIdx = -1; brewIdx = -1; lastT = -1;
+    pendPts = null; pendIdx = -1; hasField = false;
+    gratB = null; lastPts = null;
+    ax = 0; ay = 0; kick = 0; kickV = 0; sepBoost = 0;
+    clockT = 0; clockAt = performance.now();
+    hint.textContent = lines.length ? '等待第一句…' : '这首没有歌词';
+    hint.style.opacity = lines.length ? '1' : '0.5';
+  } else if (d.type === 'tick') {
+    clockT = d.payload.time; clockAt = performance.now(); playing = !!d.payload.playing;
+  } else if (d.type === 'beat') {
+    /* 踩拍：两片栅格**相对**滑一下 —— 整场一起动，条纹整体平移。
+       逐颗乱踢在这里没有意义（根本没有颗粒），错位量才是唯一的自由度 */
+    kickV += 26 * (0.35 + (d.payload.level || 0));
+    sepBoost = Math.min(1, sepBoost + 0.7 * (0.35 + (d.payload.level || 0)));
+  }
+});
+try { parent.postMessage({ __c100: 1, type: 'ready' }, '*'); } catch (_) {}
+
+/* ---------------- 主循环 ---------------- */
+let last = performance.now();
+let t0 = 0;
+
+function frame(nowMs) {
+  const dt = Math.min(0.05, (nowMs - last) / 1000);
+  last = nowMs; t0 += dt;
+  const T = now();
+  timing(T);
+  beatPulse *= Math.exp(-dt * 3.0);
+  sepBoost *= Math.exp(-dt * 2.4);
+
+  /* 错位：弹簧回中 —— 这就是参考页里"松手后缓慢漂移"的手感 */
+  kickV += (-kick * 26 - kickV * 7.5) * dt;
+  kick += kickV * dt;
+  kick = Math.max(-9, Math.min(9, kick));
+
+  const cx = W / 2, cy = H / 2;
+  ax = 26 * Math.sin(t0 * 0.090) + 14 * Math.sin(t0 * 0.037) + kick * 3.1;
+  ay = 18 * Math.cos(t0 * 0.071) + 9 * Math.sin(t0 * 0.053) + kick * 1.4;
+
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1;
+  /* 底在 body 的 CSS 背景上，这里只抹掉上一帧的栅格 */
+  ctx.clearRect(0, 0, W, H);
+  ctx.globalCompositeOperation = 'screen';
+
+  /* 第一片：同心圆栅格，缓慢自转 —— 和竖线栅格拍出全屏的摩尔玫瑰 */
+  const sc2 = Math.min(W, H) / 900 * (1 + 0.02 * Math.sin(t0 * 0.07));
+  ctx.save();
+  ctx.translate(cx - 96, cy + 76);
+  ctx.rotate(t0 * 0.0055);
+  ctx.scale(sc2, sc2);
+  ctx.lineWidth = 1.35 / sc2;
+  ctx.strokeStyle = 'rgba(236,242,255,0.20)';
+  ctx.stroke(rings);
+  ctx.restore();
+
+  /* 第一片：均匀竖线 */
+  ctx.save();
+  ctx.translate(cx + ax, cy + ay);
+  ctx.rotate(Math.sin(t0 * 0.043) * 0.010);
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = 'rgba(236,242,255,0.17)';
+  ctx.stroke(gratA);
+  ctx.restore();
+
+  /* 第二片：被字形位移场拧过的竖线。红青错位 = 参考页的色散边 */
+  if (gratB) {
+    const sep = 0.45 + 6.5 * sepBoost;
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = 'rgba(255,74,126,0.10)';
+    ctx.save(); ctx.translate(sep, 0); ctx.stroke(gratB); ctx.restore();
+    ctx.strokeStyle = 'rgba(72,208,255,0.11)';
+    ctx.save(); ctx.translate(-sep, 0); ctx.stroke(gratB); ctx.restore();
+    ctx.lineWidth = 1.05;
+    ctx.strokeStyle = 'rgba(236,242,255,0.34)';
+    ctx.stroke(gratB);
+  }
+
+  ctx.globalCompositeOperation = 'source-over';
+  /* 光雾在 #halo 覆盖层上，不用画 */
+  if (beatPulse > 0.01) {
+    ctx.globalCompositeOperation = 'screen';
+    ctx.fillStyle = 'rgba(150,200,255,' + (0.05 * beatPulse).toFixed(3) + ')';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+window.__stage = () => ({
+  lines: lines.length, curIdx: curIdx, brewIdx: brewIdx, hasField: hasField,
+  hasB: !!gratB, kick: +kick.toFixed(2), T: +now().toFixed(2)
+});
+</script>
+</body>
+</html>

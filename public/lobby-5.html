@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI · 大厅 5 版排版</title>
+<!-- 字体：用非阻塞方式加载（media=print + onload 换回 all）。
+     直接 <link rel=stylesheet> 到 Google Fonts 会**阻塞内联脚本**，网络一慢整页白屏。
+     加载不到就退到系统字体，版式不受影响。 -->
+<link rel="stylesheet" media="print" onload="this.media='all'"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,600;1,9..144,500&family=Geist:wght@300;400;500;600&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+/* ============================================================
+   LIZI 大厅 · 5 版排版（同一套设计语言，5 种结构）
+   语言取自原项目（tokens.css + lobby-concept.html）：
+     · 纸白 #fdfcfa / 墨黑 #17171a / 四档灰
+     · 不用卡片盒子，用 1px 细线 + 留白分栏
+     · 圆角极小（封面 3px，胶囊 999px）
+     · 小字（12.5/10.5/9.5）+ 大标题（clamp 28~44，字距 -.035em）
+     · 等宽只给数字/序号/大写小标
+     · 阴影只给封面，且极柔
+   ============================================================ */
+:root{
+  --paper:#fdfcfa; --paper-2:#f4f2ee;
+  --ink:#17171a; --ink-2:#4c4c55; --ink-3:#8c8c96; --ink-4:#b9b9c1;
+  --rule:oklch(21% .022 270 / .10);
+  --rule-soft:oklch(21% .022 270 / .06);
+  --accent:oklch(62% .22 12);
+  --font-display:"Fraunces","Songti SC",Georgia,serif;
+  --font-ui:"Geist","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  --font-mono:"Geist Mono",ui-monospace,"SFMono-Regular",monospace;
+  --pad:clamp(24px,3vw,42px);
+  --topbar:64px;
+}
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--font-ui);font-size:14px;line-height:1.6;
+  -webkit-font-smoothing:antialiased;overflow:hidden;user-select:none;
+}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+h1,h2,h3,p{margin:0}
+
+/* ================= 共用原子 ================= */
+.eyebrow{
+  display:flex;align-items:baseline;gap:10px;
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.eyebrow b{color:var(--ink);font-weight:500;letter-spacing:.07em}
+.eyebrow i{width:3px;height:3px;border-radius:50%;background:var(--ink-4);flex:none;transform:translateY(-3px)}
+
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+
+/* 封面：小圆角 + 极柔大阴影（原项目的做法） */
+.cover{
+  position:relative;border-radius:3px;overflow:hidden;background:var(--paper-2);
+  box-shadow:0 24px 56px -22px oklch(20% .03 270 / .42), 0 0 0 1px oklch(21% .022 270 / .07);
+}
+.cover::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px oklch(100% 0 0 / .16)}
+.cover--a{background:
+  radial-gradient(120% 110% at 24% 18%, oklch(74% .16 40), transparent 62%),
+  radial-gradient(110% 110% at 82% 84%, oklch(52% .17 320), transparent 64%),
+  linear-gradient(158deg, oklch(58% .12 14), oklch(30% .07 285));}
+
+/* 细线行：原项目的 .rw */
+.row{
+  display:grid;align-items:center;gap:10px;width:100%;height:38px;
+  border-top:1px solid var(--rule-soft);color:var(--ink-2);
+  transition:background .16s,color .16s;
+}
+.row:hover{background:oklch(21% .022 270 / .035);color:var(--ink)}
+.row:first-child{border-top:0}
+
+/* 主按钮（墨黑胶囊） */
+.btn-play{
+  display:inline-flex;align-items:center;gap:9px;height:40px;padding:0 20px 0 16px;
+  border-radius:999px;background:var(--ink);color:var(--paper);
+  font-size:13px;font-weight:500;transition:transform .3s cubic-bezier(.2,.9,.2,1),background .2s;
+}
+.btn-play:hover{transform:translateY(-1px);background:oklch(28% .02 270)}
+.btn-play svg{width:12px;height:12px;fill:currentColor}
+.btn-ghost{
+  display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;
+  border-radius:999px;border:1px solid var(--rule);color:var(--ink-2);font-size:12.5px;
+  transition:border-color .2s,color .2s,background .2s;
+}
+.btn-ghost:hover{border-color:oklch(21% .022 270 / .26);color:var(--ink);background:oklch(21% .022 270 / .03)}
+
+/* ================= 顶栏（5 版共用，只在最后一版变化） ================= */
+.top{
+  height:var(--topbar);display:flex;align-items:center;gap:18px;
+  padding:0 clamp(18px,2.4vw,32px);border-bottom:1px solid var(--rule-soft);
+  position:relative;z-index:10;
+}
+.logo{display:flex;align-items:center;gap:9px;font-weight:600;letter-spacing:.16em;font-size:13px}
+.logo i{width:16px;height:16px;background:var(--ink);display:block;
+  clip-path:polygon(0 0,18% 0,18% 78%,100% 78%,100% 100%,0 100%)}
+.logo b{font-weight:400;color:var(--ink-3);letter-spacing:.05em}
+.searchpill{
+  flex:none;display:flex;align-items:center;gap:8px;height:32px;width:min(30vw,260px);
+  margin:0 auto;padding:0 12px;border-radius:999px;background:oklch(21% .022 270 / .045);
+  color:var(--ink-3);font-size:12.5px;cursor:text;
+}
+.searchpill svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.9;flex:none}
+.top__r{display:flex;align-items:center;gap:14px;font-size:12.5px;color:var(--ink-3)}
+
+/* ================= 版式切换器 =================
+   放在顶栏里，不要浮在页面底部 —— 浮层会压住 V1/V2/V4/V5 的底部内容（实测压住了
+   播放进度条、我的信息、工具箱）。 */
+.switch{
+  display:flex;align-items:center;gap:1px;margin-left:auto;
+}
+.switch button{
+  min-width:24px;height:24px;border-radius:5px;font-family:var(--font-mono);
+  font-size:10.5px;letter-spacing:.04em;color:var(--ink-4);
+  display:grid;place-items:center;transition:background .2s,color .2s;
+}
+.switch button:hover{color:var(--ink);background:oklch(21% .022 270 / .05)}
+.switch button.on{background:var(--ink);color:var(--paper)}
+.vlabel{
+  font-family:var(--font-mono);font-size:9.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-4);margin-left:12px;
+  padding-left:14px;border-left:1px solid var(--rule);
+  white-space:nowrap;
+}
+
+.layout{display:none;height:calc(100vh - var(--topbar))}
+.layout.on{display:grid}
+
+/* ============================================================
+   V1 · 分栏节目单  （左 62% 大封面 + 曲目单 / 右 38% 细线列表）
+   ============================================================ */
+#v1{grid-template-columns:minmax(0,1.12fr) minmax(0,.88fr)}
+.v1__l{padding:var(--pad) var(--pad) 0;display:flex;flex-direction:column;min-width:0;position:relative}
+.v1__l::before{
+  content:"";position:absolute;left:-14%;top:-18%;width:70%;height:70%;
+  background:radial-gradient(circle at 40% 40%, oklch(80% .08 60 / .38), transparent 68%);
+  filter:blur(42px);pointer-events:none;
+}
+.v1__hero{position:relative;display:flex;gap:clamp(20px,2.4vw,34px);margin-top:clamp(16px,2.4vh,26px);align-items:flex-start}
+.v1__cover{flex:none;width:clamp(190px,21vw,272px);aspect-ratio:1}
+.v1__meta{min-width:0;padding-top:2px}
+.v1__kicker{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.v1__title{margin:.18em 0 0;font-size:clamp(28px,3vw,40px);font-weight:600;line-height:1.04;letter-spacing:-.035em}
+.v1__sub{margin:9px 0 0;color:var(--ink-2);font-size:13px}
+.v1__sub span{color:var(--ink-4);margin:0 6px}
+.v1__acts{display:flex;align-items:center;gap:9px;margin-top:clamp(13px,2vh,20px)}
+.v1__sheet{margin-top:clamp(14px,2.4vh,26px);border-top:1px solid var(--rule);display:flex;flex-direction:column;min-height:0;flex:1}
+.v1__sheethead{display:flex;align-items:baseline;justify-content:space-between;padding:11px 0 5px}
+.v1__sheethead b{font-size:12px;font-weight:500}
+.v1__sheethead span{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4)}
+.v1__list{overflow:hidden}
+.v1__row{grid-template-columns:22px minmax(0,1.4fr) minmax(0,1fr) 40px}
+.v1__row .i{font-family:var(--font-mono);font-size:9.5px;color:var(--ink-4);letter-spacing:.06em}
+.v1__row .n{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v1__row .a{font-size:10.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v1__row .d{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);text-align:right}
+.v1__foot{margin-top:auto;padding:12px 0 14px;display:flex;align-items:center;gap:14px}
+.v1__memo{display:flex;align-items:center;gap:9px;font-family:var(--font-mono);font-size:9.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4)}
+.v1__memo b{color:var(--ink-2);font-weight:500}
+.v1__bar{position:relative;width:92px;height:2px;background:var(--rule);border-radius:2px;overflow:hidden}
+.v1__bar i{position:absolute;inset:0 62% 0 0;background:var(--ink-2)}
+
+.v1__r{border-left:1px solid var(--rule-soft);padding:var(--pad) 0 0 clamp(20px,2.4vw,32px);
+  display:flex;flex-direction:column;min-height:0;padding-right:var(--pad)}
+.v1__sec{display:flex;flex-direction:column;min-height:0}
+.v1__sech{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:7px}
+.v1__sech b{font-size:12px;font-weight:500}
+.v1__sech span{font-family:var(--font-mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4)}
+.v1__dl{border-top:1px solid var(--rule-soft)}
+.v1__drow{grid-template-columns:18px minmax(0,1fr) 34px}
+.v1__drow .i{font-family:var(--font-mono);font-size:9.5px;color:var(--ink-4)}
+.v1__drow .n{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v1__drow .a{display:block;font-size:10px;color:var(--ink-3);margin-top:1px}
+.v1__thumb{width:30px;height:30px;border-radius:2px;box-shadow:0 2px 8px oklch(20% .02 270 / .22)}
+.v1__tools{margin-top:clamp(14px,2.4vh,24px)}
+.v1__toolrow{grid-template-columns:minmax(0,1fr) 44px}
+.v1__toolrow .n{font-size:12.5px}
+.v1__toolrow .c{font-family:var(--font-mono);font-size:9.5px;color:var(--ink-4);text-align:right}
+.v1__me{margin-top:auto;padding:16px 0;border-top:1px solid var(--rule);display:flex;align-items:center;gap:11px}
+.v1__ava{width:34px;height:34px;border-radius:50%;flex:none;
+  background:radial-gradient(72% 72% at 34% 28%, oklch(82% .1 40), oklch(52% .16 18));
+  box-shadow:inset 0 0 0 1.5px oklch(100% 0 0 / .7)}
+.v1__men{min-width:0}
+.v1__men b{display:block;font-size:12.5px;font-weight:500}
+.v1__men span{display:block;font-family:var(--font-mono);font-size:9.5px;color:var(--ink-4);letter-spacing:.08em;margin-top:2px}
+
+/* ============================================================
+   V2 · 三栏杂志  （窄栏导航 / 竖长大封面 / 推荐瀑布）
+   ============================================================ */
+#v2.on{padding-bottom:12px}
+#v2{grid-template-columns:minmax(0,.72fr) minmax(0,1.5fr) minmax(0,.95fr)}
+.v2__col{padding:var(--pad) 0 0;display:flex;flex-direction:column;min-height:0}
+.v2__col + .v2__col{border-left:1px solid var(--rule-soft);padding-left:clamp(18px,2.2vw,30px)}
+.v2__col:first-child{padding-left:var(--pad);padding-right:clamp(18px,2.2vw,30px)}
+.v2__col:last-child{padding-right:var(--pad)}
+.v2__nav{display:flex;flex-direction:column;margin-top:18px}
+.v2__nav button{
+  display:flex;align-items:center;justify-content:space-between;
+  height:44px;border-top:1px solid var(--rule-soft);font-size:12.5px;color:var(--ink-2);
+  transition:color .16s,padding .2s;
+}
+.v2__nav button:hover{color:var(--ink);padding-left:4px}
+.v2__nav button:last-child{border-bottom:1px solid var(--rule-soft)}
+.v2__nav i{font-family:var(--font-mono);font-style:normal;font-size:9.5px;color:var(--ink-4)}
+.v2__mid{position:relative;display:flex;flex-direction:column}
+.v2__bigcover{position:relative;flex:1;min-height:0;margin-top:14px;border-radius:3px;overflow:hidden;
+  background:
+    radial-gradient(120% 100% at 26% 16%, oklch(76% .15 46), transparent 60%),
+    radial-gradient(110% 110% at 80% 86%, oklch(50% .17 318), transparent 62%),
+    linear-gradient(160deg, oklch(60% .12 18), oklch(28% .07 282));
+  box-shadow:0 30px 70px -26px oklch(20% .03 270 / .5);
+}
+.v2__bigcover::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,transparent 42%,oklch(10% .02 270 / .58) 100%)}
+.v2__bigmeta{position:absolute;left:clamp(18px,2vw,28px);right:clamp(18px,2vw,28px);bottom:clamp(16px,2vh,24px);z-index:2;color:#fff}
+.v2__bigtitle{font-size:clamp(30px,3.4vw,50px);font-weight:600;letter-spacing:-.04em;line-height:1;margin:0 0 8px}
+.v2__bigsub{font-size:12.5px;color:oklch(100% 0 0 / .74)}
+.v2__ctrl{display:flex;align-items:center;gap:14px;margin-top:16px}
+.v2__play{width:46px;height:46px;border-radius:50%;background:oklch(100% 0 0 / .94);color:var(--ink);
+  display:grid;place-items:center;transition:transform .3s cubic-bezier(.2,.9,.2,1)}
+.v2__play:hover{transform:scale(1.06)}
+.v2__prog{flex:1}
+.v2__progline{height:2px;background:oklch(100% 0 0 / .26);position:relative;border-radius:2px}
+.v2__progline i{position:absolute;left:0;top:0;height:100%;width:34%;background:#fff;border-radius:2px}
+.v2__times{display:flex;justify-content:space-between;margin-top:6px;font-family:var(--font-mono);
+  font-size:9.5px;color:oklch(100% 0 0 / .6)}
+.v2__list{display:flex;flex-direction:column;margin-top:6px}
+.v2__rrow{grid-template-columns:20px minmax(0,1fr) 30px;height:44px}
+.v2__rrow .i{font-family:var(--font-mono);font-size:9.5px;color:var(--ink-4)}
+.v2__rrow .n{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v2__rrow .a{display:block;font-size:10px;color:var(--ink-3);margin-top:1px}
+.v2__rthumb{width:28px;height:28px;border-radius:2px;box-shadow:0 2px 8px oklch(20% .02 270 / .2)}
+.v2__sec{margin-top:clamp(16px,2.6vh,26px)}
+.v2__picks{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:9px}
+.v2__pick .c{aspect-ratio:1;border-radius:3px;box-shadow:0 8px 20px -12px oklch(20% .03 270 / .5)}
+.v2__pick .t{font-family:var(--font-mono);font-size:9.5px;color:var(--ink-3);margin-top:5px;letter-spacing:.08em}
+
+/* ============================================================
+   V3 · 通栏索引  （一整张表，像书的目录）
+   ============================================================ */
+#v3{display:none}
+#v3.on{display:flex;flex-direction:column}
+.v3__now{
+  display:flex;align-items:center;gap:16px;padding:14px var(--pad);
+  border-bottom:1px solid var(--rule);background:oklch(21% .022 270 / .018);
+}
+.v3__nowart{width:52px;height:52px;border-radius:2px;flex:none;
+  background:
+    radial-gradient(120% 110% at 26% 18%, oklch(78% .15 46), transparent 60%),
+    linear-gradient(160deg, oklch(62% .12 18), oklch(30% .07 280));
+  box-shadow:0 8px 20px -10px oklch(20% .03 270 / .5)}
+.v3__nowmeta{min-width:0;flex:1}
+.v3__nowtitle{font-size:15px;font-weight:600;letter-spacing:-.01em}
+.v3__nowsub{font-size:11px;color:var(--ink-3);margin-top:2px}
+.v3__nowprog{flex:none;width:min(26vw,240px)}
+.v3__nowprogline{height:2px;background:var(--rule);border-radius:2px;position:relative}
+.v3__nowprogline i{position:absolute;left:0;top:0;height:100%;width:37%;background:var(--ink);border-radius:2px}
+.v3__nowtime{display:flex;justify-content:space-between;margin-top:5px;font-family:var(--font-mono);
+  font-size:9.5px;color:var(--ink-4)}
+.v3__play{width:40px;height:40px;border-radius:50%;background:var(--ink);color:var(--paper);
+  display:grid;place-items:center;flex:none;transition:transform .3s cubic-bezier(.2,.9,.2,1)}
+.v3__play:hover{transform:scale(1.05)}
+
+.v3__body{padding:clamp(16px,2.6vh,28px) var(--pad) 0;display:flex;flex-direction:column;min-height:0;flex:1}
+.v3__head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding-bottom:14px}
+.v3__h1{font-family:var(--font-display);font-size:clamp(30px,3.6vw,52px);font-weight:500;
+  letter-spacing:-.03em;line-height:1;font-style:italic}
+.v3__h1 span{font-family:var(--font-ui);font-style:normal;font-size:12px;font-weight:400;
+  color:var(--ink-3);letter-spacing:.16em;text-transform:uppercase;margin-left:12px;vertical-align:middle}
+.v3__count{font-family:var(--font-mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-4);text-align:right}
+
+/* 行高「会长但有上限」：flex:1 让它填满，max-height 防止 5 行摊成 125px 的空条 */
+.v3__table{border-top:1px solid var(--rule);display:flex;flex-direction:column;flex:1;min-height:0}
+.v3__tr{
+  display:grid;grid-template-columns:52px minmax(0,180px) minmax(0,1fr) 96px 34px;
+  align-items:center;gap:16px;flex:1;min-height:72px;max-height:106px;
+  border-bottom:1px solid var(--rule-soft);
+  transition:background .18s,padding-left .22s;color:var(--ink-2);
+}
+.v3__tr:hover{background:oklch(21% .022 270 / .03);color:var(--ink);padding-left:8px}
+.v3__no{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;color:var(--ink-4)}
+.v3__name{font-size:clamp(14px,1.3vw,17px);font-weight:500;letter-spacing:-.01em;color:var(--ink)}
+.v3__desc{font-size:11.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v3__stat{font-family:var(--font-mono);font-size:10px;color:var(--ink-4);text-align:right;letter-spacing:.06em}
+.v3__arrow{display:grid;place-items:center;color:var(--ink-4);transition:transform .2s,color .2s}
+.v3__tr:hover .v3__arrow{transform:translateX(4px);color:var(--ink)}
+
+/* ============================================================
+   V4 · 通栏封面  （上半一张巨幅封面，下半四列细线入口）
+   ============================================================ */
+#v4{display:none}
+/* 底部要留一点内边距，否则最后一列会顶出视口（实测差 10px 被裁） */
+#v4.on{display:flex;flex-direction:column;overflow:hidden;padding-bottom:12px}
+.v4__hero{
+  position:relative;margin:0 var(--pad);margin-top:clamp(14px,2.2vh,22px);
+  flex:1;min-height:0;border-radius:3px;overflow:hidden;
+  background:
+    radial-gradient(120% 120% at 22% 14%, oklch(78% .15 52), transparent 58%),
+    radial-gradient(110% 120% at 84% 88%, oklch(48% .18 316), transparent 60%),
+    linear-gradient(162deg, oklch(62% .12 20), oklch(26% .07 286));
+  box-shadow:0 34px 78px -30px oklch(20% .03 270 / .52);
+}
+.v4__hero::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,transparent 38%,oklch(10% .02 270 / .62) 100%)}
+.v4__badge{
+  position:absolute;left:clamp(20px,2.4vw,34px);top:clamp(18px,2.4vh,28px);z-index:2;
+  display:flex;align-items:baseline;gap:10px;color:oklch(100% 0 0 / .8);
+  font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+}
+.v4__badge b{color:#fff;font-weight:500}
+.v4__meta{position:absolute;left:clamp(20px,2.4vw,34px);right:clamp(20px,2.4vw,34px);
+  bottom:clamp(18px,2.6vh,30px);z-index:2;color:#fff;
+  display:flex;align-items:flex-end;gap:clamp(18px,2.4vw,32px)}
+.v4__title{font-size:clamp(34px,4.4vw,64px);font-weight:600;letter-spacing:-.045em;line-height:.98;margin:0}
+.v4__sub{margin-top:9px;font-size:12.5px;color:oklch(100% 0 0 / .72)}
+.v4__acts{margin-left:auto;display:flex;align-items:center;gap:10px;flex:none}
+.v4__play{width:52px;height:52px;border-radius:50%;background:oklch(100% 0 0 / .95);color:var(--ink);
+  display:grid;place-items:center;transition:transform .3s cubic-bezier(.2,.9,.2,1)}
+.v4__play:hover{transform:scale(1.06)}
+.v4__ghost{border-color:oklch(100% 0 0 / .34);color:oklch(100% 0 0 / .88)}
+.v4__ghost:hover{border-color:oklch(100% 0 0 / .6);color:#fff;background:oklch(100% 0 0 / .1)}
+
+.v4__rail{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  margin:clamp(12px,2vh,20px) var(--pad) 0;border-top:1px solid var(--rule);
+}
+.v4__cell{padding:14px 0 18px;display:flex;flex-direction:column;min-width:0}
+.v4__cell + .v4__cell{border-left:1px solid var(--rule-soft);padding-left:clamp(14px,1.8vw,22px)}
+.v4__cell:not(:last-child){padding-right:clamp(14px,1.8vw,22px)}
+.v4__cellh{display:flex;align-items:baseline;justify-content:space-between;padding-bottom:6px}
+.v4__cellh b{font-size:11.5px;font-weight:500}
+.v4__cellh span{font-family:var(--font-mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4)}
+.v4__row{grid-template-columns:minmax(0,1fr) 28px;height:30px}
+.v4__row .n{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v4__row .c{font-family:var(--font-mono);font-size:9px;color:var(--ink-4);text-align:right}
+/* 一行 4 个：之前是 2×2，两行方块高 300px，直接把下面顶出视口被裁掉 */
+.v4__thumbs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:2px}
+.v4__thumb{aspect-ratio:1;border-radius:2px;box-shadow:0 4px 12px -8px oklch(20% .03 270 / .5)}
+.v4__me{display:flex;align-items:center;gap:9px;margin-top:6px}
+.v4__ava{width:30px;height:30px;border-radius:50%;flex:none;
+  background:radial-gradient(72% 72% at 34% 28%, oklch(82% .1 40), oklch(52% .16 18));
+  box-shadow:inset 0 0 0 1.5px oklch(100% 0 0 / .7)}
+.v4__men b{display:block;font-size:11.5px;font-weight:500}
+.v4__men span{display:block;font-family:var(--font-mono);font-size:9px;color:var(--ink-4);margin-top:1px}
+
+/* ============================================================
+   V5 · 竖卷  （切成 4 条竖卷，顶部一条当前播放横带）
+   ============================================================ */
+#v5{display:none}
+#v5.on{display:flex;flex-direction:column;overflow:hidden;padding-bottom:12px}
+.v5__band{
+  display:flex;align-items:center;gap:14px;padding:11px var(--pad);
+  border-bottom:1px solid var(--rule);
+}
+.v5__bandart{width:38px;height:38px;border-radius:2px;flex:none;
+  background:
+    radial-gradient(120% 110% at 26% 18%, oklch(78% .15 46), transparent 60%),
+    linear-gradient(160deg, oklch(62% .12 18), oklch(30% .07 280));
+  box-shadow:0 6px 16px -8px oklch(20% .03 270 / .5)}
+.v5__bandmeta{min-width:0}
+.v5__bandmeta b{display:block;font-size:12.5px;font-weight:500}
+.v5__bandmeta span{display:block;font-size:10px;color:var(--ink-3);margin-top:1px}
+.v5__bandprog{flex:1;margin:0 clamp(16px,2vw,28px)}
+.v5__bandline{height:2px;background:var(--rule);border-radius:2px;position:relative}
+.v5__bandline i{position:absolute;left:0;top:0;height:100%;width:37%;background:var(--ink);border-radius:2px}
+.v5__bandtime{display:flex;justify-content:space-between;margin-top:4px;
+  font-family:var(--font-mono);font-size:9px;color:var(--ink-4)}
+.v5__bandacts{display:flex;align-items:center;gap:8px;flex:none}
+
+.v5__reels{flex:1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));min-height:0}
+.v5__reel{padding:clamp(16px,2.2vh,26px) 0 18px;display:flex;flex-direction:column;min-height:0;
+  border-left:1px solid var(--rule-soft)}
+.v5__reel:first-child{border-left:0;padding-left:var(--pad)}
+.v5__reel:last-child{padding-right:var(--pad)}
+.v5__reel:not(:first-child){padding-left:clamp(16px,1.8vw,24px)}
+.v5__reel:not(:last-child){padding-right:clamp(16px,1.8vw,24px)}
+/* 竖排题头：像书脊 */
+.v5__spine{
+  writing-mode:vertical-rl;text-orientation:mixed;
+  font-family:var(--font-mono);font-size:9.5px;letter-spacing:.34em;
+  text-transform:uppercase;color:var(--ink-4);height:66px;
+}
+.v5__reelh{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding-bottom:8px}
+.v5__reelh b{font-size:12px;font-weight:500}
+.v5__reelh span{font-family:var(--font-mono);font-size:9px;color:var(--ink-4);letter-spacing:.1em}
+.v5__list{border-top:1px solid var(--rule-soft);display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.v5__row{grid-template-columns:16px minmax(0,1fr);height:34px}
+.v5__row .i{font-family:var(--font-mono);font-size:9px;color:var(--ink-4)}
+.v5__row .n{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.v5__row .a{display:block;font-size:9.5px;color:var(--ink-4);margin-top:1px}
+.v5__coverbig{flex:1;min-height:0;border-radius:3px;margin-top:2px;
+  background:
+    radial-gradient(120% 100% at 24% 16%, oklch(78% .15 52), transparent 58%),
+    radial-gradient(110% 110% at 82% 86%, oklch(48% .17 316), transparent 60%),
+    linear-gradient(162deg, oklch(60% .12 20), oklch(28% .07 286));
+  box-shadow:0 18px 44px -20px oklch(20% .03 270 / .5)}
+.v5__reel .thumbgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}
+.v5__reel .thumbgrid div{aspect-ratio:1;border-radius:2px;box-shadow:0 4px 12px -8px oklch(20% .03 270 / .45)}
+.v5__reel .me{margin-top:auto;display:flex;align-items:center;gap:9px;padding-top:10px;border-top:1px solid var(--rule-soft)}
+.v5__reel .me .ava{width:30px;height:30px;border-radius:50%;flex:none;
+  background:radial-gradient(72% 72% at 34% 28%, oklch(82% .1 40), oklch(52% .16 18));
+  box-shadow:inset 0 0 0 1.5px oklch(100% 0 0 / .7)}
+.v5__reel .me b{display:block;font-size:11.5px;font-weight:500}
+.v5__reel .me span{display:block;font-family:var(--font-mono);font-size:9px;color:var(--ink-4);margin-top:1px}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="logo"><i></i>LIZI <b>Air</b></span>
+  <span class="searchpill">
+    <svg viewBox="0 0 24 24" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+    搜歌、歌手、歌单
+  </span>
+  <span class="top__r"><span>登录</span></span>
+  <nav class="switch" id="switch">
+    <button class="on" data-v="1">1</button>
+    <button data-v="2">2</button>
+    <button data-v="3">3</button>
+    <button data-v="4">4</button>
+    <button data-v="5">5</button>
+  </nav>
+  <span class="vlabel" id="vlabel">V1 · 分栏节目单</span>
+</header>
+
+<!-- ================= V1 ================= -->
+<main class="layout on" id="v1">
+  <section class="v1__l">
+    <div class="eyebrow"><b>今日节目</b><i></i><span>2026 · 10 · 26</span><i></i><span>第 001 期</span></div>
+    <div class="v1__hero">
+      <div class="cover cover--a v1__cover"></div>
+      <div class="v1__meta">
+        <div class="v1__kicker">Track of the day</div>
+        <h1 class="v1__title">宝船</h1>
+        <p class="v1__sub">二手玫瑰<span>·</span>乐队的夏天<span>·</span>4:12</p>
+        <div class="v1__acts">
+          <button class="btn-play"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>播放</button>
+          <button class="btn-ghost">收藏</button>
+        </div>
+      </div>
+    </div>
+    <div class="v1__sheet">
+      <div class="v1__sheethead"><b>本期曲目</b><span>Side A · 6 tracks</span></div>
+      <div class="v1__list" id="v1list"></div>
+    </div>
+    <div class="v1__foot">
+      <div class="v1__memo"><span class="v1__bar"><i></i></span><b>2 / 6</b> 已听</div>
+    </div>
+  </section>
+
+  <aside class="v1__r">
+    <div class="v1__sec">
+      <div class="v1__sech"><b>本日推荐</b><span>30</span></div>
+      <div class="v1__dl" id="v1daily"></div>
+    </div>
+    <div class="v1__sec v1__tools">
+      <div class="v1__sech"><b>工具箱</b><span>4</span></div>
+      <div class="v1__dl" id="v1tools"></div>
+    </div>
+    <div class="v1__me">
+      <div class="v1__ava"></div>
+      <div class="v1__men"><b>夜航船</b><span>Lv.12 · 4,281 tracks</span></div>
+    </div>
+  </aside>
+</main>
+
+<!-- ================= V2 ================= -->
+<main class="layout" id="v2">
+  <section class="v2__col">
+    <div class="eyebrow"><b>索引</b></div>
+    <nav class="v2__nav">
+      <button>形态长廊<i>66</i></button>
+      <button>我的歌单<i>126</i></button>
+      <button>最近播放<i>50</i></button>
+      <button>下载<i>12</i></button>
+      <button>设置<i>—</i></button>
+    </nav>
+    <div class="v2__sec">
+      <div class="eyebrow" style="margin-bottom:9px"><b>工具</b></div>
+      <div class="v1__dl" id="v2tools"></div>
+    </div>
+    <div class="v1__me" style="margin-top:auto;border-top:1px solid var(--rule)">
+      <div class="v1__ava"></div>
+      <div class="v1__men"><b>夜航船</b><span>Lv.12</span></div>
+    </div>
+  </section>
+
+  <section class="v2__col v2__mid">
+    <div class="eyebrow"><b>正在播放</b><i></i><span>Now playing</span></div>
+    <div class="v2__bigcover">
+      <div class="v2__bigmeta">
+        <h1 class="v2__bigtitle">宝船</h1>
+        <p class="v2__bigsub">二手玫瑰 · 乐队的夏天</p>
+        <div class="v2__ctrl">
+          <button class="v2__play"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+          <div class="v2__prog">
+            <div class="v2__progline"><i></i></div>
+            <div class="v2__times"><span>1:24</span><span>4:12</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="v2__col">
+    <div class="eyebrow"><b>本日推荐</b><i></i><span>30 tracks</span></div>
+    <div class="v1__dl" id="v2daily" style="margin-top:8px"></div>
+    <div class="v2__sec">
+      <div class="eyebrow"><b>精选</b><i></i><span>4</span></div>
+      <div class="v2__picks" id="v2picks"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ================= V3 ================= -->
+<main class="layout" id="v3">
+  <div class="v3__now">
+    <div class="v3__nowart"></div>
+    <div class="v3__nowmeta">
+      <div class="v3__nowtitle">宝船</div>
+      <div class="v3__nowsub">二手玫瑰 · 乐队的夏天</div>
+    </div>
+    <div class="v3__nowprog">
+      <div class="v3__nowprogline"><i></i></div>
+      <div class="v3__nowtime"><span>1:24</span><span>4:12</span></div>
+    </div>
+    <button class="v3__play"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+  </div>
+
+  <div class="v3__body">
+    <div class="v3__head">
+      <h1 class="v3__h1">目录<span>Index</span></h1>
+      <div class="v3__count">LIZI · Vol.001<br>2026 / 10 / 26</div>
+    </div>
+    <div class="v3__table" id="v3table"></div>
+  </div>
+</main>
+
+<!-- ================= V4 ================= -->
+<main class="layout" id="v4">
+  <div class="v4__hero">
+    <div class="v4__badge"><b>今日节目</b><span>·</span><span>2026 · 10 · 26</span></div>
+    <div class="v4__meta">
+      <div>
+        <h1 class="v4__title">宝船</h1>
+        <p class="v4__sub">二手玫瑰 · 乐队的夏天 · 4:12</p>
+      </div>
+      <div class="v4__acts">
+        <button class="btn-ghost v4__ghost">收藏</button>
+        <button class="v4__play"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="v4__rail">
+    <div class="v4__cell">
+      <div class="v4__cellh"><b>本日推荐</b><span>30</span></div>
+      <div id="v4daily"></div>
+    </div>
+    <div class="v4__cell">
+      <div class="v4__cellh"><b>精选</b><span>4</span></div>
+      <div class="v4__thumbs" id="v4thumbs"></div>
+    </div>
+    <div class="v4__cell">
+      <div class="v4__cellh"><b>工具箱</b><span>4</span></div>
+      <div id="v4tools"></div>
+    </div>
+    <div class="v4__cell">
+      <div class="v4__cellh"><b>我的</b><span>Profile</span></div>
+      <div class="v4__me">
+        <div class="v4__ava"></div>
+        <div class="v4__men"><b>夜航船</b><span>Lv.12 · 126 歌单</span></div>
+      </div>
+      <div id="v4meta" style="margin-top:8px"></div>
+    </div>
+  </div>
+</main>
+
+<!-- ================= V5 ================= -->
+<main class="layout" id="v5">
+  <div class="v5__band">
+    <div class="v5__bandart"></div>
+    <div class="v5__bandmeta"><b>宝船</b><span>二手玫瑰 · 乐队的夏天</span></div>
+    <div class="v5__bandprog">
+      <div class="v5__bandline"><i></i></div>
+      <div class="v5__bandtime"><span>1:24</span><span>4:12</span></div>
+    </div>
+    <div class="v5__bandacts">
+      <button class="btn-ghost" style="height:32px;font-size:11.5px">收藏</button>
+      <button class="v3__play" style="width:34px;height:34px"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+    </div>
+  </div>
+
+  <div class="v5__reels">
+    <section class="v5__reel">
+      <div class="v5__spine">Now Playing</div>
+      <div class="v5__reelh"><b>正在播放</b><span>01</span></div>
+      <div class="v5__coverbig"></div>
+      <div class="v5__list" id="v5queue" style="margin-top:10px"></div>
+    </section>
+    <section class="v5__reel">
+      <div class="v5__spine">Daily / 30</div>
+      <div class="v5__reelh"><b>本日推荐</b><span>02</span></div>
+      <div class="v5__list" id="v5daily"></div>
+    </section>
+    <section class="v5__reel">
+      <div class="v5__spine">Selected</div>
+      <div class="v5__reelh"><b>精选</b><span>03</span></div>
+      <div class="thumbgrid" id="v5thumbs"></div>
+      <div class="v5__reelh" style="padding-top:22px"><b>工具箱</b><span>04</span></div>
+      <div class="v5__list" id="v5tools"></div>
+    </section>
+    <section class="v5__reel">
+      <div class="v5__spine">Profile</div>
+      <div class="v5__reelh"><b>我的</b><span>05</span></div>
+      <div class="v5__list" id="v5meta"></div>
+      <div class="v5__reelh" style="padding-top:22px"><b>最近播放</b><span>50</span></div>
+      <div class="thumbgrid" id="v5recent"></div>
+      <div class="me">
+        <div class="ava"></div>
+        <div><b>夜航船</b><span>Lv.12 · 4,281</span></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script>
+/* ---------- 数据（概念稿：假数据，样式是真的） ---------- */
+const TRACKS = [
+  ['宝船', '二手玫瑰', '4:12'],
+  ['大梦', '草东没有派对', '5:03'],
+  ['山海', '草东没有派对', '4:24'],
+  ['我想和你虚度时光', '程璧', '3:38'],
+  ['雨停了以后', '惘闻', '6:41'],
+  ['漫长的告别', '声音玩具', '5:12'],
+];
+const DAILY = [
+  ['雨停了以后', '惘闻', 'linear-gradient(150deg,#b9d9d4,#5c8f8a)'],
+  ['城市找猪', '木马', 'linear-gradient(150deg,#c9d6de,#6d8798)'],
+  ['漫长的告别', '声音玩具', 'linear-gradient(150deg,#c3d8cc,#618a76)'],
+  ['不万能的喜剧', '落日飞车', 'linear-gradient(150deg,#cdd2e2,#717d9c)'],
+];
+const PICKS = [
+  ['深夜公路', 'linear-gradient(165deg,#e0cfc2,#a6795f)'],
+  ['雨天卧室', 'linear-gradient(165deg,#c6d5dc,#71899a)'],
+  ['通勤 40 分', 'linear-gradient(165deg,#ded3bd,#a89272)'],
+  ['老磁带', 'linear-gradient(165deg,#cfc8bf,#8d8279)'],
+];
+const TOOLS = [['形态长廊', '66'], ['歌词样式', '3'], ['定时关闭', '—'], ['投屏', '—']];
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+
+/* ---------- 填充 ---------- */
+const $ = (id) => document.getElementById(id);
+
+/* V1 曲目单 */
+$('v1list').innerHTML = TRACKS.map(([n, a, d], i) => `
+  <button class="row v1__row">
+    <span class="i">${String(i + 1).padStart(2, '0')}</span>
+    <span class="n">${esc(n)}</span>
+    <span class="a">${esc(a)}</span>
+    <span class="d">${d}</span>
+  </button>`).join('');
+
+/* V1 推荐（右侧） */
+const dailyRow = (withThumb = true, cls = 'v1__drow') => DAILY.slice(0, 3).map(([n, a, g], i) => `
+  <button class="row ${cls}">
+    <span class="i">${String(i + 1).padStart(2, '0')}</span>
+    <span style="min-width:0">
+      <span class="n" style="display:block">${esc(n)}</span>
+      <span class="a">${esc(a)}</span>
+    </span>
+    ${withThumb ? `<span class="v1__thumb" style="background:${g}"></span>` : ''}
+  </button>`).join('');
+
+$('v1daily').innerHTML = dailyRow();
+$('v1tools').innerHTML = TOOLS.map(([n, c]) => `
+  <button class="row v1__toolrow"><span class="n">${esc(n)}</span><span class="c">${c}</span></button>`).join('');
+
+/* V2 */
+$('v2tools').innerHTML = TOOLS.slice(0, 2).map(([n, c]) => `
+  <button class="row v1__toolrow"><span class="n">${esc(n)}</span><span class="c">${c}</span></button>`).join('');
+$('v2daily').innerHTML = DAILY.map(([n, a, g], i) => `
+  <button class="row v2__rrow">
+    <span class="i">${String(i + 1).padStart(2, '0')}</span>
+    <span style="min-width:0">
+      <span class="n" style="display:block">${esc(n)}</span>
+      <span class="a">${esc(a)}</span>
+    </span>
+    <span class="v2__rthumb" style="background:${g}"></span>
+  </button>`).join('');
+$('v2picks').innerHTML = PICKS.map(([t, g]) => `
+  <div class="v2__pick"><div class="c" style="background:${g}"></div><div class="t">${esc(t)}</div></div>`).join('');
+
+/* V3 目录表 */
+const V3ROWS = [
+  ['搜索', '搜歌、歌手、歌单，或者直接说你想听什么', 'Search', '⌘K'],
+  ['本日推荐', '每天 6:00 更新 · 30 首', 'Daily', '30'],
+  ['精选', '深夜公路 / 雨天卧室 / 通勤 40 分 / 老磁带', 'Selected', '4'],
+  ['工具箱', '形态长廊 66 · 歌词样式 3 · 定时 · 投屏', 'Tools', '4'],
+  ['我的信息', '夜航船 · Lv.12 · 126 歌单', 'Profile', '—'],
+];
+$('v3table').innerHTML = V3ROWS.map(([n, d, en, st], i) => `
+  <button class="v3__tr">
+    <span class="v3__no">${String(i + 1).padStart(2, '0')}</span>
+    <span class="v3__name">${esc(n)}</span>
+    <span class="v3__desc">${esc(d)}</span>
+    <span class="v3__stat">${esc(en)} ${st !== '—' ? '· ' + st : ''}</span>
+    <span class="v3__arrow"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 12h13m-5-5 5 5-5 5"/></svg></span>
+  </button>`).join('');
+
+/* V4 */
+$('v4daily').innerHTML = DAILY.slice(0, 3).map(([n], i) => `
+  <button class="row v4__row"><span class="n">${esc(n)}</span><span class="c">0${i + 1}</span></button>`).join('');
+$('v4thumbs').innerHTML = PICKS.map(([, g]) => `<div class="v4__thumb" style="background:${g}"></div>`).join('');
+$('v4tools').innerHTML = TOOLS.slice(0, 3).map(([n, c]) => `
+  <button class="row v4__row"><span class="n">${esc(n)}</span><span class="c">${c}</span></button>`).join('');
+$('v4meta').innerHTML = `<button class="row v4__row"><span class="n">我的歌单</span><span class="c">126</span></button>
+  <button class="row v4__row"><span class="n">最近播放</span><span class="c">50</span></button>`;
+
+/* V5 */
+$('v5queue').innerHTML = TRACKS.slice(1, 5).map(([n, a], i) => `
+  <button class="row v5__row">
+    <span class="i">${String(i + 1).padStart(2, '0')}</span>
+    <span style="min-width:0"><span class="n" style="display:block">${esc(n)}</span><span class="a">${esc(a)}</span></span>
+  </button>`).join('');
+$('v5daily').innerHTML = DAILY.map(([n, a], i) => `
+  <button class="row v5__row">
+    <span class="i">${String(i + 1).padStart(2, '0')}</span>
+    <span style="min-width:0"><span class="n" style="display:block">${esc(n)}</span><span class="a">${esc(a)}</span></span>
+  </button>`).join('');
+$('v5thumbs').innerHTML = PICKS.map(([, g]) => `<div style="background:${g}"></div>`).join('');
+$('v5recent').innerHTML = PICKS.slice().reverse().map(([, g]) => `<div style="background:${g}"></div>`).join('');
+$('v5tools').innerHTML = TOOLS.slice(0, 3).map(([n, c], i) => `
+  <button class="row v5__row"><span class="i">0${i + 1}</span><span class="n">${esc(n)} <span class="c">${c}</span></span></button>`).join('');
+$('v5meta').innerHTML = [['歌单', '126'], ['关注', '38'], ['粉丝', '2.4k']].map(([n, c]) => `
+  <button class="row v5__row"><span class="i">·</span><span class="n">${n} <span class="c">${c}</span></span></button>`).join('');
+
+/* ---------- 版式切换 ---------- */
+const NAMES = {
+  1: 'V1 · 分栏节目单',
+  2: 'V2 · 三栏杂志',
+  3: 'V3 · 通栏目录',
+  4: 'V4 · 巨幅封面',
+  5: 'V5 · 四卷竖排',
+};
+function show(n) {
+  for (let i = 1; i <= 5; i++) {
+    const el = document.getElementById('v' + i);
+    if (el) { el.classList.toggle('on', i === n); }
+  }
+  document.querySelectorAll('#switch button').forEach((b) => {
+    b.classList.toggle('on', +b.dataset.v === n);
+  });
+  $('vlabel').textContent = NAMES[n];
+}
+$('switch').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (b) show(+b.dataset.v);
+});
+addEventListener('keydown', (e) => {
+  if (e.key >= '1' && e.key <= '5') show(+e.key);
+});
+
+/* 截图/探针用 */
+window.__show = show;
+window.__current = () => document.querySelector('.layout.on')?.id;
+</script>
+</body>
+</html>
+

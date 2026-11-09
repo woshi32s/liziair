@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIZI · 点阵立方体菜单</title>
+<!-- 不引外部字体：<link rel=stylesheet> 会阻塞下面内联脚本执行，
+     网络一慢整页白屏（lab 页必须自包含） -->
+<style>
+  :root{
+    --paper:#fdfcfa; --ink:#141416; --ink-3:#8c8c96; --ink-4:#bcbcc4;
+    --font-ui:"Geist",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    --font-mono:"Geist Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--paper); color:var(--ink); font-family:var(--font-ui);
+    overflow:hidden; -webkit-font-smoothing:antialiased; user-select:none}
+  canvas{display:block; width:100%; height:100%; cursor:grab; touch-action:none}
+  canvas.is-drag{cursor:grabbing}
+
+  .tag{position:fixed;top:22px;left:26px;display:flex;align-items:baseline;gap:10px;z-index:5;
+    font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-4)}
+  .tag b{color:var(--ink);font-weight:500;letter-spacing:.1em}
+  .hint{position:fixed;bottom:22px;left:26px;font-family:var(--font-mono);font-size:10px;
+    letter-spacing:.13em;text-transform:uppercase;color:var(--ink-4);line-height:1.9;z-index:5}
+  .hint b{color:var(--ink-3);font-weight:500}
+  .count{position:fixed;bottom:22px;right:26px;font-family:var(--font-mono);font-size:10px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);text-align:right;line-height:1.9;z-index:5}
+  .count b{color:var(--ink-3);font-weight:500}
+  .utils{position:fixed;top:20px;right:26px;display:flex;align-items:center;gap:14px;z-index:5;
+    font-family:var(--font-mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+  .utils span{cursor:pointer;transition:color .2s}
+  .utils span:hover{color:var(--ink)}
+  .utils i{width:3px;height:3px;border-radius:50%;background:var(--ink-4)}
+  .toast{position:fixed;left:50%;bottom:92px;transform:translate(-50%,6px) scale(.98);
+    padding:12px 22px;border-radius:999px;background:oklch(18% .02 270 / .92);color:#fff;
+    font-size:13px;letter-spacing:.02em;opacity:0;pointer-events:none;z-index:6;
+    transition:opacity .28s ease, transform .34s cubic-bezier(.2,.9,.2,1)}
+  .toast.is-on{opacity:1;transform:translate(-50%,0) scale(1)}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+<div class="tag"><b>点阵</b><span>Cube Menu · 007</span></div>
+<div class="utils"><span data-n="工具箱">工具箱</span><i></i><span data-n="我的信息">我的信息</span></div>
+<div class="hint"><b>拖动</b> 360° 随便转 · 谁朝前谁化开<br><b>点一下</b> 进入最朝前的面</div>
+<div class="count"><span id="n">0</span> dots<br><b>6 面 · 360°</b></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   点阵立方体菜单 · v8
+   v5/v6/v7 没修好的两个 bug，根因都在这三行数学里：
+   ① 格子边长算成一半（CELL = 1/(N-1)，实际是 2*HALF/(N-1)）→
+      点长大的终点只有半个格，面永远拼不成实心（50% 的洞），
+      白字压在洞上就成了「一坨白块」。
+   ② 圆点用**屏幕像素**半径画：翻到近乎侧对时 15 行点挤进 1~2px，
+      alpha 互相叠加 → 棱上的深色锯齿条。
+      v8 改成在「面基」里画椭圆（随面一起压扁），叠不出深色。
+   ③ 每个可见面都各画各的字 → 极点处「立牌字 + 贴面字」同屏互盖。
+      v8 只有**最朝前**的那一面出白字，且必须它底下的点已经拼成实心；
+      其余面只留贴面名字，白字一亮就退场。
+   几何：每个点占「四周各半格」，格子四角用真实投影（含透视），
+   溶解到底时相邻格子严丝合缝；面的最外一圈由**面轮廓裁剪**收边，
+   所以格子永远不会越过立方体的棱。
+   ============================================================ */
+const cvs = document.getElementById('c');
+const ctx = cvs.getContext('2d', { alpha: false });
+const toast = document.getElementById('toast');
+
+const N = 15;              // 每个面 N×N 个点
+const HALF = 1;
+const CELL = (2 * HALF) / (N - 1);  // 一格的边长（世界单位）—— v7 写成 1/(N-1)，只有半格
+const DOT_R = CELL * 0.085;         // 圆点半径（世界单位；跟着面一起被压扁，见文件头 ②）
+const BG = '#fdfcfa';
+const FONT = 'Geist, "PingFang SC", "Microsoft YaHei", sans-serif';
+const MONO = '"Geist Mono", ui-monospace, monospace';
+
+/* 面的两条世界轴（立方体自己的轴，**不跟 yaw 转**；v7 让顶/底面的格子跟着 yaw 转，
+   格子就和立方体的棱对不齐，越到边上越出轨） */
+const AXIS_U = [[0, 0, 1], [1, 0, 0], [1, 0, 0]];
+const AXIS_V = [[0, 1, 0], [0, 0, 1], [0, 1, 0]];
+
+const FACES = [
+  { name:'搜索歌曲', n:[0, 0, 1] },
+  { name:'每日推荐', n:[1, 0, 0] },
+  { name:'热门精选', n:[0, 0, -1] },
+  { name:'我的歌单', n:[-1, 0, 0] },
+  { name:'我的喜欢', n:[0, 1, 0] },
+  { name:'系统设置', n:[0, -1, 0] },
+];
+const COLORS = [
+  [47,111,104],   // 搜索 · 青
+  [176,86,58],    // 推荐 · 赭
+  [116,82,166],   // 精选 · 紫
+  [58,106,174],   // 歌单 · 蓝
+  [178,63,92],    // 喜欢 · 玫红
+  [96,104,88],    // 设置 · 橄榄
+];
+
+/* ---------- 生成点 ----------
+   v7 用全局 Set 去重「棱上的点只归第一个面」，于是后一个面在棱这一行整行缺失，
+   棱上就留出半格空隙、并且两个面的格子争同一行 —— 这就是「棱上深色锯齿条」的来源之一。
+   v8：**每个面拥有自己完整的 N×N 格网**，棱上重叠无所谓——
+        每个点的格子朝面内收边（uLo/uHi/vLo/vHi 在外圈为 0），
+        两个面在棱处正好各占一半、严丝合缝，不会互相越过。 */
+const pts = [];
+const byFace = FACES.map(() => []);
+{
+  const step = (2 * HALF) / (N - 1);
+  const EPS = 1e-6;
+  FACES.forEach((f, fi) => {
+    const axis = f.n[0] ? 0 : f.n[1] ? 1 : 2;
+    const sign = f.n[axis];
+    const su = AXIS_U[axis], sv = AXIS_V[axis];
+    for (let i = 0; i < N; i++) {
+      for (let k = 0; k < N; k++) {
+        const a = -HALF + i * step;
+        const b = -HALF + k * step;
+        const p = axis === 0 ? [sign * HALF, a, b]
+                : axis === 1 ? [a, sign * HALF, b]
+                : [a, b, sign * HALF];
+        /* 面内本地坐标（沿 su / sv）：格子四角的裁切靠它 */
+        const lu = p[0] * su[0] + p[1] * su[1] + p[2] * su[2];
+        const lv = p[0] * sv[0] + p[1] * sv[1] + p[2] * sv[2];
+        const o = {
+          p, f: fi,
+          onEdge: (Math.abs(Math.abs(lu) - HALF) < EPS ? 1 : 0) + (Math.abs(Math.abs(lv) - HALF) < EPS ? 1 : 0) >= 2,
+          d0: Math.hypot(lu, lv) / HALF,
+          /* 格的半宽：外圈朝外那半边不画（否则格子越过立方体的棱，六面互相叠） */
+          uLo: Math.abs(lu + HALF) < EPS ? 0 : CELL / 2,
+          uHi: Math.abs(lu - HALF) < EPS ? 0 : CELL / 2,
+          vLo: Math.abs(lv + HALF) < EPS ? 0 : CELL / 2,
+          vHi: Math.abs(lv - HALF) < EPS ? 0 : CELL / 2,
+          ph: Math.random() * 6.283,
+          sp: 0.5 + Math.random() * 0.9,
+        };
+        pts.push(o);
+        byFace[fi].push(o);
+      }
+    }
+  });
+}
+document.getElementById('n').textContent = pts.length;
+
+/* ---------- 状态 ---------- */
+let W = 0, H = 0, dpr = 1;
+let yaw = -0.62, pitch = 0.44;
+let dragging = false, moved = 0;
+let lastX = 0, lastY = 0, vyaw = 0, vpitch = 0;
+let mx = -1e4, my = -1e4;
+let t = 0;
+
+function resize() {
+  const r = cvs.getBoundingClientRect();
+  W = r.width; H = r.height;
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  cvs.width = Math.round(W * dpr);
+  cvs.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+const side = () => Math.min(W, H) * 0.5;
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const smooth = (a, b, x) => { const v = clamp01((x - a) / (b - a)); return v * v * (3 - 2 * v); };
+const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
+const easeOutBack = (x) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2); };
+
+/* ---- 绘制帧 ---- */
+function frame() {
+  t += 1 / 60;
+
+  if (!dragging) {
+    yaw += vyaw; pitch += vpitch;
+    vyaw *= 0.94; vpitch *= 0.94;
+  }
+
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const rx0 = -pitch + Math.sin(t * 0.18) * 0.006;
+  const cx = Math.cos(rx0), sx = Math.sin(rx0);
+
+  const s = side() / 2;
+  /* 透视强度：f 越小越"广角"。v7 是 22s（几乎正交，立方体发扁、侧棱只剩几像素被压成锯齿）；
+     v8 取 13s —— 正对时面仍有轻微梯形、侧面立得住，又不至于桶形畸变。 */
+  const f = s * 13;
+  const ox = W / 2, oy = H / 2;
+
+  /* 世界 → 屏幕（z 带回来：透视、排序用） */
+  const P = (p) => {
+    const x1 = p[0] * cy - p[2] * sy;
+    const z1 = p[0] * sy + p[2] * cy;
+    const y1 = p[1] * cx - z1 * sx;
+    const z2 = p[1] * sx + z1 * cx;
+    const k = f / (f + z2 * s);
+    return [ox + x1 * s * k, oy + y1 * s * k, z2];
+  };
+
+  const front = FACES.map((fc) => {
+    const nz1 = fc.n[0] * sy + fc.n[2] * cy;
+    const nz = fc.n[1] * sx + nz1 * cx;
+    return Math.max(0, -nz);
+  });
+  /* 谁是「赢家」：全场最朝前的那个面。必须先定赢家，再算溶解/出字 ——
+     否则 45° 时两个面同时化开成两块色块、两套字各拉一半（v8 试过，很丑）。 */
+  let winFi = -1, winFr = 0;
+  for (let fi = 0; fi < FACES.length; fi++) {
+    if (front[fi] > winFr) { winFr = front[fi]; winFi = fi; }
+  }
+
+  /* 溶解 / 出字：**只给赢家面**，阈值用「相对朝前度」（自己 ÷ 最朝前的那个）。
+     为什么用相对值：斜看时最朝前的面常常只有 0.7~0.8，用绝对值当阈值的话，
+     用户一拖就停在「谁都没化开、一个字也没有」的状态，看起来像点了没反应（v7 的问题）。
+     为什么只给赢家：白字全场只有一套，两个面不可能同时化开 →
+       ① 不会再出现「字叠成一坨白块」；② 45° 时不会变成两块色块打架。 */
+  const winRatio = (i) => (winFr > 1e-6 ? front[i] / winFr : 0);
+  const plate = front.map((fr, i) => (i === winFi ? smooth(0.80, 0.97, winRatio(i)) * smooth(0.55, 0.70, fr) : 0));
+  const reveal = plate.map((pf) => smooth(0.55, 0.90, pf));
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = BG;
+  ctx.fillRect(0, 0, W, H);
+
+  /* ---- 点阵 ----
+     每格 = 点四周各半格，四角**逐角真实投影**（含透视）→ 相邻格共角、拼成实心；
+     v8 的格子只按世界尺寸长，所以近乎侧对的面会被透视自己压扁，不再堆成锯齿条。
+     颜色预混到纸色、alpha 恒 1：半透明叠半透明会把重叠处压深，那正是棱上那条黑带。 */
+  const quads = [];
+  for (let fi = 0; fi < FACES.length; fi++) {
+    const fr = front[fi];
+    if (fr <= 0.012) continue;
+    const axis = FACES[fi].n[0] ? 0 : FACES[fi].n[1] ? 1 : 2;
+    const u = AXIS_U[axis], v = AXIS_V[axis];
+    const col = COLORS[fi];
+    const plateF = plate[fi];
+    const gz = smooth(0.012, 0.17, fr);          // 掠射面淡出（锯齿条的直接来源）
+
+    for (const o of byFace[fi]) {
+      const pd = clamp01((plateF - o.d0 * 0.22) / (1 - o.d0 * 0.22));
+      const e = easeOutCubic(pd);
+      /* 呼吸抖动只在「还是点」的时候有，一溶解就归零，免得格子互相挤缝 */
+      const d = Math.sin(t * o.sp + o.ph) * 0.01 * (1 - e) * (1 - e);
+      const x = o.p[0] + d * (1.2 + o.p[1]);
+      const y = o.p[1] + d;
+      const z = o.p[2] + d * (1.2 - o.p[0]);
+
+      const pr = P([x, y, z]);
+      /* 四角**逐个真实投影**（透视下直线仍映射为直线，所以四边形正好贴合）。
+         外圈朝外那半边为 0 → 格子正好停在立方体的棱上，六面永不越界重叠。 */
+      const ku = DOT_R + (CELL / 2 - DOT_R) * e;   // 半格长度：点半径 → 整半格
+      const ru = o.uLo ? ku : 0, RU = o.uHi ? ku : 0;
+      const dv = o.vLo ? ku : 0, DV = o.vHi ? ku : 0;
+      const c00 = P([x - u[0] * ru - v[0] * dv, y - u[1] * ru - v[1] * dv, z - u[2] * ru - v[2] * dv]);
+      const c10 = P([x + u[0] * RU - v[0] * dv, y + u[1] * RU - v[1] * dv, z + u[2] * RU - v[2] * dv]);
+      const c11 = P([x + u[0] * RU + v[0] * DV, y + u[1] * RU + v[1] * DV, z + u[2] * RU + v[2] * DV]);
+      const c01 = P([x - u[0] * ru + v[0] * DV, y - u[1] * ru + v[1] * DV, z - u[2] * ru + v[2] * DV]);
+
+      /* 鼠标推力（屏幕向量，随溶解衰减） */
+      let sx2 = 0, sy2 = 0;
+      const ddx = pr[0] - mx, ddy = pr[1] - my;
+      const dist = Math.hypot(ddx, ddy);
+      if (dist < 70) {
+        const push = (1 - dist / 70) * 7 * (1 - pd);
+        sx2 = (ddx / (dist || 1)) * push;
+        sy2 = (ddy / (dist || 1)) * push;
+      }
+
+      let a = 0.16 + fr * fr * 0.74;
+      if (pd > 0.001) a = Math.max(a, 0.55 + 0.45 * pd);
+      if (o.onEdge && pd < 0.5) a = Math.max(a, 0.24 + fr * 0.6);
+      a *= gz;
+      if (a < 0.02) continue;
+
+      const mix = Math.max(Math.pow(fr, 1.25), pd);
+      const R = 18 * (1 - mix) + col[0] * mix;
+      const G = 18 * (1 - mix) + col[1] * mix;
+      const B = 20 * (1 - mix) + col[2] * mix;
+      /* 预混：纸色 + 颜色 × a（alpha 保持 1，重叠就不会叠深） */
+      const cr = Math.round(253 + (R - 253) * a);
+      const cg = Math.round(252 + (G - 252) * a);
+      const cb = Math.round(250 + (B - 250) * a);
+
+      quads.push({ c: [c00, c10, c11, c01], sx: sx2, sy: sy2, z: pr[2], rq: 1 - e, cr, cg, cb });
+    }
+  }
+  quads.sort((A, B) => B.z - A.z);               // 远 → 近（不透明填充，必须这个序）
+
+  for (const q of quads) {
+    const c = q.c;
+    ctx.fillStyle = 'rgb(' + q.cr + ',' + q.cg + ',' + q.cb + ')';
+    if (q.rq > 0.02) {
+      /* 圆点：沿着两条边向量画椭圆（跟着面一起透视压扁 → 转起来才是立体的圆，
+         而不是永远正圆的贴纸）。v7 用屏幕像素画正圆，压扁时 15 行叠进 1px 成锯齿条。 */
+      const e0 = [c[0][0] + q.sx, c[0][1] + q.sy], e1 = [c[1][0] + q.sx, c[1][1] + q.sy];
+      const e2 = [c[2][0] + q.sx, c[2][1] + q.sy], e3 = [c[3][0] + q.sx, c[3][1] + q.sy];
+      const cx2 = (e0[0] + e1[0] + e2[0] + e3[0]) / 4;
+      const cy2 = (e0[1] + e1[1] + e2[1] + e3[1]) / 4;
+      const Au = [(e1[0] - e0[0] + e2[0] - e3[0]) / 2, (e1[1] - e0[1] + e2[1] - e3[1]) / 2];
+      const Av = [(e3[0] - e0[0] + e2[0] - e1[0]) / 2, (e3[1] - e0[1] + e2[1] - e1[1]) / 2];
+      ctx.save();
+      ctx.transform(Au[0], Au[1], Av[0], Av[1], cx2, cy2);
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, 6.2832);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      /* 每格按自己的两条边向量各外扩 2%：共边处两边各只有 ~50% 覆盖，
+         alpha 合成是 1-(1-a)(1-b) 而不是相加 → 只到 75%，会漏出一条纸色细线。
+         外扩让它变成真·整块纯色（设计本意就是「拼成纯色面」）。 */
+      const EX = 0.02;
+      const e0 = [c[0][0] + q.sx, c[0][1] + q.sy], e1 = [c[1][0] + q.sx, c[1][1] + q.sy];
+      const e2 = [c[2][0] + q.sx, c[2][1] + q.sy], e3 = [c[3][0] + q.sx, c[3][1] + q.sy];
+      const ux = [(e1[0] - e0[0]) * EX, (e1[1] - e0[1]) * EX];
+      const vx = [(e3[0] - e0[0]) * EX, (e3[1] - e0[1]) * EX];
+      ctx.beginPath();
+      ctx.moveTo(e0[0] - ux[0] - vx[0], e0[1] - ux[1] - vx[1]);
+      ctx.lineTo(e1[0] + ux[0] - vx[0], e1[1] + ux[1] - vx[1]);
+      ctx.lineTo(e2[0] + ux[0] + vx[0], e2[1] + ux[1] + vx[1]);
+      ctx.lineTo(e3[0] - ux[0] + vx[0], e3[1] - ux[1] + vx[1]);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  /* ---- 字 ----
+     就一条规则：**全场只出最朝前那一面的白字**（winFi 在上面算溶解时已定）。
+     v4~v7 让每个可见面各画各的（侧面贴面字 + 顶底立牌），翻过极点时两个字同屏，
+     白字压白字就是用户说的「叠成一坨白块」。 */
+
+  const texts = [];
+  for (let fi = 0; fi < FACES.length; fi++) {
+    if (front[fi] <= 0.02) continue;
+    const fc = FACES[fi];
+    const axis = fc.n[0] ? 0 : fc.n[1] ? 1 : 2;
+    const u = AXIS_U[axis], v = AXIS_V[axis];
+    const Cw = [fc.n[0] * HALF, fc.n[1] * HALF, fc.n[2] * HALF];
+    const C = P(Cw);
+    const U = P([Cw[0] + u[0], Cw[1] + u[1], Cw[2] + u[2]]);
+    const V = P([Cw[0] + v[0], Cw[1] + v[1], Cw[2] + v[2]]);
+    texts.push({
+      fi, fc, isPole: axis === 1, C, win: fi === winFi,
+      ax: U[0] - C[0], ay: U[1] - C[1],       // 1 个世界单位的屏幕长度
+      bx: V[0] - C[0], by: V[1] - C[1],
+      fr: front[fi], plateF: plate[fi], revealF: reveal[fi],
+    });
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const T of texts) {
+    /* 就一条规则：**只有赢家面出白字**，且它底下的格子已经拼成实心。
+       没有「先报名字」的灰色占位字了 —— 那个占位在极点附近会跟着贴面透视拉成
+       一坨斜字（用户看到的「字叠成块」有一半是它）。
+       也没有第二个面的白字：T.win 全场只有一个。 */
+    const rv = T.win ? T.revealF * smooth(0.55, 0.92, T.plateF) : 0;
+    if (rv <= 0.01) continue;
+
+    const chars = [...T.fc.name];
+    const drawWord = (unit) => {
+      const e2 = easeOutCubic(rv);
+      ctx.fillStyle = 'rgba(255,255,255,' + Math.min(1, 0.28 + e2 * 0.85).toFixed(3) + ')';
+      /* 字号 0.40·unit（原 0.46）：田字总宽 = gap + 字宽 ≈ 1.56·unit，
+         必须塞得进 2·unit 的面里，否则上面的字会被面的边缘裁掉（尤其中文全角字） */
+      ctx.font = '600 ' + (unit * 0.40).toFixed(3) + 'px ' + FONT;
+      /* 田字 2×2：格距 = 字号的 0.72（原来 1.0，四个字散到面的四角，看着像字飞了） */
+      const gap = unit * 0.72;
+      for (let ci = 0; ci < chars.length; ci++) {
+        const gx = (ci % 2) * gap - gap / 2;
+        const gy = Math.floor(ci / 2) * gap - gap / 2;
+        const delay = ci * 0.06;
+        const ce = clamp01((rv - delay) / (1 - delay));
+        if (ce <= 0) continue;
+        ctx.save();
+        ctx.translate(gx, gy);
+        const pop = 0.8 + 0.2 * easeOutBack(ce);
+        ctx.scale(pop, pop);
+        ctx.globalAlpha = ce;
+        ctx.fillText(chars[ci], 0, 0);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(255,255,255,' + (e2 * 0.5).toFixed(3) + ')';
+      ctx.font = '500 ' + (unit * 0.05).toFixed(3) + 'px ' + MONO;
+      ctx.fillText('LIZI · ' + String(T.fi + 1).padStart(2, '0'), 0, unit * 0.82);
+    };
+
+    if (T.isPole) {
+      /* 顶/底面：立牌，永远屏幕正立，锚在面中心。
+         字得塞进面的**可见范围**：透视把远侧压扁后可见高度 = 两侧 ay 的平均左右，
+         取 |ax|（横向）和平均 |ay|（纵向）里小的那个，再乘 0.98 留边，
+         这样既不会伸到棱外面被裁、也不会缩成一小坨。 */
+      const spanX = Math.hypot(T.ax, T.ay) * 2;                      // 横向整边长（屏幕像素）
+      const spanY = (Math.abs(T.ay) + Math.abs(T.by)) ;              // 纵向（透视压扁后）
+      const unit = Math.min(spanX, spanY * 1.9) * 0.5 * 0.98;
+      ctx.save();
+      ctx.translate(T.C[0], T.C[1]);
+      drawWord(unit);
+      ctx.restore();
+    } else {
+      /* 侧面：贴面透视 */
+      let ax = T.ax, ay = T.ay;
+      const bx = T.bx, by = T.by;
+      if (ax * by - ay * bx < 0) { ax = -ax; ay = -ay; }   // 镜像面翻横轴
+      ctx.save();
+      ctx.transform(ax, ay, bx, by, T.C[0], T.C[1]);
+      drawWord(1);
+      ctx.restore();
+    }
+  }
+
+  /* 诊断口：截图/探针脚本读这个（lab 页专用） */
+  window.__dbg = {
+    front, plate, reveal, winFi,
+    texts: texts.map((T) => ({ fi: T.fi, pole: T.isPole, win: T.win, c: [Math.round(T.C[0]), Math.round(T.C[1])], fr: +T.fr.toFixed(2), reveal: +T.revealF.toFixed(2) })),
+    quads: quads.length,
+  };
+
+  requestAnimationFrame(frame);
+}
+
+/* ---------- 拖动 / 点击 ---------- */
+cvs.addEventListener('pointerdown', (e) => {
+  dragging = true; moved = 0; vyaw = 0; vpitch = 0;
+  lastX = e.clientX; lastY = e.clientY;
+  cvs.classList.add('is-drag');
+  cvs.setPointerCapture(e.pointerId);
+});
+
+cvs.addEventListener('pointermove', (e) => {
+  mx = e.clientX; my = e.clientY;
+  if (!dragging) return;
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  moved += Math.abs(dx) + Math.abs(dy);
+  yaw += dx * 0.008;
+  pitch += dy * 0.008;                    // 360°：不夹
+  vyaw = dx * 0.008; vpitch = dy * 0.008;
+}, { passive: true });
+
+cvs.addEventListener('pointerup', (e) => {
+  dragging = false;
+  cvs.classList.remove('is-drag');
+  if (moved < 6) {
+    const cy2 = Math.cos(yaw), sy2 = Math.sin(yaw), cx2 = Math.cos(-pitch), sx2 = Math.sin(-pitch);
+    let best = -2, face = -1;
+    FACES.forEach((fc, i) => {
+      const nz1 = fc.n[0] * sy2 + fc.n[2] * cy2;
+      const nz = fc.n[1] * sx2 + nz1 * cx2;
+      if (-nz > best) { best = -nz; face = i; }
+    });
+    if (best > 0.8) {
+      toast.textContent = '进入 · ' + FACES[face].name;
+      toast.classList.add('is-on');
+      clearTimeout(showT);
+      var showT = setTimeout(() => toast.classList.remove('is-on'), 1100);
+    }
+  }
+});
+
+cvs.addEventListener('pointerleave', () => { mx = -1e4; my = -1e4; });
+addEventListener('resize', resize);
+
+document.querySelectorAll('.utils span').forEach((el) => {
+  el.addEventListener('click', () => {
+    toast.textContent = '进入 · ' + el.dataset.n;
+    toast.classList.add('is-on');
+    clearTimeout(showT);
+    var showT = setTimeout(() => toast.classList.remove('is-on'), 1100);
+  });
+});
+
+resize();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

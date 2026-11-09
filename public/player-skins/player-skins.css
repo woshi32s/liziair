@@ -1,0 +1,770 @@
+/* ============================================================================
+   player-skins.css — 大厅播放条 10 套皮肤 + 设置页选择器
+   ----------------------------------------------------------------------------
+   所有皮肤样式都锁在 body[data-view="hall"] 下；离开大厅时 JS 会同时移除
+   body 上的 pskin-* 类，播放页 / 设置页不会残留任何视觉。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   运行层：只画视觉，绝不接收指针事件（#bar / #vol 的拖动命中区保持原样）
+   -------------------------------------------------------------------------- */
+.pskin-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+  contain: paint;
+}
+
+.pskin-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+body[data-pskin][data-view="hall"] .player .player__inner {
+  position: relative;
+  z-index: 2;
+}
+
+/* 圆环文字 / goo 滤镜等 DOM 装饰也不能挡住点击 */
+.pskin-magnet-ring,
+.pskin-neon,
+.pskin-glass-sheen,
+.pskin-goo,
+.pskin-defs {
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   设置页 —— 播放条选择器
+   ========================================================================== */
+#player-skins-picker {
+  margin-top: 4px;
+}
+
+.psp {
+  padding: 2px 0 2px;
+}
+
+.psp__bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0 9px;
+}
+
+.psp__blurb {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  opacity: 0.92;
+}
+
+.psp__now {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--ink-2);
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.psp__stagehead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px 6px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+
+.psp__sel {
+  font-weight: var(--fw-med);
+  letter-spacing: 0.01em;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.psp__live {
+  opacity: 0.66;
+  text-align: right;
+}
+
+.psp__stage {
+  position: relative;
+  height: 138px;
+  margin: 0 0 12px;
+  border: 1px solid var(--rule);
+  border-radius: 15px;
+  overflow: hidden;
+  background: #f3f5f9;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+.psp__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.psp__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
+  gap: 8px;
+}
+
+.psp__card {
+  --card-bd: var(--rule);
+  position: relative;
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 10px;
+  align-items: center;
+  gap: 10px;
+  min-height: 66px;
+  padding: 8px 10px 8px 8px;
+  border: 1px solid var(--card-bd);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.42);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms var(--ease-out),
+    background-color 160ms var(--ease-out),
+    box-shadow 200ms var(--ease-out),
+    transform 160ms var(--ease-out);
+}
+
+.psp__card:hover {
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(21, 26, 42, 0.2);
+  box-shadow: 0 5px 18px rgba(21, 26, 42, 0.07);
+  transform: translateY(-1px);
+}
+
+.psp__card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.psp__card.is-on,
+.psp__card[aria-checked="true"] {
+  border-color: rgba(21, 26, 42, 0.72);
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(21, 26, 42, 0.72);
+}
+
+.psp__thumb {
+  position: relative;
+  width: 72px;
+  height: 46px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #eef1f6;
+  box-shadow: inset 0 0 0 1px rgba(21, 26, 42, 0.08);
+  isolation: isolate;
+}
+
+.psp__thumb::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
+  border-radius: inherit;
+}
+
+.psp__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 6px;
+  min-width: 0;
+}
+
+.psp__name {
+  grid-column: 1 / -1;
+  font-size: 12.5px;
+  font-weight: var(--fw-med);
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.psp__src {
+  min-width: 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.psp__tag {
+  justify-self: end;
+  flex: none;
+  font-size: 9px;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  padding: 1px 6px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.psp__tag.is-particle {
+  color: oklch(48% 0.13 250);
+  border-color: oklch(63% 0.13 250 / 0.26);
+  background: oklch(93% 0.05 250 / 0.6);
+}
+
+.psp__check {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgba(21, 26, 42, 0.22);
+  background: transparent;
+  transition: background-color 160ms var(--ease-out), border-color 160ms var(--ease-out);
+}
+
+.psp__card.is-on .psp__check,
+.psp__card[aria-checked="true"] .psp__check {
+  background: var(--ink);
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(21, 26, 42, 0.08);
+}
+
+/* 缩略预览：用纯 CSS 画每种皮肤「指纹」，不跑 10 个 canvas */
+.psp__thumb--default {
+  background:
+    linear-gradient(90deg, transparent 0 17%, rgba(21, 26, 42, 0.16) 17% 18%, transparent 18% 34%, rgba(21, 26, 42, 0.16) 34% 35%, transparent 35%),
+    linear-gradient(180deg, #fff, #eef1f5);
+}
+
+.psp__thumb--01 {
+  background:
+    radial-gradient(circle at 14% 32%, #fff 0 1px, transparent 1.8px),
+    radial-gradient(circle at 34% 66%, #bae6fd 0 1.2px, transparent 2px),
+    radial-gradient(circle at 52% 24%, #ddd6fe 0 0.9px, transparent 1.7px),
+    radial-gradient(circle at 69% 58%, #fff 0 1.1px, transparent 1.9px),
+    radial-gradient(circle at 87% 36%, #a5f3fc 0 0.9px, transparent 1.8px),
+    radial-gradient(120% 100% at 30% 0%, #16224a 0%, #070b18 58%, #0b0a1a 100%);
+}
+
+.psp__thumb--02 {
+  background:
+    radial-gradient(circle at 22% 30%, #fff 0 1px, transparent 1.7px),
+    radial-gradient(circle at 40% 68%, #ffb27a 0 1.7px, transparent 2.5px),
+    radial-gradient(circle at 62% 38%, #fdba74 0 1.2px, transparent 2px),
+    radial-gradient(circle at 79% 64%, #fb7185 0 1.4px, transparent 2.2px),
+    radial-gradient(110% 120% at 30% 0%, #fff7ef 0%, #ffe3d2 58%, #ffd1bd 100%);
+}
+
+.psp__thumb--03 {
+  background:
+    repeating-linear-gradient(116deg, transparent 0 11px, rgba(125, 211, 252, 0.5) 12px 12.6px, transparent 13.4px 24px),
+    radial-gradient(120% 100% at 70% 0%, #17356a 0%, #0a1226 58%, #050913 100%);
+}
+
+.psp__thumb--04 {
+  background:
+    radial-gradient(circle at 18% 38%, #fff8dc 0 1.2px, transparent 2px),
+    radial-gradient(circle at 31% 62%, #fbbf24 0 1px, transparent 1.8px),
+    radial-gradient(circle at 47% 28%, #fff 0 0.8px, transparent 1.6px),
+    radial-gradient(circle at 66% 54%, #fde68a 0 1.4px, transparent 2.2px),
+    radial-gradient(circle at 84% 34%, #f59e0b 0 0.9px, transparent 1.7px),
+    radial-gradient(110% 120% at 50% 15%, #fffdf7 0%, #fff4dc 62%, #ffe6b8 100%);
+}
+
+.psp__thumb--05 {
+  background:
+    radial-gradient(circle at 22% 58%, #8ecae6 0 4px, transparent 4.6px),
+    radial-gradient(circle at 41% 68%, #ffd166 0 3.3px, transparent 3.8px),
+    radial-gradient(circle at 58% 48%, #a78bfa 0 4.6px, transparent 5.2px),
+    radial-gradient(circle at 76% 64%, #5eead4 0 3.1px, transparent 3.7px),
+    linear-gradient(180deg, #f8fcff, #dbeafe);
+}
+
+.psp__thumb--06 {
+  background:
+    radial-gradient(circle at 50% 50%, transparent 0 9px, rgba(124, 58, 237, 0.5) 9.5px 10.5px, transparent 11px 17px, rgba(124, 58, 237, 0.28) 17.5px 18.5px, transparent 19px 25px, rgba(124, 58, 237, 0.15) 25.5px 26.5px, transparent 27px),
+    linear-gradient(135deg, #faf8ff, #eee7ff);
+}
+
+.psp__thumb--07 {
+  background:
+    linear-gradient(90deg, rgba(34, 211, 238, 0.75), rgba(217, 70, 239, 0.7)) padding-box,
+    linear-gradient(135deg, #0a0a10, #141020) border-box;
+  border: 1px solid transparent;
+  box-shadow: inset 0 0 14px rgba(217, 70, 239, 0.34), inset 0 0 0 1px rgba(34, 211, 238, 0.36);
+}
+
+.psp__thumb--08 {
+  background:
+    linear-gradient(118deg, transparent 0 28%, rgba(255, 255, 255, 0.78) 36%, transparent 45%),
+    radial-gradient(80% 120% at 18% 0%, rgba(255, 160, 230, 0.28), transparent 62%),
+    radial-gradient(80% 120% at 88% 20%, rgba(120, 220, 255, 0.28), transparent 64%),
+    linear-gradient(180deg, #ffffff, #e7edf8);
+  box-shadow: inset 0 0 0 1px rgba(130, 190, 255, 0.42), inset 0 0 14px rgba(165, 243, 252, 0.6);
+}
+
+.psp__thumb--09 {
+  background:
+    repeating-linear-gradient(90deg, rgba(245, 214, 140, 0.56) 0 1px, transparent 1px 7px) 0 calc(100% - 10px) / 100% 5px no-repeat,
+    radial-gradient(100% 100% at 40% 0%, #2b2c2f 0%, #15171a 58%, #0a0b0d 100%);
+}
+
+.psp__thumb--10 {
+  background:
+    radial-gradient(circle at 30% 59%, #fff 0 2.5px, #cbd5e1 4px, transparent 7px),
+    radial-gradient(circle at 50% 62%, #f8fafc 0 4px, #94a3b8 6px, transparent 10px),
+    radial-gradient(circle at 69% 56%, #fff 0 3px, #cbd5e1 5px, transparent 8px),
+    linear-gradient(135deg, #fbfdff, #dfe7f1);
+}
+
+/* ==========================================================================
+   Shared player surface resets when a skin is active
+   ========================================================================== */
+body[data-pskin][data-view="hall"] .player {
+  isolation: isolate;
+}
+
+body[data-pskin][data-view="hall"] .player .np__art {
+  transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out);
+}
+
+/* ---- 深色组：01 / 03 / 07 / 09 ---- */
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .player {
+  color: #fff;
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] :is(.np__artist, .time) {
+  color: rgba(255, 255, 255, 0.56);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .np__art {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .np__art-ph {
+  color: rgba(255, 255, 255, 0.62);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .bar::before {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .bar__buf {
+  background: rgba(255, 255, 255, 0.26);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .icbtn {
+  color: rgba(255, 255, 255, 0.74);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .icbtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .icbtn--play {
+  background: rgba(255, 255, 255, 0.94);
+  color: #0b1020;
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.16);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .icbtn--play:hover {
+  background: #fff;
+  color: #0b1020;
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .badge {
+  color: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+body:is(.pskin-01, .pskin-03, .pskin-07, .pskin-09)[data-view="hall"] .badge.is-action {
+  color: #0b1020;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+/* ==========================================================================
+   01 — 星轨粒子 / React Bits · Particles
+   ========================================================================== */
+body.pskin-01[data-view="hall"] .player {
+  background:
+    radial-gradient(90% 160% at 18% 0%, rgba(24, 58, 112, 0.38), transparent 62%),
+    linear-gradient(180deg, rgba(5, 8, 18, 0.98), rgba(8, 12, 28, 0.99));
+  border-top-color: rgba(103, 232, 249, 0.2);
+  box-shadow: inset 0 1px 0 rgba(160, 220, 255, 0.1), 0 -18px 60px rgba(20, 40, 90, 0.18);
+}
+
+body.pskin-01[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #22d3ee, #818cf8 55%, #c084fc);
+  box-shadow: 0 0 14px rgba(103, 232, 249, 0.55);
+}
+
+/* ==========================================================================
+   02 — 重力软粒 / Fancy Components · Cursor Attractor & Gravity
+   ========================================================================== */
+body.pskin-02[data-view="hall"] .player {
+  background:
+    radial-gradient(70% 150% at 24% 0%, rgba(255, 203, 164, 0.55), transparent 64%),
+    linear-gradient(180deg, rgba(255, 251, 245, 0.96), rgba(255, 235, 222, 0.94));
+  border-top-color: rgba(214, 122, 80, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+body.pskin-02[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #f59e0b, #fb7185);
+  box-shadow: 0 0 12px rgba(251, 146, 60, 0.35);
+}
+
+body.pskin-02[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(190, 90, 50, 0.35);
+}
+
+/* ==========================================================================
+   03 — 流星跑道 / Magic UI · Meteors
+   ========================================================================== */
+body.pskin-03[data-view="hall"] .player {
+  background:
+    radial-gradient(90% 180% at 76% 0%, rgba(28, 78, 156, 0.38), transparent 62%),
+    linear-gradient(180deg, rgba(4, 7, 15, 0.99), rgba(9, 15, 32, 0.99));
+  border-top-color: rgba(96, 165, 250, 0.24);
+  box-shadow: inset 0 1px 0 rgba(147, 197, 253, 0.1), 0 -20px 70px rgba(10, 30, 80, 0.22);
+}
+
+body.pskin-03[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #1d4ed8, #38bdf8 68%, #e0f2fe);
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.55);
+}
+
+body.pskin-03[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 0 14px rgba(125, 211, 252, 0.9);
+}
+
+/* ==========================================================================
+   04 — 星尘光晕 / Aceternity UI · Sparkles
+   ========================================================================== */
+body.pskin-04[data-view="hall"] .player {
+  background:
+    radial-gradient(70% 150% at 50% 0%, rgba(255, 226, 159, 0.5), transparent 66%),
+    linear-gradient(180deg, rgba(255, 253, 248, 0.97), rgba(255, 246, 230, 0.95));
+  border-top-color: rgba(217, 164, 52, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+body.pskin-04[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24 60%, #fde68a);
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.4);
+}
+
+body.pskin-04[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+/* ==========================================================================
+   05 — 玻璃球池 / React Bits · Ballpit
+   ========================================================================== */
+body.pskin-05[data-view="hall"] .player {
+  background:
+    radial-gradient(80% 160% at 30% 0%, rgba(179, 226, 255, 0.5), transparent 64%),
+    linear-gradient(180deg, rgba(249, 253, 255, 0.97), rgba(230, 244, 255, 0.95));
+  border-top-color: rgba(78, 150, 210, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+body.pskin-05[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #0ea5e9, #14b8a6);
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.32);
+}
+
+body.pskin-05[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 1px 7px rgba(14, 116, 144, 0.3);
+}
+
+/* ==========================================================================
+   06 — 磁吸按钮 / Hover.dev · Magnet Button
+   ========================================================================== */
+body.pskin-06[data-view="hall"] .player {
+  background:
+    radial-gradient(60% 160% at 50% 0%, rgba(196, 181, 253, 0.38), transparent 62%),
+    linear-gradient(180deg, rgba(252, 250, 255, 0.97), rgba(239, 233, 255, 0.95));
+  border-top-color: rgba(109, 40, 217, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+body.pskin-06[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #7c3aed, #a78bfa);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.34);
+}
+
+body.pskin-06[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 1px 7px rgba(76, 29, 149, 0.34);
+}
+
+body.pskin-06[data-view="hall"] .icbtn {
+  transition: background-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              transform 80ms linear;
+  will-change: transform;
+}
+
+/* 圆环文字会略微超出播放条上沿，06 这一层不裁切 */
+.pskin-layer--06 {
+  overflow: visible;
+  contain: none;
+}
+
+/* 旋转的圆环文字：位置由 JS 每帧按播放键中心更新 */
+.pskin-magnet-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 88px;
+  height: 88px;
+  margin: -44px 0 0 -44px;
+  color: rgba(88, 60, 160, 0.58);
+  opacity: 0.78;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+.pskin-magnet-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.pskin-magnet-ring text {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 7px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  fill: currentColor;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pskin-magnet-ring {
+    animation: pskin-spin 26s linear infinite;
+  }
+}
+
+@keyframes pskin-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   07 — 霓虹扫边 / Magic UI · Shine Border
+   ========================================================================== */
+body.pskin-07[data-view="hall"] .player {
+  background:
+    radial-gradient(70% 180% at 80% 0%, rgba(80, 20, 110, 0.34), transparent 60%),
+    radial-gradient(70% 180% at 12% 0%, rgba(10, 90, 110, 0.3), transparent 62%),
+    linear-gradient(180deg, rgba(6, 6, 11, 0.99), rgba(12, 10, 18, 0.99));
+  border-top-color: rgba(217, 70, 239, 0.32);
+  box-shadow: inset 0 1px 0 rgba(34, 211, 238, 0.18), 0 -18px 60px rgba(70, 20, 100, 0.18);
+}
+
+body.pskin-07[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #22d3ee, #a855f7 62%, #e879f9);
+  box-shadow: 0 0 18px rgba(217, 70, 239, 0.55);
+}
+
+body.pskin-07[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 0 14px rgba(232, 121, 249, 0.95);
+}
+
+/* Magic UI ShineBorder 的核心：radial-gradient 背景 + mask-composite 只留边框 */
+.pskin-neon {
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background-image: radial-gradient(transparent, transparent, #22d3ee, #e879f9, transparent, transparent);
+  background-size: 300% 300%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.9;
+  will-change: background-position;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .pskin-neon {
+    animation: pskin-shine 7s linear infinite;
+  }
+}
+
+@keyframes pskin-shine {
+  0% { background-position: 0% 44%; }
+  100% { background-position: 300% 56%; }
+}
+
+/* ==========================================================================
+   08 — 棱镜玻璃 / React Bits · StarBorder
+   ========================================================================== */
+body.pskin-08[data-view="hall"] .player {
+  background:
+    linear-gradient(115deg, rgba(255, 255, 255, 0.68), rgba(246, 249, 255, 0.5) 42%, rgba(235, 243, 255, 0.64)),
+    radial-gradient(80% 160% at 16% 0%, rgba(255, 170, 230, 0.2), transparent 64%),
+    radial-gradient(80% 160% at 84% 20%, rgba(120, 220, 255, 0.22), transparent 64%);
+  border-top-color: rgba(130, 190, 255, 0.34);
+  -webkit-backdrop-filter: blur(30px) saturate(1.35);
+  backdrop-filter: blur(30px) saturate(1.35);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(160, 200, 255, 0.18);
+}
+
+body.pskin-08[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #0891b2, #7c3aed 60%, #d946ef);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.26);
+}
+
+body.pskin-08[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 0 12px rgba(160, 220, 255, 0.9);
+}
+
+.pskin-glass-sheen {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(112deg, transparent 0 26%, rgba(255, 255, 255, 0.5) 35%, transparent 44%),
+    radial-gradient(40% 120% at 20% 0%, rgba(255, 150, 220, 0.14), transparent 72%),
+    radial-gradient(40% 120% at 82% 18%, rgba(120, 220, 255, 0.16), transparent 72%);
+  opacity: 0.72;
+  mix-blend-mode: screen;
+}
+
+/* ==========================================================================
+   09 — 机械刻度 / Aceternity UI · Tracing Beam
+   ========================================================================== */
+body.pskin-09[data-view="hall"] .player {
+  background:
+    radial-gradient(90% 160% at 30% 0%, rgba(110, 92, 58, 0.22), transparent 62%),
+    linear-gradient(180deg, rgba(24, 25, 28, 0.99), rgba(10, 11, 13, 0.99));
+  border-top-color: rgba(245, 214, 140, 0.22);
+  box-shadow: inset 0 1px 0 rgba(245, 214, 140, 0.08), 0 -16px 50px rgba(0, 0, 0, 0.24);
+}
+
+body.pskin-09[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #8a6a38, #f5d68c);
+  box-shadow: 0 0 12px rgba(245, 214, 140, 0.38);
+}
+
+body.pskin-09[data-view="hall"] .knob {
+  background: #fff4d0;
+  box-shadow: 0 0 12px rgba(245, 214, 140, 0.8);
+}
+
+/* ==========================================================================
+   10 — 液态汞滴 / Fancy Components · Gooey SVG Filter
+   ========================================================================== */
+body.pskin-10[data-view="hall"] .player {
+  background:
+    radial-gradient(70% 160% at 20% 0%, rgba(226, 232, 240, 0.7), transparent 62%),
+    linear-gradient(180deg, rgba(253, 254, 255, 0.97), rgba(235, 241, 248, 0.96));
+  border-top-color: rgba(100, 116, 139, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+body.pskin-10[data-view="hall"] .bar__fill {
+  background: linear-gradient(90deg, #94a3b8, #e2e8f0 52%, #64748b);
+  box-shadow: 0 0 10px rgba(148, 163, 184, 0.4);
+}
+
+body.pskin-10[data-view="hall"] .knob {
+  background: #fff;
+  box-shadow: 0 0 12px rgba(148, 163, 184, 0.55);
+}
+
+.pskin-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.pskin-goo {
+  position: absolute;
+  inset: 0;
+  filter: url(#pskin-goo-filter);
+  opacity: 0.88;
+  will-change: filter;
+}
+
+.pskin-goo__b {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 30%, #ffffff 0 12%, #eef3f9 38%, #c2cfdf 68%, #93a7bd 100%);
+  box-shadow: inset -2px -3px 6px rgba(70, 90, 120, 0.2);
+  will-change: transform;
+}
+
+/* ==========================================================================
+   Reduced motion：CSS 动效也降级
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .pskin-neon,
+  .pskin-magnet-ring {
+    animation: none !important;
+  }
+
+  .psp__card,
+  .psp__check {
+    transition: none;
+  }
+}
+
+/* ==========================================================================
+   Narrow settings layout
+   ========================================================================== */
+@media (max-width: 560px) {
+  .psp__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .psp__bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .psp__stage {
+    height: 118px;
+  }
+}

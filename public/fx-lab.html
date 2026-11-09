@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FX 特效试片台</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --line:#222836; --ink:#e8ecf5; --ink2:#98a2b8; --ink3:#5d687e;
+    --accent:#7cc4ff; --on:#1b2a3d;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.5 system-ui,"Microsoft YaHei",sans-serif;overflow:hidden}
+  header{display:flex;align-items:center;gap:18px;padding:12px 18px;border-bottom:1px solid var(--line);
+    background:linear-gradient(#151922,#0e1118)}
+  header h1{margin:0;font-size:14px;font-weight:600;letter-spacing:.02em}
+  header .sub{color:var(--ink3);font-size:11.5px}
+  .ctrl{display:flex;align-items:center;gap:8px;color:var(--ink2);font-size:12px}
+  input[type=range]{width:110px;accent-color:var(--accent)}
+  button{background:#1a2030;color:var(--ink);border:1px solid var(--line);border-radius:6px;
+    padding:5px 10px;font:inherit;cursor:pointer}
+  button:hover{background:#222b3f}
+  main{display:flex;height:calc(100% - 53px)}
+  aside{width:288px;flex:0 0 288px;border-right:1px solid var(--line);overflow-y:auto;background:var(--panel)}
+  aside::-webkit-scrollbar{width:8px}
+  aside::-webkit-scrollbar-thumb{background:#26303f;border-radius:4px}
+  .cat{padding:10px 14px 6px;color:var(--ink3);font-size:11px;letter-spacing:.08em;position:sticky;top:0;
+    background:linear-gradient(var(--panel),rgba(18,21,29,.92));backdrop-filter:blur(4px)}
+  .item{display:flex;align-items:center;gap:8px;padding:6px 14px;cursor:pointer;border-left:2px solid transparent}
+  .item:hover{background:#161b26}
+  .item.on{background:var(--on);border-left-color:var(--accent)}
+  .item .n{color:var(--ink3);font:11px ui-monospace,Consolas,monospace;width:22px}
+  .item .t{flex:1}
+  .item .b{font-size:10px;color:#c9a227;border:1px solid #4a3c14;border-radius:4px;padding:0 4px}
+  section{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:14px}
+  #cv{width:min(100%,calc((100vh - 150px) * 1.7777));aspect-ratio:16/9;background:#000;
+    border:1px solid var(--line);border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,.55)}
+  #hud{display:flex;gap:14px;align-items:baseline;color:var(--ink2);font-size:12px;min-height:20px}
+  #hud b{color:var(--ink);font-size:14px;font-weight:600}
+  #hud .tag{color:#7d8aa3;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:11px}
+  #hud .tag.warn{color:#e0b44a;border-color:#4a3c14}
+</style>
+</head>
+<body>
+<header>
+  <h1>FX 特效试片台</h1>
+  <span class="sub">点左边任意一个 → 右边立刻套在那张图上循环播放</span>
+  <div class="ctrl">强度 <input id="amp" type="range" min="0" max="2" step="0.05" value="1"><span id="ampv">1.00</span></div>
+  <div class="ctrl">速度 <input id="spd" type="range" min="0.2" max="3" step="0.05" value="1"><span id="spdv">1.00</span></div>
+  <button id="play">暂停</button>
+  <button id="prev">◀ 上一个</button>
+  <button id="next">下一个 ▶</button>
+  <span class="sub" id="count"></span>
+</header>
+<main>
+  <aside id="list"></aside>
+  <section>
+    <canvas id="cv"></canvas>
+    <div id="hud"><b id="hname"></b><span id="hnote"></span><span class="tag" id="htag"></span></div>
+  </section>
+</main>
+<script>
+"use strict";
+const W = 1440, H = 810;
+const cv = document.getElementById('cv');
+cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d', { alpha: false });
+
+/* ---------- 图片 ---------- */
+const A = new Image(), B = new Image(), C = new Image();
+A.src = '_fx/a.png'; B.src = '_fx/b.png'; C.src = '_fx/c.png';
+let ready = 0;
+[A, B, C].forEach((im) => { im.onload = () => ready++; });
+
+/* ---------- 杂项缓冲 ---------- */
+const fb = document.createElement('canvas'); fb.width = W; fb.height = H;
+const fbx = fb.getContext('2d');
+const tmp = document.createElement('canvas'); tmp.width = W; tmp.height = H;
+const tmx = tmp.getContext('2d');
+let grain = null, scan = null;
+
+function bakeNoise() {
+  grain = document.createElement('canvas'); grain.width = 256; grain.height = 256;
+  const g = grain.getContext('2d'), d = g.createImageData(256, 256);
+  for (let i = 0; i < d.data.length; i += 4) {
+    const v = 128 + (Math.random() * 255 - 128) * 0.9;
+    d.data[i] = d.data[i + 1] = d.data[i + 2] = v; d.data[i + 3] = 255;
+  }
+  g.putImageData(d, 0, 0);
+  scan = document.createElement('canvas'); scan.width = 4; scan.height = 4;
+  const s = scan.getContext('2d');
+  s.fillStyle = 'rgba(0,0,0,0.55)'; s.fillRect(0, 0, 4, 2);
+  s.fillStyle = 'rgba(0,0,0,0)'; s.fillRect(0, 2, 4, 2);
+}
+bakeNoise();
+
+/* ---------- 基础绘制 ---------- */
+const N = (x) => Math.sin(x) + 0.6 * Math.sin(x * 2.17 + 1.3) + 0.35 * Math.sin(x * 3.71 + 2.1);
+function bg(g, img, zoom, ox, oy, rot) {
+  g.save();
+  g.translate(W / 2 + (ox || 0), H / 2 + (oy || 0));
+  if (rot) g.rotate(rot);
+  g.scale(zoom || 1, zoom || 1);
+  g.drawImage(img || A, -W / 2, -H / 2, W, H);
+  g.restore();
+}
+function base(g, st) {
+  /* 基础镜头：缓慢推拉 + 横移，让所有效果都有"画面在动"的参照 */
+  const z = 1.03 + 0.03 * Math.sin(st * 0.55) + 0.012 * Math.sin(st * 1.7);
+  bg(g, A, z, Math.sin(st * 0.31) * 16, Math.cos(st * 0.27) * 10);
+}
+function withFilter(g, f, fn) { g.save(); g.filter = f; fn(); g.restore(); }
+function coverImg(g, img) { g.drawImage(img, 0, 0, W, H); }
+
+/* ---------- 效果表 ---------- */
+const FX = [];
+const add = (cat, id, name, note, draw, webgl) => {
+  const no = String(FX.length + 1).padStart(2, '0');
+  FX.push({ no, cat, id, name, note, draw, webgl: !!webgl });
+};
+const F = (v) => v; /* 占位，保持可读 */
+
+/* ===== 1 震动 / 抖动 ===== */
+add('震动 / 抖动', 'shake-dir', '定向冲击震', '一次冲击、指数衰减、带方向', (g, t, a) => {
+  const ph = t % 1.4, k = Math.exp(-ph * 7) * 34 * a, d = -0.55;
+  bg(g, A, 1.07, Math.cos(d) * k, Math.sin(d) * k);
+});
+add('震动 / 抖动', 'shake-hand', '手持漂移', '低频噪波，像手持机位', (g, t, a) => {
+  const k = 9 * a;
+  bg(g, A, 1.07, N(t * 1.1) * k, N(t * 0.83 + 4) * k * 0.8, N(t * 0.6) * 0.002 * a);
+});
+add('震动 / 抖动', 'shake-hi', '高频颗粒抖', '逐帧随机，粗糙廉价感', (g, t, a) => {
+  const k = 3.2 * a, q = Math.floor(t * 24);
+  bg(g, A, 1.04, (N(q * 12.9) ) * k, (N(q * 7.3 + 3)) * k);
+});
+add('震动 / 抖动', 'shake-rot', '旋转抖动', '绕中心小幅旋转', (g, t, a) => {
+  bg(g, A, 1.05, 0, 0, N(t * 9) * 0.012 * a);
+});
+add('震动 / 抖动', 'shake-zoom', '缩放抖动', '快速推拉，呼吸感', (g, t, a) => {
+  bg(g, A, 1 + 0.02 * a * Math.sin(t * 11));
+});
+add('震动 / 抖动', 'shake-burst', '爆震', '大位移 + 衰减 + 拉焦', (g, t, a) => {
+  const ph = t % 2.2, k = Math.exp(-ph * 9) * 60 * a, z = 1 + Math.exp(-ph * 9) * 0.10 * a;
+  bg(g, A, z, N(ph * 40) * k, N(ph * 37 + 2) * k, N(ph * 30) * 0.01 * a);
+});
+add('震动 / 抖动', 'shake-sine', '正弦摇摆', '匀速左右摇，像晃动镜头', (g, t, a) => {
+  bg(g, A, 1.06, Math.sin(t * 4.2) * 18 * a, 0, Math.sin(t * 4.2) * 0.004 * a);
+});
+add('震动 / 抖动', 'shake-roll', '滚转摇晃', '绕光轴滚动的眩晕感', (g, t, a) => {
+  bg(g, A, 1.12, 0, 0, Math.sin(t * 1.6) * 0.05 * a);
+});
+add('震动 / 抖动', 'shake-jump', '随机跳帧抖', '每 1/12 秒跳一次位置', (g, t, a) => {
+  const q = Math.floor(t * 12), k = 13 * a;
+  bg(g, A, 1.06, (N(q * 3.1)) * k, (N(q * 5.7 + 1)) * k);
+});
+add('震动 / 抖动', 'shake-vertical', '竖向鼓点震', '只上下震，配低频鼓点', (g, t, a) => {
+  const ph = t % 0.42, k = Math.exp(-ph * 16) * 26 * a;
+  bg(g, A, 1.05, 0, k);
+});
+
+/* ===== 2 冲击 / 闪光 ===== */
+add('冲击 / 闪光', 'flash-white', '白闪', '整帧白，短促', (g, t, a) => {
+  base(g, t);
+  const ph = t % 1.6, v = Math.exp(-ph * 10) * 0.85 * a;
+  g.fillStyle = 'rgba(255,255,255,' + v.toFixed(3) + ')'; g.fillRect(0, 0, W, H);
+});
+add('冲击 / 闪光', 'flash-neg', '负片闪', 'difference 反相，冲击帧常用', (g, t, a) => {
+  base(g, t);
+  const ph = t % 1.6, v = Math.exp(-ph * 9) * 0.75 * a;
+  g.save(); g.globalCompositeOperation = 'difference';
+  g.fillStyle = 'rgba(255,255,255,' + v.toFixed(3) + ')'; g.fillRect(0, 0, W, H); g.restore();
+});
+add('冲击 / 闪光', 'flash-red', '红闪', '暖色爆闪，配爆炸/鼓点', (g, t, a) => {
+  base(g, t);
+  const ph = t % 1.5, v = Math.exp(-ph * 9) * 0.55 * a;
+  g.fillStyle = 'rgba(255,80,40,' + v.toFixed(3) + ')'; g.fillRect(0, 0, W, H);
+});
+add('冲击 / 闪光', 'flash-exposure', '曝光脉冲', '整体提亮后回落', (g, t, a) => {
+  base(g, t);
+  const ph = t % 2, v = (0.5 + 0.5 * Math.exp(-ph * 4)) * 0.30 * a;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.fillStyle = 'rgba(120,160,220,' + v.toFixed(3) + ')'; g.fillRect(0, 0, W, H); g.restore();
+});
+add('冲击 / 闪光', 'flash-bloom', '泛光爆闪', '模糊亮部叠加 = 光爆', (g, t, a) => {
+  base(g, t);
+  const ph = t % 1.8, v = Math.exp(-ph * 6) * 0.9 * a;
+  g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = v; g.filter = 'blur(26px) brightness(1.6)';
+  g.drawImage(A, 0, 0, W, H); g.restore();
+});
+add('冲击 / 闪光', 'flash-strobe', '频闪', '12Hz 明暗交替', (g, t, a) => {
+  base(g, t);
+  const on = Math.sin(t * Math.PI * 2 * 12) > 0;
+  g.fillStyle = on ? 'rgba(255,255,255,' + (0.35 * a).toFixed(3) + ')' : 'rgba(0,0,0,' + (0.35 * a).toFixed(3) + ')';
+  g.fillRect(0, 0, W, H);
+});
+add('冲击 / 闪光', 'flash-edge', '边缘冲击光', '四边压暗 + 一圈亮边', (g, t, a) => {
+  base(g, t);
+  const ph = t % 1.7, v = Math.exp(-ph * 7) * a;
+  const gr = g.createRadialGradient(W / 2, H / 2, H * 0.28, W / 2, H / 2, H * 0.86);
+  gr.addColorStop(0, 'rgba(255,255,255,0)');
+  gr.addColorStop(1, 'rgba(255,245,220,' + (0.55 * v).toFixed(3) + ')');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+});
+add('冲击 / 闪光', 'impact-ring', '冲击环', '扩散圆环 + 镜头踢一下', (g, t, a) => {
+  const ph = t % 1.5, k = Math.exp(-ph * 5) * 0.06 * a;
+  bg(g, A, 1 + k, 0, 0);
+  const r = 40 + ph * 900 * a;
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.strokeStyle = 'rgba(255,240,210,' + Math.max(0, 0.6 - ph * 0.6).toFixed(3) + ')';
+  g.lineWidth = 2 + 10 * Math.exp(-ph * 5); g.beginPath(); g.arc(W / 2, H * 0.46, r, 0, 6.2832); g.stroke();
+  g.restore();
+});
+
+/* ===== 3 模糊 / 拖影 ===== */
+add('模糊 / 拖影', 'blur-zoom', '变焦模糊', '同图多层放大叠加，冲击常用', (g, t, a) => {
+  for (let i = 0; i < 7; i++) {
+    const k = 1 + i * 0.02 * a;
+    g.globalAlpha = 1 / (i + 1);
+    bg(g, A, k);
+  }
+  g.globalAlpha = 1;
+});
+add('模糊 / 拖影', 'blur-radial', '径向模糊', '绕中心旋转的多层叠加', (g, t, a) => {
+  for (let i = 0; i < 7; i++) {
+    g.globalAlpha = 1 / (i + 1.3);
+    bg(g, A, 1.02, 0, 0, (i - 3) * 0.004 * a);
+  }
+  g.globalAlpha = 1;
+}, true);
+add('模糊 / 拖影', 'blur-dir', '方向模糊', '沿一个方向拖开', (g, t, a) => {
+  const d = 0.5, k = 9 * a;
+  for (let i = -3; i <= 3; i++) {
+    g.globalAlpha = 1 / (Math.abs(i) + 1.4);
+    bg(g, A, 1.05, Math.cos(d) * i * k, Math.sin(d) * i * k);
+  }
+  g.globalAlpha = 1;
+});
+add('模糊 / 拖影', 'blur-gauss', '高斯模糊', '真模糊（Canvas filter）', (g, t, a) => {
+  withFilter(g, 'blur(' + (a * 9).toFixed(1) + 'px)', () => bg(g, A, 1.03));
+}, true);
+add('模糊 / 拖影', 'blur-motion', '运动拖影', '模糊 + 横向错位', (g, t, a) => {
+  withFilter(g, 'blur(' + (a * 3).toFixed(1) + 'px)', () => {
+    for (let i = 0; i < 4; i++) { g.globalAlpha = 0.55; bg(g, A, 1.05, i * 10 * a, 0); }
+  });
+  g.globalAlpha = 1;
+});
+add('模糊 / 拖影', 'afterimage', '残影', '上一帧不擦，慢慢褪', (g, t, a) => {
+  g.globalAlpha = Math.min(0.95, 0.55 + 0.3 * a);
+  g.drawImage(fb, 0, 0);
+  g.globalAlpha = 1;
+  base(g, t);
+  fbx.clearRect(0, 0, W, H); fbx.drawImage(cv, 0, 0);
+});
+add('模糊 / 拖影', 'trail-ghost', '重影拖尾', '3 层错位亮影', (g, t, a) => {
+  bg(g, A, 1.03);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (let i = 1; i <= 3; i++) {
+    g.globalAlpha = 0.22 / i;
+    bg(g, A, 1.03, -i * 14 * a, i * 5 * a);
+  }
+  g.restore(); g.globalAlpha = 1;
+});
+add('模糊 / 拖影', 'blur-focus', '焦点拉焦', '中间实、四周虚', (g, t, a) => {
+  withFilter(g, 'blur(' + (a * 10).toFixed(1) + 'px)', () => bg(g, A, 1.04));
+  g.save();
+  g.beginPath(); g.arc(W / 2, H * 0.46, 260, 0, 6.2832); g.clip();
+  bg(g, A, 1.04); g.restore();
+}, true);
+add('模糊 / 拖影', 'smear', '拉伸残影', '横向压扁再拉回', (g, t, a) => {
+  const ph = (t % 1.6) / 1.6, k = 1 + 0.16 * Math.sin(ph * 3.14) * a;
+  g.save(); g.translate(W / 2, H / 2); g.scale(1 / k, k * 0.96); g.translate(-W / 2, -H / 2);
+  bg(g, A, 1.05); g.restore();
+});
+add('模糊 / 拖影', 'blur-glass', '毛玻璃', '模糊 + 轻微错位色偏', (g, t, a) => {
+  withFilter(g, 'blur(' + (a * 6).toFixed(1) + 'px) saturate(1.2)', () => bg(g, A, 1.05, 3 * a, -2 * a));
+}, true);
+
+/* ===== 4 故障 / 数字 ===== */
+add('故障 / 数字', 'glitch-slice', '切片错位', '横向切片随机错开', (g, t, a) => {
+  const q = Math.floor(t * 12);
+  for (let i = 0; i < 26; i++) {
+    const y = (i / 26) * H, h = H / 26 + 2;
+    const off = (N(q * 1.7 + i * 0.9) > 0.15 ? N(q * 3.1 + i) : 0) * 40 * a;
+    g.save(); g.beginPath(); g.rect(0, y, W, h); g.clip();
+    bg(g, A, 1.02, off, 0); g.restore();
+  }
+});
+add('故障 / 数字', 'glitch-rgb', '色差分离', 'RGB 三通道错位', (g, t, a) => {
+  bg(g, A, 1.03);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  g.globalAlpha = 0.5; g.filter = 'sepia(1) hue-rotate(-55deg) saturate(8)';
+  bg(g, A, 1.03, -6 * a, 0);
+  g.filter = 'sepia(1) hue-rotate(140deg) saturate(8)';
+  bg(g, A, 1.03, 6 * a, 0);
+  g.restore(); g.globalAlpha = 1; g.filter = 'none';
+}, true);
+add('故障 / 数字', 'glitch-block', '块状故障', '随机方块从别处搬过来', (g, t, a) => {
+  bg(g, A, 1.02);
+  const q = Math.floor(t * 8);
+  for (let i = 0; i < 14; i++) {
+    const w = 60 + Math.abs(N(q + i * 2.1)) * 220, h = 20 + Math.abs(N(q + i * 3.7)) * 90;
+    const x = Math.abs(N(q * 1.3 + i)) * W, y = Math.abs(N(q * 2.2 + i * 1.7)) * H;
+    const sx = Math.abs(N(q * 2.9 + i * 2.3)) * (W - w), sy = Math.abs(N(q * 1.9 + i * 3.1)) * (H - h);
+    g.drawImage(A, sx, sy, w, h, x, y, w, h);
+  }
+});
+add('故障 / 数字', 'glitch-scan', '扫描线', 'CRT 扫描线压暗', (g, t, a) => {
+  bg(g, A, 1.02);
+  g.save(); g.globalAlpha = 0.35 * a; g.fillStyle = g.createPattern(scan, 'repeat');
+  g.fillRect(0, 0, W, H); g.restore();
+  const y = (t * 220) % H;
+  g.fillStyle = 'rgba(255,255,255,' + (0.10 * a).toFixed(3) + ')'; g.fillRect(0, y, W, 3);
+});
+add('故障 / 数字', 'glitch-crt', 'CRT 弯边', '扫描线 + 暗角 + 轻微桶形', (g, t, a) => {
+  g.save(); g.translate(W / 2, H / 2); g.scale(1.03, 1.06); g.translate(-W / 2, -H / 2);
+  bg(g, A, 1.02); g.restore();
+  g.save(); g.globalAlpha = 0.32 * a; g.fillStyle = g.createPattern(scan, 'repeat'); g.fillRect(0, 0, W, H); g.restore();
+  const gr = g.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,' + (0.6 * a).toFixed(3) + ')');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+}, true);
+add('故障 / 数字', 'glitch-pixel', '像素化', '降采样再放大', (g, t, a) => {
+  const s = Math.max(2, Math.round(4 + a * 20));
+  tmx.imageSmoothingEnabled = false;
+  tmx.drawImage(A, 0, 0, W, H, 0, 0, Math.ceil(W / s), Math.ceil(H / s));
+  g.imageSmoothingEnabled = false;
+  g.drawImage(tmp, 0, 0, Math.ceil(W / s), Math.ceil(H / s), 0, 0, W, H);
+  g.imageSmoothingEnabled = true;
+});
+add('故障 / 数字', 'glitch-quant', '色阶量化', '压成几档色，海报感', (g, t, a) => {
+  bg(g, A, 1.02);
+  g.save(); g.globalCompositeOperation = 'overlay'; g.globalAlpha = 0.55 * a;
+  g.filter = 'contrast(2.4) saturate(1.6)'; g.drawImage(A, 0, 0, W, H);
+  g.restore(); g.filter = 'none';
+}, true);
+add('故障 / 数字', 'glitch-noise', '数字噪点', '满屏噪 + 轻微色偏', (g, t, a) => {
+  bg(g, A, 1.02);
+  g.save(); g.globalCompositeOperation = 'overlay'; g.globalAlpha = 0.25 * a;
+  const ox = -Math.random() * 200, oy = -Math.random() * 200;
+  g.fillStyle = g.createPattern(grain, 'repeat'); g.translate(ox, oy); g.fillRect(-ox, -oy, W, H); g.restore();
+});
+add('故障 / 数字', 'glitch-line', '横线撕裂', '几条亮线把画面撕开', (g, t, a) => {
+  bg(g, A, 1.02);
+  const q = Math.floor(t * 10);
+  for (let i = 0; i < 5; i++) {
+    const y = Math.abs(N(q * 2.3 + i * 1.9)) * H, h = 2 + Math.abs(N(q + i)) * 8;
+    g.save(); g.beginPath(); g.rect(0, y, W, h); g.clip();
+    bg(g, A, 1.02, N(q + i * 3) * 60 * a, 0); g.restore();
+    g.fillStyle = 'rgba(255,255,255,' + (0.18 * a).toFixed(3) + ')'; g.fillRect(0, y, W, 1);
+  }
+});
+add('故障 / 数字', 'glitch-datamosh', '数据损毁', '旧帧堆积不擦，越拖越乱', (g, t, a) => {
+  g.globalAlpha = 0.78; g.drawImage(fb, 0, 0); g.globalAlpha = 1;
+  bg(g, A, 1.02, N(t * 7) * 18 * a, 0);
+  fbx.clearRect(0, 0, W, H); fbx.drawImage(cv, 0, 0);
+});
+add('故障 / 数字', 'glitch-vhs', 'VHS 抖动', '逐行水平摇摆 + 噪', (g, t, a) => {
+  for (let y = 0; y < H; y += 6) {
+    const off = Math.sin(y * 0.05 + t * 9) * 6 * a + (Math.random() - 0.5) * 2 * a;
+    g.drawImage(A, 0, y, W, 6, off, y, W, 6);
+  }
+  g.save(); g.globalCompositeOperation = 'overlay'; g.globalAlpha = 0.18 * a;
+  g.fillStyle = g.createPattern(grain, 'repeat'); g.fillRect(0, 0, W, H); g.restore();
+});
+add('故障 / 数字', 'glitch-invert', '反相闪', '整帧反相，间歇触发', (g, t, a) => {
+  base(g, t);
+  const on = (t % 1.2) < 0.12;
+  if (on) { g.save(); g.globalCompositeOperation = 'difference'; g.fillStyle = 'rgba(255,255,255,' + (0.9 * a).toFixed(3) + ')'; g.fillRect(0, 0, W, H); g.restore(); }
+});
+
+/* ===== 5 转场 / 切句 ===== */
+function prog(t, a) { return (t * 0.35 * (0.6 + a * 0.8)) % 1; }
+add('转场 / 切句', 'tr-fade', '淡入切', 'A 淡出 B 淡入', (g, t, a) => {
+  const p = prog(t, a);
+  bg(g, A, 1.02); g.globalAlpha = p; bg(g, B, 1.02); g.globalAlpha = 1;
+});
+add('转场 / 切句', 'tr-zoom', '缩放切', 'A 推近消失，B 从远拉近', (g, t, a) => {
+  const p = prog(t, a);
+  if (p < 0.5) bg(g, A, 1 + p * 0.6); else bg(g, B, 1.6 - (p - 0.5) * 1.2);
+});
+add('转场 / 切句', 'tr-slide', '滑移切', 'B 从右侧滑入', (g, t, a) => {
+  const p = prog(t, a), x = W * (1 - p);
+  bg(g, A, 1.02, -x * 0.35, 0);
+  g.save(); g.beginPath(); g.rect(x, 0, W, H); g.clip(); bg(g, B, 1.02, 0, 0); g.restore();
+});
+add('转场 / 切句', 'tr-wipe', '擦除切', '硬边从左扫过', (g, t, a) => {
+  const p = prog(t, a);
+  bg(g, A, 1.02);
+  g.save(); g.beginPath(); g.rect(0, 0, W * p, H); g.clip(); bg(g, B, 1.02); g.restore();
+  g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(W * p - 2, 0, 2, H);
+});
+add('转场 / 切句', 'tr-pixel', '像素化切', '先糊成马赛克再变清楚', (g, t, a) => {
+  const p = prog(t, a), s = Math.round(2 + Math.sin(p * Math.PI) * 40);
+  const src = p < 0.5 ? A : B;
+  tmx.imageSmoothingEnabled = false;
+  tmx.drawImage(src, 0, 0, W, H, 0, 0, Math.ceil(W / s), Math.ceil(H / s));
+  g.imageSmoothingEnabled = false;
+  g.drawImage(tmp, 0, 0, Math.ceil(W / s), Math.ceil(H / s), 0, 0, W, H);
+  g.imageSmoothingEnabled = true;
+});
+add('转场 / 切句', 'tr-glitch', '故障切', '切片错位 + 闪烁', (g, t, a) => {
+  const p = prog(t, a), q = Math.floor(t * 20);
+  for (let i = 0; i < 20; i++) {
+    const y = (i / 20) * H, h = H / 20 + 2;
+    const off = (N(q * 2.1 + i) > 0.4 ? 1 : 0) * 70 * Math.sin(p * Math.PI) * a;
+    g.save(); g.beginPath(); g.rect(0, y, W, h); g.clip();
+    bg(g, i / 20 < p ? B : A, 1.02, off, 0); g.restore();
+  }
+});
+add('转场 / 切句', 'tr-iris', '圆形开合', '圆形遮罩扩张', (g, t, a) => {
+  const p = prog(t, a), r = Math.min(W, H) * 0.75 * p;
+  bg(g, A, 1.02);
+  g.save(); g.beginPath(); g.arc(W / 2, H * 0.46, r, 0, 6.2832); g.clip(); bg(g, B, 1.02); g.restore();
+});
+add('转场 / 切句', 'tr-wind', '风吹切', '横向细条被风吹走', (g, t, a) => {
+  const p = prog(t, a);
+  for (let i = 0; i < 24; i++) {
+    const y = (i / 24) * H, h = H / 24 + 2;
+    const k = Math.max(0, Math.min(1, p * 1.6 - (i / 24) * 0.6));
+    const off = k * W * 1.1;
+    g.save(); g.beginPath(); g.rect(0, y, W, h); g.clip();
+    g.drawImage(A, -off, y, W, h, 0, y, W, h);
+    g.drawImage(B, W - off, y, W, h, 0, y, W, h);
+    g.restore();
+  }
+});
+add('转场 / 切句', 'tr-crosswarp', '扭曲切', '上下反向错位分离再合上', (g, t, a) => {
+  const p = prog(t, a), k = Math.sin(p * Math.PI);
+  for (let i = 0; i < 22; i++) {
+    const y = (i / 22) * H, h = H / 22 + 2, s = (i / 22 - 0.5) * 2;
+    const off = s * 180 * k * a;
+    g.save(); g.beginPath(); g.rect(0, y, W, h); g.clip();
+    bg(g, p < 0.5 ? A : B, 1.02, off, 0); g.restore();
+  }
+});
+add('转场 / 切句', 'tr-roll', '滚动切', '像卷帘一样往上卷', (g, t, a) => {
+  const p = prog(t, a), y = H * p;
+  g.drawImage(A, 0, -y, W, H);
+  g.drawImage(B, 0, H - y, W, H);
+});
+
+/* ===== 6 光学 / 氛围 ===== */
+add('光学 / 氛围', 'opt-grain', '胶片颗粒', '静态噪点叠层，轻微的呼吸', (g, t, a) => {
+  base(g, t);
+  g.save(); g.globalCompositeOperation = 'overlay'; g.globalAlpha = 0.30 * a;
+  g.fillStyle = g.createPattern(grain, 'repeat');
+  g.translate(-Math.floor(t * 60) % 256, -Math.floor(t * 47) % 256);
+  g.fillRect(0, 0, W + 256, H + 256); g.restore();
+});
+add('光学 / 氛围', 'opt-vignette', '暗角', '四角压暗，聚焦中心', (g, t, a) => {
+  base(g, t);
+  const gr = g.createRadialGradient(W / 2, H * 0.46, H * 0.30, W / 2, H * 0.46, H * 0.92);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,' + (0.82 * a).toFixed(3) + ')');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H);
+});
+add('光学 / 氛围', 'opt-halation', '漏光', '暖色光晕从边缘渗进来', (g, t, a) => {
+  base(g, t);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  const x = W * (0.2 + 0.6 * (0.5 + 0.5 * Math.sin(t * 0.4)));
+  const gr = g.createRadialGradient(x, H * 0.1, 20, x, H * 0.1, 700);
+  gr.addColorStop(0, 'rgba(255,150,60,' + (0.5 * a).toFixed(3) + ')');
+  gr.addColorStop(0.4, 'rgba(255,90,40,' + (0.18 * a).toFixed(3) + ')');
+  gr.addColorStop(1, 'rgba(255,60,30,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, W, H * 0.9); g.restore();
+});
+add('光学 / 氛围', 'opt-dispersion', '色散', '边缘三通道分离，镜头味', (g, t, a) => {
+  bg(g, A, 1.03);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    g.globalAlpha = 0.16; g.filter = ['hue-rotate(-40deg) saturate(4)', 'hue-rotate(120deg) saturate(4)', 'hue-rotate(220deg) saturate(4)'][i];
+    bg(g, A, 1.03, (i - 1) * 9 * a, 0);
+  }
+  g.restore(); g.filter = 'none'; g.globalAlpha = 1;
+}, true);
+add('光学 / 氛围', 'opt-bloom', '辉光', '亮部糊开再叠回去', (g, t, a) => {
+  base(g, t);
+  g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = 0.55 * a; g.filter = 'blur(18px) brightness(1.4)';
+  g.drawImage(A, 0, 0, W, H); g.restore();
+}, true);
+add('光学 / 氛围', 'opt-flare', '光斑', '几颗椭圆光斑缓慢漂', (g, t, a) => {
+  base(g, t);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 4; i++) {
+    const x = W * (0.2 + 0.6 * (0.5 + 0.5 * Math.sin(t * 0.5 + i * 1.7)));
+    const y = H * (0.2 + 0.5 * (0.5 + 0.5 * Math.cos(t * 0.4 + i * 2.1)));
+    const gr = g.createRadialGradient(x, y, 4, x, y, 140);
+    gr.addColorStop(0, 'rgba(255,240,210,' + (0.28 * a).toFixed(3) + ')');
+    gr.addColorStop(1, 'rgba(255,200,120,0)');
+    g.fillStyle = gr; g.beginPath(); g.ellipse(x, y, 190, 120, 0.4, 0, 6.2832); g.fill();
+  }
+  g.restore();
+});
+add('光学 / 氛围', 'opt-wave', '热浪', '横向细条波动，像空气扭曲', (g, t, a) => {
+  for (let y = 0; y < H; y += 4) {
+    const off = Math.sin(y * 0.03 + t * 3) * 5 * a;
+    g.drawImage(A, 0, y, W, 4, off, y, W, 4);
+  }
+});
+add('光学 / 氛围', 'opt-prism', '三棱镜', '三个偏移色层叠成彩色边缘', (g, t, a) => {
+  g.globalAlpha = 0.9; bg(g, A, 1.03);
+  g.save(); g.globalCompositeOperation = 'screen';
+  g.globalAlpha = 0.5; g.filter = 'sepia(1) hue-rotate(-45deg) saturate(6)'; bg(g, A, 1.03, -4 * a, -2 * a);
+  g.filter = 'sepia(1) hue-rotate(160deg) saturate(6)'; bg(g, A, 1.03, 4 * a, 2 * a);
+  g.restore(); g.filter = 'none'; g.globalAlpha = 1;
+}, true);
+add('光学 / 氛围', 'opt-scanband', '光带扫过', '一条亮带从上往下扫', (g, t, a) => {
+  base(g, t);
+  const y = ((t * 0.35) % 1) * (H + 300) - 150;
+  const gr = g.createLinearGradient(0, y - 120, 0, y + 120);
+  gr.addColorStop(0, 'rgba(255,255,255,0)');
+  gr.addColorStop(0.5, 'rgba(220,240,255,' + (0.22 * a).toFixed(3) + ')');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.save(); g.globalCompositeOperation = 'lighter'; g.fillStyle = gr; g.fillRect(0, y - 120, W, 240); g.restore();
+});
+add('光学 / 氛围', 'opt-dof', '景深虚化', '上下虚、中间实', (g, t, a) => {
+  withFilter(g, 'blur(' + (a * 7).toFixed(1) + 'px)', () => bg(g, A, 1.04));
+  g.save(); g.beginPath(); g.rect(0, H * 0.34, W, H * 0.26); g.clip(); bg(g, A, 1.04); g.restore();
+}, true);
+
+/* ===== 7 变速 / 抽帧 ===== */
+const RATE = {};
+add('变速 / 抽帧', 'time-step', '抽帧', '画面按 1/8 秒跳', (g, t, a) => {
+  const q = Math.floor(t * 8) / 8;
+  bg(g, A, 1.03 + 0.03 * Math.sin(q * 0.55), Math.sin(q * 0.31) * 16, Math.cos(q * 0.27) * 10);
+}, false);
+add('变速 / 抽帧', 'time-slow', '升格慢放', '所有运动放慢到 0.3 倍', (g, t, a) => {
+  const q = t * 0.3;
+  bg(g, A, 1.03 + 0.03 * Math.sin(q * 0.55), Math.sin(q * 0.31) * 16, Math.cos(q * 0.27) * 10);
+});
+add('变速 / 抽帧', 'time-ramp', '缓急变速', '快→慢→快的曲线', (g, t, a) => {
+  const q = t + 3 * Math.sin(t * 0.6);
+  bg(g, A, 1.03 + 0.03 * Math.sin(q * 0.55), Math.sin(q * 0.31) * 16, Math.cos(q * 0.27) * 10);
+});
+add('变速 / 抽帧', 'time-reverse', '倒放', '时间反着走', (g, t, a) => {
+  const q = 40 - t * 1.0;
+  bg(g, A, 1.03 + 0.03 * Math.sin(q * 0.55), Math.sin(q * 0.31) * 16, Math.cos(q * 0.27) * 10);
+});
+add('变速 / 抽帧', 'time-stutter', '卡顿', '时不时冻一下再跳', (g, t, a) => {
+  const seg = Math.floor(t * 4), hitch = (seg % 3 === 0);
+  const q = hitch ? Math.floor(t * 2) / 2 : t;
+  bg(g, A, 1.03 + 0.03 * Math.sin(q * 0.55), Math.sin(q * 0.31) * 16, Math.cos(q * 0.27) * 10);
+});
+add('变速 / 抽帧', 'time-freeze', '冻结帧', '画面完全停住', (g, t, a) => {
+  bg(g, A, 1.05, 0, 0);
+});
+
+/* ---------- UI ---------- */
+const list = document.getElementById('list');
+const hname = document.getElementById('hname'), hnote = document.getElementById('hnote');
+const htag = document.getElementById('htag'), count = document.getElementById('count');
+const ampEl = document.getElementById('amp'), spdEl = document.getElementById('spd');
+const ampv = document.getElementById('ampv'), spdv = document.getElementById('spdv');
+let cur = FX[0].id, playing = true;
+
+const cats = [...new Set(FX.map((f) => f.cat))];
+cats.forEach((cat) => {
+  const h = document.createElement('div'); h.className = 'cat'; h.textContent = cat; list.appendChild(h);
+  FX.filter((f) => f.cat === cat).forEach((f) => {
+    const d = document.createElement('div');
+    d.className = 'item'; d.dataset.id = f.id;
+    d.innerHTML = '<span class="n"></span><span class="t"></span>' + (f.webgl ? '<span class="b" title="这个效果要 WebGL 才能更好">W</span>' : '');
+    d.querySelector('.n').textContent = f.no;
+    d.querySelector('.t').textContent = f.name;
+    d.onclick = () => pick(f.id);
+    list.appendChild(d);
+  });
+});
+count.textContent = '共 ' + FX.length + ' 个效果';
+
+let idx = 0;
+const order = FX.map((f) => f.id);
+function pick(key) {
+  let i = FX.findIndex((f) => f.id === key);
+  if (i < 0) {
+    const m = String(key || '').toUpperCase().replace(/^FX/, '').padStart(2, '0');
+    i = FX.findIndex((f) => f.no === m);
+  }
+  if (i < 0) i = 0;
+  const f = FX[i];
+  cur = f.id; idx = i;
+  hname.textContent = 'FX' + f.no + ' · ' + f.name; hnote.textContent = f.note;
+  htag.textContent = f.webgl ? '需要 WebGL 才能做到位' : '纯 Canvas 2D';
+  htag.className = 'tag' + (f.webgl ? ' warn' : '');
+  [...list.querySelectorAll('.item')].forEach((el) => el.classList.toggle('on', el.dataset.id === cur));
+  const el = list.querySelector('.item.on'); if (el) el.scrollIntoView({ block: 'nearest' });
+  fbx.clearRect(0, 0, W, H);
+}
+ampEl.oninput = () => { ampv.textContent = (+ampEl.value).toFixed(2); };
+spdEl.oninput = () => { spdv.textContent = (+spdEl.value).toFixed(2); };
+document.getElementById('play').onclick = (e) => {
+  playing = !playing; e.target.textContent = playing ? '暂停' : '播放';
+};
+document.getElementById('next').onclick = () => pick(order[(idx + 1) % order.length]);
+document.getElementById('prev').onclick = () => pick(order[(idx - 1 + order.length) % order.length]);
+addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') document.getElementById('next').click();
+  if (e.key === 'ArrowLeft') document.getElementById('prev').click();
+});
+
+/* ---------- 主循环 ---------- */
+let last = performance.now(), T = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (playing) T += dt * (+spdEl.value);
+  if (!ready) {
+    ctx.fillStyle = '#0b0d12'; ctx.fillRect(0, 0, W, H);
+    requestAnimationFrame(frame); return;
+  }
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.globalAlpha = 1; ctx.filter = 'none';
+  const f = FX[idx];
+  /* 兜底底图：保证任何位移/切片效果都不会露出黑边 */
+  ctx.save();
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(A, -W * 0.06, -H * 0.06, W * 1.12, H * 1.12);
+  ctx.restore();
+  try { f.draw(ctx, T, +ampEl.value); } catch (err) { console.error(err); }
+  ctx.restore();
+  requestAnimationFrame(frame);
+}
+/* 支持深链：fx-lab.html?fx=FX07 或 ?fx=shake-dir */
+const wantFx = new URLSearchParams(location.search).get('fx');
+pick(wantFx || FX[0].id);
+history.replaceState(null, '', location.pathname + (wantFx ? '?fx=' + wantFx : ''));
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

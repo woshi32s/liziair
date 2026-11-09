@@ -1,0 +1,106 @@
+/* ==========================================================================
+   Liquid Glass —— 玻璃表面样式
+   与 assets/liquid-glass.js 配套：JS 只负责「位移贴图 + 滤镜链 + 尺寸同步」，
+   这里负责表面的所有声明级视觉（底色 / 描边 / 高光 / 投影 / 过渡）。
+   ========================================================================== */
+
+/* 滤镜容器：0 尺寸、不可见、不参与布局 */
+.lg-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   表面本体
+   --lg-filter      : JS 注入的 url("#liquid-glass-N")，缺省时退化为纯模糊
+   --lg-surface-blur: 叠在折射之上的高斯模糊（玻璃的「厚度感」）
+   --lg-saturation  : 饱和度提升，让背后被模糊的色块不发灰
+   --lg-tint        : 玻璃底色（半透明白）
+   --lg-edge        : 1px 描边
+   -------------------------------------------------------------------------- */
+.lg-surface {
+  position: relative;
+  isolation: isolate; /* 把混合/滤镜的影响限制在表面内部 */
+  border-radius: var(--lg-radius, 999px);
+  background: var(--lg-tint, rgba(255, 255, 255, 0.42));
+  border: 1px solid var(--lg-edge, rgba(21, 20, 15, 0.08));
+
+  /* 1) 先给出「只有模糊」的降级版（Safari / Firefox / 关闭 JS 时命中这条） */
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+
+  /* 2) JS 注入 --lg-backdrop（整条滤镜链）：
+        url("#id") blur(7px) saturate(1.4)
+        注意整条链都要放进变量里 —— 如果把 var() 拼在声明中间，一旦替换后的语法非法，
+        CSS 会把这条声明判为「计算值无效」并退回 unset，而不会回退到上一条声明。 */
+  -webkit-backdrop-filter: var(--lg-backdrop, blur(12px) saturate(1.4));
+  backdrop-filter: var(--lg-backdrop, blur(12px) saturate(1.4));
+
+  /* 内阴影 = 玻璃边缘的一圈高光；外阴影 = 与背景分离的体量感 */
+  box-shadow:
+    inset 0 0 2px 1px rgba(255, 255, 255, 0.55),
+    inset 0 0 10px 4px rgba(255, 255, 255, 0.22),
+    0 6px 24px rgba(17, 17, 26, 0.06),
+    0 12px 40px rgba(17, 17, 26, 0.05);
+}
+
+/* --------------------------------------------------------------------------
+   规格镜面高光（可选增强，原站只用内阴影，这里额外给一圈渐变描边）
+   -------------------------------------------------------------------------- */
+.lg-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    140deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(255, 255, 255, 0.05) 26%,
+    rgba(255, 255, 255, 0.6) 48%,
+    rgba(255, 255, 255, 0.06) 72%,
+    rgba(255, 255, 255, 0.75) 100%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* --------------------------------------------------------------------------
+   尺寸 / 色调变体
+   -------------------------------------------------------------------------- */
+.lg-surface--rect { --lg-radius: 18px; }
+.lg-surface--pill { --lg-radius: 999px; }
+
+/* 深色底上的玻璃：降低白底、提亮描边 */
+.lg-surface--dark {
+  --lg-tint: rgba(255, 255, 255, 0.08);
+  --lg-edge: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    inset 0 0 2px 1px rgba(255, 255, 255, 0.35),
+    inset 0 0 12px 4px rgba(255, 255, 255, 0.1),
+    0 10px 32px rgba(0, 0, 0, 0.35);
+}
+
+/* 彩色玻璃（给演示页用） */
+.lg-surface--tint {
+  --lg-tint: rgba(99, 254, 19, 0.14);
+  --lg-edge: rgba(99, 254, 19, 0.35);
+}
+
+/* --------------------------------------------------------------------------
+   降级：完全不支持 backdrop-filter 的环境（老 Firefox 等）
+   -------------------------------------------------------------------------- */
+@supports not ((backdrop-filter: blur(2px)) or (-webkit-backdrop-filter: blur(2px))) {
+  .lg-surface {
+    background: rgba(250, 250, 250, 0.94);
+  }
+  .lg-surface--dark {
+    background: rgba(20, 20, 24, 0.92);
+  }
+}

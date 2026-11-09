@@ -1,0 +1,223 @@
+/* ==========================================================================
+   开场引导（聚光灯巡游）—— onboard.css
+   --------------------------------------------------------------------------
+   三层叠在一张画面上，从下往上：
+     1. .tour__dof   景深层：backdrop-filter 模糊 + 一张 SVG 遮罩抠出「目标窗口」，
+                     窗口里保持原样、外面全部虚化 —— 这就是「景深告诉你能干什么」
+     2. .tour__fx    粒子层：一坨粒子贴着目标面板的边框流动（包裹），
+                     每个目标换位时重新成团；另有一小队在面板上乱点（指来指去）
+     3. .tour__card  说明层：1px 细线 + 纸白面板，没有阴影、没有大圆角
+   设计语言照 tokens.css：纸白 / 墨黑 / 唯一强调色网易云红 / 4px 圆角 / 只动 transform 与 opacity。
+   z-index 300：顶栏是 60，全站最高层是 200，引导必须比它们都高才能盖住。
+   ========================================================================== */
+
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  /* 引导期间整页不接受点击：只走「下一步 / 跳过 / Esc」，避免误触 */
+  touch-action: none;
+}
+.tour[hidden] { display: none; }
+
+/* ---------- 1. 景深层 ---------- */
+.tour__dof {
+  position: absolute;
+  inset: 0;
+  -webkit-backdrop-filter: blur(18px) saturate(0.9);
+  backdrop-filter: blur(18px) saturate(0.9);
+  background: oklch(96.5% 0.008 264 / 0.30);
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease-out);
+  /* 遮罩（SVG data URI）由 onboard.js 逐步注入：白色留、黑色挖空 */
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+/* 景深只在「指路」那几步出现；开场白那一幕是整页纸，不虚化 */
+.tour.is-steps .tour__dof { opacity: 1; }
+
+/* ---------- 2. 粒子层 ---------- */
+.tour__fx {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ---------- 3. 说明层 ---------- */
+.tour__card {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 372px;
+  max-width: calc(100vw - 48px);
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper-2);
+  opacity: 0;
+  /* 只动 transform / opacity */
+  transition: transform 520ms var(--ease-out), opacity 260ms var(--ease-out);
+  will-change: transform;
+}
+.tour.is-on .tour__card { opacity: 1; }
+
+/* 换步骤才让卡片「飞」过去；只是跟着滚动挪位置时不能带 transform 过渡，
+   否则卡片会比景深窗口慢半拍。is-anim 由 onboard.js 在换步时挂 620ms。 */
+.tour__card:not(.is-anim) { transition: opacity 260ms var(--ease-out); }
+
+.tour__meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.tour__idx {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+.tour__idx b {
+  font-weight: var(--fw-semi);
+  color: var(--ink);
+}
+.tour__rule {
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+  transform-origin: left center;
+  transform: scaleX(var(--tour-progress, 0));
+  transition: transform 420ms var(--ease-out);
+}
+
+.tour__title {
+  margin: 0 0 var(--sp-2);
+  font-size: 26px;
+  font-weight: var(--fw-semi);
+  letter-spacing: -0.035em;
+  line-height: 1.18;
+  color: var(--ink);
+}
+.tour__desc {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--text-sm);
+  line-height: 1.62;
+  color: var(--ink-2);
+  letter-spacing: 0.002em;
+}
+
+.tour__acts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.tour__btn {
+  height: 34px;
+  padding: 0 var(--sp-4);
+  border: 1px solid var(--ink);
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--paper-2);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--fw-med);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+.tour__btn:hover { transform: translateY(-1px); }
+.tour__btn:active { transform: translateY(0); opacity: 0.86; }
+.tour__btn:focus-visible { outline: 1px solid var(--ink); outline-offset: 3px; }
+
+.tour__btn--ghost {
+  border-color: var(--rule);
+  background: transparent;
+  color: var(--ink-3);
+  font-weight: var(--fw-body);
+}
+.tour__btn--ghost:hover { color: var(--ink); }
+
+.tour__hint {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+
+/* ==========================================================================
+   开场白那一幕（整页纸 + 粒子做的手和脸）
+   --------------------------------------------------------------------------
+   和后面「指路」那几步不是一套视觉：这里是纯纸白、没有面板、没有 1px 框，
+   文字居中放在底部，粒子在中间自己动。所以用 .is-intro 把它们分开。
+   ========================================================================== */
+.tour__intro {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity var(--dur-slow) var(--ease-out);
+  background:
+    radial-gradient(118% 88% at 50% 40%, oklch(99.4% 0.002 264) 0%, oklch(96.5% 0.008 264) 58%, oklch(93.6% 0.011 264) 100%);
+}
+.tour.is-intro .tour__intro { opacity: 1; }
+
+/* 纸面上不画面板：去掉底色和描边，字直接落在纸上 */
+.tour__card.is-intro {
+  top: auto;
+  bottom: 56px;
+  left: 50%;
+  width: 520px;
+  max-width: calc(100vw - 56px);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  text-align: center;
+  transform: translateX(-50%);
+  transition: opacity 420ms var(--ease-out);
+}
+.tour__card.is-intro .tour__meta { display: none; }
+.tour__card.is-intro .tour__title {
+  font-size: 30px;
+  margin-bottom: var(--sp-2);
+}
+.tour__card.is-intro .tour__desc {
+  margin-bottom: var(--sp-5);
+  font-size: var(--text-md);
+  color: var(--ink-2);
+}
+.tour__card.is-intro .tour__acts { justify-content: center; }
+.tour__card.is-intro .tour__hint { display: none; }
+
+/* 第二句是后出来的：先藏起来，到点再抬起来 */
+.tour__desc.is-hold {
+  opacity: 0;
+  transform: translateY(7px);
+  transition: opacity 460ms var(--ease-out), transform 460ms var(--ease-out);
+}
+.tour__desc.is-in {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 460ms var(--ease-out), transform 460ms var(--ease-out);
+}
+
+/* ---------- 减弱动效：粒子只画一帧，过渡全关 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .tour__dof,
+  .tour__card,
+  .tour__rule,
+  .tour__btn { transition-duration: 0ms !important; }
+}
+
+/* ---------- 设置页里那一行 ---------- */
+.tour-row-done {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  margin-left: var(--sp-2);
+}

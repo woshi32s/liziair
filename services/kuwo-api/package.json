@@ -1,0 +1,8 @@
+{
+  "name": "lizi-kuwo-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LIZI 的酷我音乐边车（本机回环，零运行时依赖）",
+  "scripts": { "start": "node start.mjs" }
+}

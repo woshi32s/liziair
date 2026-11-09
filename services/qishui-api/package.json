@@ -1,0 +1,17 @@
+{
+  "name": "lizi-qishui-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LIZI 的汽水音乐边车（ByteDance 车机协议，纯协议库 + 本地 HTTP 壳，仅本机回环；需要 Node >= 24）",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node start.mjs"
+  },
+  "dependencies": {
+    "qishui-music-api": "0.2.2",
+    "qrcode-generator": "2.0.4"
+  }
+}

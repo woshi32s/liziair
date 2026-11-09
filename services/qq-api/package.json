@@ -1,0 +1,9 @@
+{
+  "name": "lizi-qq-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "LIZI 的 QQ 音乐边车（第三方协议包，仅本机回环）",
+  "scripts": { "start": "node start.mjs" },
+  "dependencies": { "@yakult-green-tea/qq-music-api": "3.3.5" }
+}

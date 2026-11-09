@@ -1,0 +1,11 @@
+{
+  "name": "lizi-kugou-api",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs",
+  "description": "LIZI 的酷狗音乐边车（第三方协议包，仅本机回环）",
+  "scripts": { "start": "node start.mjs" },
+  "dependencies": {
+    "kugoumusicapi": "https://codeload.github.com/MakcRe/KuGouMusicApi/tar.gz/refs/tags/v1.6.0"
+  }
+}

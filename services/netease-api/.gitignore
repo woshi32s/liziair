@@ -1,0 +1,12 @@
+# 网易云边车自己的东西，一律不进版本库
+
+node_modules/
+.port
+.log
+*.log
+
+# cookie / 登录态落盘：这个包里任何一份都不许进版本库
+.session.json
+.auth-state/
+cookie*.txt
+*.cookie

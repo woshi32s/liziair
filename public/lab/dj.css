@@ -1,0 +1,413 @@
+/* ==========================================================================
+   DJ 台（#view-lab · #lab-pane-dj）
+   纯白硬件风：1px 细线分栏、等宽数字、真旋钮、细槽推子。无卡片、无阴影、无渐变。
+   类名统一 djx- 前缀，全部作用域收在 #view-lab 里，不影响别的视图。
+   ========================================================================== */
+#view-lab {
+  --dj-bg: #fff;
+  --dj-bg2: #fdfcfa;
+  --dj-rule: #e8e5df;
+  --dj-rule2: #d7d3cb;
+  --dj-ink: #17171a;
+  --dj-ink2: #6b6b70;
+  --dj-ink3: #a8a8ad;
+  --dj-on: oklch(62% .22 12);
+  --dj-mono: var(--font-mono);
+}
+
+/* ---------- 总容器：deck | mixer | deck（细线分栏） ---------- */
+.djx {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 236px minmax(0, 1fr);
+  background: var(--dj-bg);
+  border-top: 1px solid var(--dj-ink);
+  border-bottom: 1px solid var(--dj-rule);
+}
+.djx *, .djx *::before, .djx *::after { box-sizing: border-box; }
+
+/* ---------- Deck ---------- */
+.djx-deck {
+  display: flex; flex-direction: column; gap: 9px;
+  min-width: 0; padding: 12px 14px 14px;
+  position: relative;
+}
+.djx-deck + .djx-mix { border-left: 1px solid var(--dj-rule); }
+.djx-mix + .djx-deck { border-left: 1px solid var(--dj-rule); }
+/* 拖动经过 deck：只描边 + 中间一枚墨色胶囊，别把整台 deck 糊白（糊白了看不清内容） */
+.djx-deck.is-over { outline: 1px solid var(--dj-ink); outline-offset: -1px; }
+.djx-deck.is-over::after {
+  content: "松开载入"; position: absolute; left: 50%; top: 50%; z-index: 3;
+  transform: translate(-50%, -50%); pointer-events: none;
+  padding: 8px 15px; background: var(--dj-ink); color: #fff; border-radius: 2px;
+  font: 400 10.5px/1 var(--dj-mono); letter-spacing: .14em;
+}
+.djx.is-drag-lib { cursor: copy; }
+
+.djx-deck__h {
+  display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 9px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--dj-rule);
+}
+.djx-deck__id {
+  display: grid; place-items: center; width: 18px; height: 18px;
+  border: 1px solid var(--dj-ink); font: 500 11px/1 var(--dj-mono); color: var(--dj-ink);
+}
+.djx-deck__meta { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.djx-deck__meta b {
+  font-size: 12.5px; font-weight: 500; color: var(--dj-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.djx-deck__meta span {
+  font-size: 9.5px; letter-spacing: .04em; color: var(--dj-ink3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- 波形 ---------- */
+.djx-over, .djx-wave {
+  display: block; width: 100%; background: var(--dj-bg);
+  image-rendering: auto; cursor: crosshair;
+}
+.djx-over { flex: none; height: 26px; border-bottom: 1px solid var(--dj-rule); }
+/* 细节波形吃掉 deck 剩余高度（列车布局里 deck 会被 mixer 拉高） */
+.djx-wave { flex: 1 1 auto; min-height: 84px; height: auto; }
+
+/* ---------- 转盘 + 速度 ---------- */
+.djx-transport { display: grid; grid-template-columns: 120px 92px minmax(0, 1fr); gap: 12px; align-items: stretch; }
+
+.djx-platter-wrap { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.djx-platter {
+  position: relative; width: 108px; height: 108px; border-radius: 50%;
+  background: var(--dj-bg); cursor: grab; touch-action: none; user-select: none;
+}
+.djx-platter:active { cursor: grabbing; }
+.djx-platter__g { position: absolute; inset: 0; width: 100%; height: 100%; }
+.djx-platter__g circle { fill: none; stroke: var(--dj-rule2); stroke-width: .8; }
+.djx-platter__g circle:nth-child(3) { stroke: var(--dj-ink); stroke-width: .8; }
+/* 中央的专辑封面：圆形裁切、跟着转盘一起转（inset 14% = 正好落在 r=36 的那圈里） */
+.djx-platter__cover {
+  position: absolute; inset: 14%; width: 72%; height: 72%;
+  border-radius: 50%; object-fit: cover; object-position: center;
+  transform: rotate(var(--rot, 0deg)); transform-origin: 50% 50%;
+  pointer-events: none; background: var(--dj-bg2);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.djx-platter__cover.is-empty { opacity: 0; }
+.djx-platter__dot {
+  position: absolute; left: 50%; top: 6px; width: 6px; height: 6px; margin-left: -3px;
+  border-radius: 50%; background: var(--dj-ink);
+  transform-origin: 50% 48px; transform: rotate(var(--rot, 0deg));
+}
+/* 没封面时的回落：浅渐变的 label 盘 + 字母（不是深色块，还是这台白机器） */
+.djx-platter__lbl {
+  position: absolute; inset: 14%; display: grid; place-items: center;
+  border-radius: 50%; opacity: 0; pointer-events: none;
+  font: 500 16px/1 var(--dj-mono); color: var(--dj-ink2); letter-spacing: .12em;
+  background: linear-gradient(150deg, #f6f3ee, #e6e2da);
+  box-shadow: inset 0 0 0 1px var(--dj-rule2);
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+.djx-platter.is-empty .djx-platter__lbl { opacity: 1; }
+.djx-platter.is-scratch .djx-platter__lbl { color: var(--dj-on); }
+.djx-platter__time {
+  font: 400 10px/1 var(--dj-mono); color: var(--dj-ink2);
+  font-variant-numeric: tabular-nums; letter-spacing: .04em;
+}
+
+.djx-pitch { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.djx-pitch__top {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  font-size: 9px; letter-spacing: .1em; color: var(--dj-ink3);
+}
+.djx-pitch__top b { font: 400 10.5px/1 var(--dj-mono); color: var(--dj-ink); font-variant-numeric: tabular-nums; }
+.djx-pitchf { flex: 1; display: flex; justify-content: center; padding: 2px 0; cursor: ns-resize; touch-action: none; }
+.djx-pitchf__track { position: relative; width: 2px; height: 100%; background: var(--dj-rule2); }
+.djx-pitchf__zero {
+  position: absolute; left: -9px; top: 50%; width: 20px; height: 1px; background: var(--dj-ink3);
+}
+.djx-pitchf__cap {
+  position: absolute; left: 50%; width: 20px; height: 9px; margin-left: -10px;
+  background: var(--dj-ink); border-radius: 1px;
+  bottom: calc(var(--p, .5) * (100% - 9px));
+}
+.djx-ranges { display: flex; gap: 3px; }
+.djx-ranges button {
+  width: 26px; height: 18px; border: 1px solid var(--dj-rule); border-radius: 2px;
+  background: var(--dj-bg); color: var(--dj-ink2);
+  font: 400 9px/1 var(--dj-mono);
+}
+.djx-ranges button.is-on { border-color: var(--dj-ink); color: var(--dj-ink); background: var(--dj-bg2); }
+
+/* ---------- 运输键 ---------- */
+.djx-keys { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.djx-k {
+  height: 30px; border: 1px solid var(--dj-rule2); border-radius: 2px; background: var(--dj-bg);
+  font: 400 9.5px/1 var(--dj-mono); letter-spacing: .06em; color: var(--dj-ink);
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.djx-k:hover { background: var(--dj-bg2); border-color: var(--dj-ink3); }
+.djx-k--play { font-size: 12px; }
+/* 状态分层：.is-on/.is-solid = 墨底（播放中、master）；.is-sel = 选中但中性；.is-accent = 唯一强调色 */
+.djx-k.is-on, .djx-k.is-solid { background: var(--dj-ink); border-color: var(--dj-ink); color: #fff; }
+.djx-k.is-sel { background: #fff; border-color: var(--dj-ink); color: var(--dj-ink); }
+.djx-k.is-accent {
+  border-color: var(--dj-on); color: var(--dj-on);
+  background: color-mix(in oklab, var(--dj-on) 7%, #fff);
+}
+
+/* ---------- 读数 ---------- */
+.djx-read {
+  display: grid; grid-template-columns: 62px 74px minmax(0, 1fr) minmax(0, 1.1fr);
+  border-top: 1px solid var(--dj-rule); border-bottom: 1px solid var(--dj-rule);
+}
+.djx-read > span {
+  display: flex; flex-direction: column; gap: 1px; padding: 4px 7px 5px;
+  border-left: 1px solid var(--dj-rule); min-width: 0;
+}
+.djx-read > span:first-child { border-left: 0; padding-left: 0; }
+.djx-read i {
+  font-style: normal; font-size: 9px; letter-spacing: .1em; color: var(--dj-ink3);
+}
+.djx-read b {
+  font: 400 10.5px/1.25 var(--dj-mono); color: var(--dj-ink); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.djx-read__bpm b { font-size: 12.5px; }
+.djx-read__time { flex-direction: row !important; flex-wrap: wrap; align-items: baseline; gap: 0 9px; }
+.djx-read__time i { width: 100%; }
+.djx-read__time b:last-child { color: var(--dj-ink3); }
+.djx-read__state b { font-family: var(--font-body); font-size: 10px; }
+
+/* ---------- 热键 ---------- */
+.djx-hc { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 3px; }
+.djx-hc__b {
+  height: 22px; border: 1px solid var(--dj-rule); border-radius: 2px; background: var(--dj-bg);
+  font: 400 9.5px/1 var(--dj-mono); color: var(--dj-ink3);
+}
+.djx-hc__b:hover { border-color: var(--dj-ink3); color: var(--dj-ink); }
+.djx-hc__b.is-on {
+  border-color: var(--dj-on); color: var(--dj-on);
+  background: color-mix(in oklab, var(--dj-on) 7%, #fff);
+}
+
+/* ---------- loop / jump / fx ---------- */
+.djx-loop { display: flex; flex-direction: column; gap: 4px; }
+.djx-loop__row { display: flex; align-items: center; gap: 3px; min-width: 0; }
+.djx-lab {
+  flex: none; width: 34px; font-size: 8.5px; letter-spacing: .1em; color: var(--dj-ink3);
+}
+.djx-lab--fx { width: auto; margin-left: 2px; }
+.djx-t, .djx-beat {
+  height: 20px; padding: 0 6px; border: 1px solid var(--dj-rule); border-radius: 2px;
+  background: var(--dj-bg); color: var(--dj-ink2);
+  font: 400 9.5px/1 var(--dj-mono); letter-spacing: .04em;
+}
+.djx-beat { min-width: 24px; padding: 0 3px; flex: none; }
+.djx-t:hover, .djx-beat:hover { border-color: var(--dj-ink3); color: var(--dj-ink); }
+.djx-t.is-on, .djx-beat.is-on { border-color: var(--dj-ink); color: var(--dj-ink); background: #fff; }
+.djx-t.is-accent, .djx-beat.is-accent {
+  border-color: var(--dj-on); color: var(--dj-on);
+  background: color-mix(in oklab, var(--dj-on) 7%, #fff);
+}
+.djx-t--loop.is-on { background: var(--dj-on); color: #fff; border-color: var(--dj-on); }
+.djx-t--pfl.is-on { background: var(--dj-ink); color: #fff; border-color: var(--dj-ink); }
+.djx-loop__now {
+  margin-left: auto; font: 400 9px/1 var(--dj-mono); color: var(--dj-ink3);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+
+/* ---------- 旋钮（真旋钮：刻度弧 + 指示线） ---------- */
+.djx-knob {
+  position: relative; width: 27px; height: 27px; flex: none; border-radius: 50%;
+  border: 1px solid var(--dj-rule2); background: var(--dj-bg);
+  cursor: ns-resize; touch-action: none;
+}
+.djx-knob__ticks { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.djx-knob__ticks line { stroke: var(--dj-ink3); stroke-width: .9; }
+.djx-knob__ticks line.mid { stroke: var(--dj-ink); stroke-width: 1.4; }
+.djx-knob::after {
+  content: ""; position: absolute; left: 50%; top: 3px; width: 2px; height: 8px; margin-left: -1px;
+  background: var(--dj-ink); border-radius: 1px;
+  transform-origin: 50% 10.5px; transform: rotate(var(--rot, 0deg));
+}
+.djx-knob b {
+  position: absolute; left: 50%; bottom: -11px; transform: translateX(-50%);
+  font: 400 8.5px/1 var(--dj-mono); letter-spacing: .06em; color: var(--dj-ink3); white-space: nowrap;
+}
+.djx-knob.is-drag { border-color: var(--dj-ink); }
+.djx-knob--fx { width: 24px; height: 24px; }
+.djx-knob--fx::after { height: 7px; transform-origin: 50% 9px; }
+.djx-knob--fx b { bottom: -10px; }
+
+/* ---------- FX（每 deck 一个） ---------- */
+.djx-fx { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding-left: 10px; border-left: 1px solid var(--dj-rule); }
+.djx-fx__modes { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; }
+.djx-fx__modes .djx-beat { width: 100%; height: 18px; font-size: 8.5px; }
+.djx-fx__par { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+.djx-fx__v {
+  margin-top: auto; font: 400 8px/1 var(--dj-mono); letter-spacing: .06em; color: var(--dj-ink3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* ---------- 混音台 ---------- */
+.djx-mix {
+  display: flex; flex-direction: column; gap: 9px;
+  padding: 12px 12px 14px; min-width: 0; background: var(--dj-bg2);
+}
+.djx-mix__h {
+  font: 400 9px/1 var(--dj-mono); letter-spacing: .22em; color: var(--dj-ink3);
+  text-align: center; padding-bottom: 8px; border-bottom: 1px solid var(--dj-rule);
+}
+.djx-strips { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.djx-strip { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.djx-strip__id { font: 400 9px/1 var(--dj-mono); letter-spacing: .1em; color: var(--dj-ink2); }
+
+.djx-faders {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px;
+  padding-top: 9px; border-top: 1px solid var(--dj-rule); margin-top: 2px;
+}
+.djx-fcol { display: flex; align-items: flex-end; justify-content: center; gap: 6px; }
+.djx-fcol--m { border-left: 1px solid var(--dj-rule); padding-left: 6px; }
+.djx-fcols-lbl {
+  display: grid; grid-template-columns: 1fr 1fr 1.6fr; gap: 6px;
+  font: 400 8px/1.3 var(--dj-mono); color: var(--dj-ink3); letter-spacing: .08em;
+  text-align: center;
+}
+.djx-fcols-lbl span:last-child { text-align: right; }
+.djx-fcols-lbl b { font-weight: 400; color: var(--dj-ink2); font-variant-numeric: tabular-nums; }
+
+.djx-fader { position: relative; display: flex; justify-content: center; padding: 0; cursor: ns-resize; touch-action: none; }
+.djx-fader__track { position: relative; width: 2px; height: 96px; background: var(--dj-rule2); }
+.djx-fader__cap {
+  position: absolute; left: 50%; width: 20px; height: 9px; margin-left: -10px;
+  background: var(--dj-ink); border-radius: 1px;
+  bottom: calc(var(--p, .85) * (100% - 9px));
+}
+
+.djx-meter { display: block; width: 18px; height: 96px; }
+
+.djx-xf { display: flex; flex-direction: column; gap: 5px; padding-top: 10px; border-top: 1px solid var(--dj-rule); }
+.djx-xf .djx-lab { width: auto; font-size: 8px; }
+.djx-xf__track {
+  position: relative; height: 22px; border-top: 1px solid transparent; cursor: ew-resize; touch-action: none;
+}
+.djx-xf__track::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px;
+  transform: translateY(-50%); background: var(--dj-rule2);
+}
+.djx-xf__zero {
+  position: absolute; left: 50%; top: 50%; width: 1px; height: 10px;
+  transform: translate(-50%, -50%); background: var(--dj-ink3);
+}
+.djx-xf__cap {
+  position: absolute; top: 50%; width: 22px; height: 16px; margin-left: -11px;
+  transform: translateY(-50%); background: var(--dj-ink); border-radius: 1px;
+  left: calc(var(--p, .5) * (100% - 22px) + 11px);
+}
+.djx-xf__lbl {
+  display: flex; align-items: center; justify-content: space-between;
+  font: 400 8.5px/1 var(--dj-mono); color: var(--dj-ink3); letter-spacing: .1em;
+}
+.djx-xf__lbl .djx-t { height: 18px; font-size: 8.5px; }
+
+.djx-cue {
+  border-top: 1px solid var(--dj-rule); padding-top: 9px;
+  display: grid; grid-template-columns: auto auto auto minmax(0, 1fr); align-items: center; gap: 6px;
+}
+.djx-cue .djx-lab { width: auto; font-size: 8px; }
+.djx-cue .djx-mini { grid-column: 4; }
+.djx-note { grid-column: 1 / -1; margin: 2px 0 0; font-size: 9px; line-height: 1.55; color: var(--dj-ink3); }
+
+/* 迷你横向滑条（PFL MIX / FX 参数） */
+.djx-mini {
+  position: relative; height: 14px; cursor: ew-resize; touch-action: none; min-width: 40px;
+}
+.djx-mini::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 2px;
+  transform: translateY(-50%); background: var(--dj-rule2);
+}
+.djx-mini__fill {
+  position: absolute; left: 0; top: 50%; height: 2px; width: calc(var(--p, 0) * 100%);
+  transform: translateY(-50%); background: var(--dj-ink);
+}
+.djx-mini__cap {
+  position: absolute; top: 50%; left: calc(var(--p, 0) * 100%); width: 6px; height: 12px;
+  margin-left: -3px; transform: translateY(-50%); background: var(--dj-ink); border-radius: 1px;
+}
+.djx-mini--fx { flex: 1; }
+
+/* ---------- 曲库 ---------- */
+.djx-lib { border-top: 1px solid var(--dj-ink); padding: 10px 0 0; }
+.djx-lib__h { display: flex; align-items: center; gap: 8px; padding: 0 2px 9px; }
+.djx-lib__h .djx-lab { width: auto; font-size: 9px; color: var(--dj-ink); letter-spacing: .16em; }
+.djx-search {
+  flex: 0 1 220px; height: 24px; padding: 0 8px;
+  border: 1px solid var(--dj-rule); border-radius: 2px; background: var(--dj-bg);
+  font: 400 11px/1 var(--font-body); color: var(--dj-ink);
+}
+.djx-search:focus { outline: none; border-color: var(--dj-ink3); }
+.djx-search::placeholder { color: var(--dj-ink3); }
+.djx-lib__n { margin-left: auto; font: 400 9.5px/1 var(--dj-mono); color: var(--dj-ink3); }
+
+.djx-lib__scroll { max-height: 250px; overflow-y: auto; scrollbar-width: thin; }
+.djx-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.djx-table th.c-bpm, .djx-table th.c-dur, .djx-table th.c-op { text-align: right; }
+.djx-table th {
+  position: sticky; top: 0; z-index: 1; background: var(--dj-bg);
+  padding: 5px 8px; border-bottom: 1px solid var(--dj-ink);
+  font: 400 8.5px/1 var(--dj-mono); letter-spacing: .14em; color: var(--dj-ink3);
+  text-align: left; font-weight: 400;
+}
+.djx-table td {
+  padding: 5px 8px; border-bottom: 1px solid var(--dj-rule);
+  font-size: 11.5px; color: var(--dj-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.djx-table tr { cursor: default; }
+.djx-table tbody tr:hover { background: var(--dj-bg2); }
+.djx-table tbody tr.is-loaded td { color: var(--dj-ink2); }
+.djx-table .c-cov { width: 42px; }
+.djx-table .c-n { width: 34px; }
+.djx-table .c-t { width: 33%; }
+.djx-table .c-a { width: 38%; }
+.djx-table .c-bpm { width: 8%; }
+.djx-table .c-dur { width: 8%; }
+.djx-table .c-op { width: 7%; }
+.djx-table td.c-n, .djx-table td.c-bpm, .djx-table td.c-dur {
+  font-family: var(--dj-mono); font-variant-numeric: tabular-nums; text-align: right;
+}
+.djx-table td.c-n { color: var(--dj-ink3); }
+/* 每行的小封面：36px、2px 圆角、hairline 边；没有封面时是中性占位 SVG（同样 <img>，行高不跳） */
+.djx-table td.c-cov { padding: 3px 6px 3px 2px; }
+.djx-thumb {
+  display: block; width: 36px; height: 36px; border-radius: 2px;
+  border: 1px solid var(--dj-rule); background: var(--dj-bg2);
+  object-fit: cover; object-position: center; pointer-events: none;
+}
+.djx-table tbody tr.is-dragging { background: var(--dj-bg2); }
+.djx-table tbody tr.is-dragging td { color: var(--dj-ink3); }
+.djx-table td.c-a { color: var(--dj-ink2); }
+.djx-table td.c-op { text-align: right; }
+.djx-table td.c-op button {
+  width: 24px; height: 17px; margin-left: 3px;
+  border: 1px solid var(--dj-rule); border-radius: 2px; background: var(--dj-bg);
+  font: 400 9px/1 var(--dj-mono); color: var(--dj-ink2);
+}
+.djx-table td.c-op button:hover { border-color: var(--dj-ink); color: var(--dj-ink); }
+.djx-lib__empty { margin: 0; padding: 14px 8px; font-size: 11px; color: var(--dj-ink3); }
+.djx-lib__empty[hidden] { display: none; }
+
+/* ---------- 提示 ---------- */
+.djx-hint {
+  margin: 10px 0 0; font-size: 10px; line-height: 1.85; color: var(--dj-ink3);
+  padding-top: 9px; border-top: 1px solid var(--dj-rule);
+}
+.djx-hint b { font-weight: 400; font-size: 9px; letter-spacing: .1em; color: var(--dj-ink2); }
+.djx-hint span {
+  font-family: var(--dj-mono); font-size: 9.5px; color: var(--dj-ink2);
+  border: 1px solid var(--dj-rule); border-radius: 2px; padding: 0 3px;
+}
+
+/* 窄屏：三栏塌成单列，先保功能再谈好看 */
+@media (max-width: 1080px) {
+  .djx { grid-template-columns: minmax(0, 1fr) 236px; }
+  .djx-mix + .djx-deck { border-left: 0; border-top: 1px solid var(--dj-ink); grid-column: 1 / -1; }
+  .djx-strips { grid-template-columns: 1fr 1fr; }
+}
