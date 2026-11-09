@@ -36,6 +36,7 @@
       "desktop/**",
       "public/**",
       "!public/**/*.bak*",
+      "!public/site/download/**",
       "server.mjs",
       "package.json",
       "build/icon.png"
@@ -66,6 +67,7 @@
       "icon": "build/icon.ico"
     },
     "nsis": {
+      "artifactName": "LIZI-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,

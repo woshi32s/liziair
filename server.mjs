@@ -2556,15 +2556,20 @@ function kugouPlaylist(it) {
   };
 }
 
-/** 酷狗 /song/url 的返回有好几种形状：data 是数组，或者 {url,...}，失败时只有 errcode */
+/** 酷狗 /song/url 的返回有好几种形状：data 是数组，或者 {url,...}，失败时只有 errcode。
+ *  kugoumusicapi 1.6.0 起 /song/url 直接把 trackercdn 的根级对象透传出来
+ *  （{ status:1, url:[...], backupUrl:[...] }），不再包一层 data；
+ *  url 也可能本身就是数组。两种结构都要认，否则永远取到空串、只能放示例音乐。 */
 function kugouUrlOf(data) {
-  const d = (data && data.data) || null;
+  const d = (data && data.data) || data || null;
   const one = Array.isArray(d) ? d[0] : d;
-  const url = (one && (one.url || (Array.isArray(one.urls) ? one.urls[0] : ''))) || '';
+  const raw = one && (one.url || (Array.isArray(one.urls) ? one.urls[0] : ''));
+  const url = Array.isArray(raw) ? (raw[0] || '') : (raw || '');
   return {
     url,
     preview: !!(one && (one.free_part || one.is_free_part)),
-    upstream: (data && (data.error || data.message || (data.errcode && ('errcode ' + data.errcode)))) || null,
+    upstream: (data && (data.error || data.message || (data.errcode && ('errcode ' + data.errcode))))
+      || (one && one.status !== undefined && Number(one.status) !== 1 ? ('status ' + one.status) : null),
   };
 }
 

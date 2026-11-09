@@ -229,7 +229,10 @@ step(2, '打包 Windows 安装包（npm run dist）');
 
 runWindowsBatch('npm', ['run', 'dist'], { cwd: ROOT });
 
-const setupExe = path.join(DIST, `LIZI Setup ${version}.exe`);
+/* 名字必须和 package.json 的 build.nsis.artifactName 一致，
+   也要和 latest.yml 里的 url 一致（空格会被 electron-builder 改写成连字符，
+   两边不一致时客户端更新会 404）。 */
+const setupExe = path.join(DIST, `LIZI-Setup-${version}.exe`);
 const blockmap = `${setupExe}.blockmap`;
 const latestYml = path.join(DIST, 'latest.yml');
 for (const file of [setupExe, blockmap, latestYml]) {
