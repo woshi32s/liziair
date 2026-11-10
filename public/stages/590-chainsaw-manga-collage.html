@@ -77,6 +77,11 @@ addEventListener('message', function (e) {
   var tctx = tearSnap.getContext("2d", { alpha: false });
 
   var W = 1440, H = 900, DPR = 1;
+  /* 安卓 WebView 标记（宿主在加载前注入 window.__liziAndroid）。
+     手机的 GPU 填充率、文字栅格化、阴影模糊都远弱于桌面，下面所有 ANDROID
+     分支只做“减负”：缓存静态图层、压 DPR、限制残影层数。桌面端 !ANDROID
+     始终走原来的完整路径，构图 / 配色 / 动效参数一点不改。 */
+  var ANDROID = !!window.__liziAndroid;
   var FONT_BRUSH = '"STKaiti","KaiTi","Kaiti SC","FangSong","Songti SC","SimSun","Microsoft YaHei",serif';
   var FONT_SANS = '"Arial Narrow","Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif';
   var FONT_MONO = '"Consolas","SFMono-Regular","Menlo",monospace';
@@ -98,6 +103,7 @@ addEventListener('message', function (e) {
 
   var shotIdx = -2, shotMode = "ink", shotBorn = 0, panels = [];
   var lyricRows = [], lyricTimes = [], lyricDur = 3.4;
+  var bubbleChars = [];
   var tear = { active: false, t0: 0, dur: 0, pts: [], seed: 1 };
 
   var cam = { rot: 0, rv: 0, sc: 1, sv: 0, x: 0, xv: 0, y: 0, yv: 0 };
@@ -164,7 +170,10 @@ addEventListener('message', function (e) {
     H = window.innerHeight || 900;
     if (!isFinite(W) || W <= 0) W = 1440;
     if (!isFinite(H) || H <= 0) H = 900;
-    DPR = Math.min(2, window.devicePixelRatio || 1);
+    /* 安卓 WebView 的 DPR 常是 2.5–3：若照 2 倍铺 backing store，1280 宽会变成
+       2560 像素，全屏合成 / 网点填充的像素量是 1.25 倍时的 2.56 倍。手机端把
+       上限压到 1.25，CSS 尺寸仍是 100vw/100vh，由浏览器拉伸回 1280，肉眼几乎无差。 */
+    DPR = Math.min(ANDROID ? 1.25 : 2, window.devicePixelRatio || 1);
     if (!isFinite(DPR) || DPR <= 0) DPR = 1;
     cv.width = Math.max(1, Math.round(W * DPR));
     cv.height = Math.max(1, Math.round(H * DPR));
@@ -409,6 +418,12 @@ addEventListener('message', function (e) {
     var layoutId = idx < 0 ? 3 : Math.abs(idx) % 6;
     buildPanels(layoutId, shotMode);
     buildLyricLayout();
+    /* 画格 / 背景 / 背景大字都是“换句才变”的静态内容，换句时一次性烘焙成离屏位图，
+       手机端每帧只贴图。buildPanelCaches 内部对桌面端直接 return，原绘制路径不变。 */
+    buildPanelCaches();
+    glyphCache = {};
+    glyphCacheN = 0;
+    buildBubbleChars();
   }
 
   function buildLyricLayout() {
@@ -998,24 +1013,48 @@ addEventListener('message', function (e) {
   /* ============================================================
      6. 纸片画格绘制（撕边 + 半调 + 纸纹）
      ============================================================ */
-  function drawPanel(g, p, now) {
+
+  /* ---- 手机端：画格静态内容烘焙 ----
+     画格里的程序化日漫插画、半调网点、纸纹、撕边纤维、投影 shadowBlur 都跟
+     时间无关，只有外层的漂浮 / 抖动 / 缩放是动画。原来这些矢量绘制每帧重跑
+     3–4 遍（每个画格 4 层网点 pattern 填充 + 大形状 shadowBlur + 几十根纤维线），
+     是安卓 WebView 最重的一笔开销。换句时画一次，之后每帧只做一次 drawImage。 */
+  var panelCachePool = [];
+
+  function buildPanelCaches() {
+    if (!ANDROID) return;
+    for (var i = 0; i < panels.length; i++) {
+      var p = panels[i];
+      if (!p) continue;
+      p.cache = null;
+      var size = Math.min(p.w, p.h);
+      var blur = Math.min(26, size * 0.10);
+      /* 投影会往右下溢出画格，缓存四周留出 blur + 偏移的安全边，避免裁掉阴影 */
+      var pad = Math.ceil(size * 0.05 + blur * 1.7 + 10);
+      var cw = Math.max(1, Math.ceil((p.w + pad * 2) * DPR));
+      var chh = Math.max(1, Math.ceil((p.h + pad * 2) * DPR));
+      /* 复用画布对象：重设 width/height（即使同值）会清空位图，
+         既省掉每句新建 3–4 张大画布的 GC 抖动，也不会串上一句的内容 */
+      var c = panelCachePool[i];
+      if (!c) { c = document.createElement("canvas"); panelCachePool[i] = c; }
+      c.width = cw;
+      c.height = chh;
+      var g = c.getContext("2d");
+      if (!g) continue;
+      g.setTransform(DPR, 0, 0, DPR, 0, 0);
+      g.translate(pad, pad);
+      try {
+        paintPanelContent(g, p);
+        p.cache = c;
+        p.cachePad = pad;
+      } catch (e) { p.cache = null; }
+    }
+  }
+
+  /* 画格的静态内容（原 drawPanel 去掉外层动画变换后的部分） */
+  function paintPanelContent(g, p) {
     var pa = pal(p);
     var size = Math.min(p.w, p.h);
-    var tsec = now / 1000;
-    var floatX = RM ? 0 : Math.sin(tsec * 1.1 + p.phase) * size * 0.012;
-    var floatY = RM ? 0 : Math.cos(tsec * 0.9 + p.phase * 1.7) * size * 0.014;
-    floatY += live.mid * size * 0.02;
-    var jitter = (RM || window.__liziShake === false) ? 0 : hitEnergy * size * 0.012;
-    var jx = Math.sin(now * 0.05 + p.phase) * jitter;
-    var jy = Math.cos(now * 0.043 + p.phase) * jitter;
-    var sc = clamp(p.anim + live.bass * 0.012, 0.35, 1.6);
-    var rot = p.rot + (RM ? 0 : Math.sin(tsec * 0.7 + p.phase) * 0.006);
-
-    g.save();
-    g.translate(p.x + p.w / 2 + floatX + jx, p.y + p.h / 2 + floatY + jy);
-    g.rotate(rot);
-    g.scale(sc, sc);
-    g.translate(-p.w / 2, -p.h / 2);
 
     /* 纸片投影 */
     g.save();
@@ -1031,7 +1070,7 @@ addEventListener('message', function (e) {
     g.restore();
 
     /* 撕边纸基 */
-    if (!pathPts(g, p.pts)) { g.restore(); return; }
+    if (!pathPts(g, p.pts)) return;
     g.fillStyle = p.tone === "ink" ? "#0b0a09" : PAPER;
     g.fill();
 
@@ -1083,6 +1122,34 @@ addEventListener('message', function (e) {
       }
     }
     g.restore();
+  }
+
+  function drawPanel(g, p, now) {
+    var size = Math.min(p.w, p.h);
+    var tsec = now / 1000;
+    var floatX = RM ? 0 : Math.sin(tsec * 1.1 + p.phase) * size * 0.012;
+    var floatY = RM ? 0 : Math.cos(tsec * 0.9 + p.phase * 1.7) * size * 0.014;
+    floatY += live.mid * size * 0.02;
+    var jitter = (RM || window.__liziShake === false) ? 0 : hitEnergy * size * 0.012;
+    var jx = Math.sin(now * 0.05 + p.phase) * jitter;
+    var jy = Math.cos(now * 0.043 + p.phase) * jitter;
+    var sc = clamp(p.anim + live.bass * 0.012, 0.35, 1.6);
+    var rot = p.rot + (RM ? 0 : Math.sin(tsec * 0.7 + p.phase) * 0.006);
+
+    g.save();
+    g.translate(p.x + p.w / 2 + floatX + jx, p.y + p.h / 2 + floatY + jy);
+    g.rotate(rot);
+    g.scale(sc, sc);
+    g.translate(-p.w / 2, -p.h / 2);
+
+    if (ANDROID && p.cache) {
+      /* 手机端只贴烘焙好的画格。缓存按 DPR 建、再按 DPR 换算回逻辑尺寸，
+         保证 1:1 不重采样；漂浮 / 抖动 / 缩放仍每帧实时做。 */
+      var pad = p.cachePad;
+      g.drawImage(p.cache, -pad, -pad, p.cache.width / DPR, p.cache.height / DPR);
+    } else {
+      paintPanelContent(g, p);
+    }
 
     g.restore();
   }
@@ -1092,8 +1159,15 @@ addEventListener('message', function (e) {
      ============================================================ */
   var lastNow = 0;
 
-  function drawBackground(g, now) {
-    sceneBg = shotMode === "paper" ? "#e6dcc6" : "#080807";
+  /* ---- 手机端：背景静态层烘焙 ----
+     背景 = 底色 + 纸/暗渐变 + 巨大网点圆 + 上下网点条，其中只有暗场那团红色
+     呼吸光跟 bass 有关。把静态部分烘成 1x 位图（背景是低对比网点，1x 拉回
+     1.25 倍看不出），每帧只贴图 + 画那团红光，省掉 2 次全屏渐变和 3 次大面积
+     网点 pattern 填充。原来画在场景最上层的整屏纸纹也一并烘进来（画格自带
+     纸纹），省掉每帧一次全屏 pattern 填充。 */
+  var bgCache = null, bgCacheKey = "";
+
+  function paintBackgroundStatic(g) {
     g.fillStyle = sceneBg;
     g.fillRect(0, 0, W, H);
     if (shotMode === "paper") {
@@ -1102,8 +1176,65 @@ addEventListener('message', function (e) {
     } else {
       var dg = safeGrad(g, "radial", [W * 0.5, H * 0.42, Math.min(W, H) * 0.05, W * 0.5, H * 0.5, Math.max(W, H) * 0.8], [[0, "#151311"], [1, "#050505"]]);
       if (dg) { g.fillStyle = dg; g.fillRect(0, 0, W, H); }
-      var ag = safeGrad(g, "radial", [W * (0.22 + live.bass * 0.1), H * 0.32, 10, W * 0.22, H * 0.32, Math.min(W, H) * 0.55], [[0, "rgba(205,32,48,0.22)"], [1, "rgba(205,32,48,0)"]]);
-      if (ag) { g.fillStyle = ag; g.fillRect(0, 0, W, H); }
+    }
+    /* 巨大半调圆：半径随 bass 的 3% 呼吸在缓存里固定为基准值，换来整块背景
+       只画一次；整体节拍感仍由相机、画格缩放、血点保留。 */
+    var cx = W * (shotMode === "paper" ? 0.76 : 0.78);
+    var cy = H * 0.24;
+    var rad = Math.min(W, H) * 0.30;
+    g.save();
+    g.beginPath();
+    g.arc(cx, cy, rad, 0, Math.PI * 2);
+    g.clip();
+    fillPat(g, shotMode === "paper" ? P.dot : P.dotLight, 0.22, cx - rad, cy - rad, rad * 2, rad * 2);
+    g.strokeStyle = shotMode === "paper" ? "rgba(11,10,9,0.25)" : "rgba(239,230,210,0.22)";
+    g.lineWidth = 2;
+    g.beginPath(); g.arc(cx, cy, rad, 0, Math.PI * 2); g.stroke();
+    g.restore();
+    /* 边缘网点条 */
+    fillPat(g, shotMode === "paper" ? P.dot : P.dotLight, 0.10, 0, 0, W, H * 0.10);
+    fillPat(g, shotMode === "paper" ? P.dot : P.dotLight, 0.10, 0, H * 0.90, W, H * 0.10);
+    /* 整屏纸纹（原来在 drawScene 里每帧画一次，现在烘进背景） */
+    fillPat(g, shotMode === "paper" ? P.grainDark : P.grainLight, 0.32, 0, 0, W, H);
+  }
+
+  function drawBackground(g, now) {
+    sceneBg = shotMode === "paper" ? "#e6dcc6" : "#080807";
+    if (ANDROID) {
+      var key = shotMode + "|" + W + "x" + H;
+      if (bgCacheKey !== key) {
+        /* 复用同一张画布：重设尺寸会清空位图，省掉每句新建 1280×900 画布的 GC */
+        if (!bgCache) bgCache = document.createElement("canvas");
+        bgCache.width = Math.max(1, Math.round(W));
+        bgCache.height = Math.max(1, Math.round(H));
+        var b = bgCache.getContext("2d");
+        if (b) {
+          b.setTransform(1, 0, 0, 1, 0, 0);
+          paintBackgroundStatic(b);
+        }
+        bgCacheKey = key;
+      }
+      if (bgCache) {
+        g.drawImage(bgCache, 0, 0, W, H);
+        /* 唯一保留的动态背景层：bass 呼吸红光 */
+        if (shotMode !== "paper") {
+          var ag = safeGrad(g, "radial", [W * (0.22 + live.bass * 0.1), H * 0.32, 10, W * 0.22, H * 0.32, Math.min(W, H) * 0.55], [[0, "rgba(205,32,48,0.22)"], [1, "rgba(205,32,48,0)"]]);
+          if (ag) { g.fillStyle = ag; g.fillRect(0, 0, W, H); }
+        }
+        return;
+      }
+    }
+    /* 桌面端：原路径（网点圆半径随 bass 呼吸，纸纹在 drawScene 里单独叠加） */
+    g.fillStyle = sceneBg;
+    g.fillRect(0, 0, W, H);
+    if (shotMode === "paper") {
+      var pg2 = safeGrad(g, "linear", [0, 0, 0, H], [[0, "#efe6d2"], [0.55, "#e6dcc6"], [1, "#d6c9ad"]]);
+      if (pg2) { g.fillStyle = pg2; g.fillRect(0, 0, W, H); }
+    } else {
+      var dg = safeGrad(g, "radial", [W * 0.5, H * 0.42, Math.min(W, H) * 0.05, W * 0.5, H * 0.5, Math.max(W, H) * 0.8], [[0, "#151311"], [1, "#050505"]]);
+      if (dg) { g.fillStyle = dg; g.fillRect(0, 0, W, H); }
+      var ag2 = safeGrad(g, "radial", [W * (0.22 + live.bass * 0.1), H * 0.32, 10, W * 0.22, H * 0.32, Math.min(W, H) * 0.55], [[0, "rgba(205,32,48,0.22)"], [1, "rgba(205,32,48,0)"]]);
+      if (ag2) { g.fillStyle = ag2; g.fillRect(0, 0, W, H); }
     }
     /* 巨大半调圆 */
     var cx = W * (shotMode === "paper" ? 0.76 : 0.78);
@@ -1123,9 +1254,56 @@ addEventListener('message', function (e) {
     fillPat(g, shotMode === "paper" ? P.dot : P.dotLight, 0.10, 0, H * 0.90, W, H * 0.10);
   }
 
+  /* ---- 手机端：背景大字缓存 ----
+     “狂”字以 ~900px 字号每帧 fillText + strokeText，安卓上光字形栅格化就要
+     几毫秒。这个字只随分镜变，按 0.5 倍分辨率烘一张（它是低透明度水印，放大
+     2 倍完全看不出），每帧只贴图 + 原来的轻微漂移。 */
+  var kanjiCache = null, kanjiKey = "", kanjiExt = 0;
+
+  function buildKanjiCache(kj, size) {
+    var ext = Math.ceil(size * 1.15);
+    var sc = 0.5;
+    var px = Math.max(1, Math.round(ext * sc));
+    var c = document.createElement("canvas");
+    c.width = px;
+    c.height = px;
+    var g = c.getContext("2d");
+    if (!g) return null;
+    g.setTransform(sc, 0, 0, sc, 0, 0);
+    g.translate(ext / 2, ext / 2);
+    g.font = "900 " + Math.round(size) + "px " + FONT_BRUSH;
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.globalAlpha = shotMode === "paper" ? 0.085 : 0.115;
+    g.fillStyle = shotMode === "paper" ? "#0b0a09" : "#efe6d3";
+    try { g.fillText(kj, 0, 0); } catch (e) {}
+    g.globalAlpha = 0.32;
+    g.strokeStyle = accent;
+    g.lineWidth = 2;
+    try { g.strokeText(kj, size * 0.018, size * 0.02); } catch (e2) {}
+    return { c: c, ext: ext };
+  }
+
   function drawBgKanji(g, now) {
     var kj = KANJI[Math.abs(shotIdx < 0 ? 0 : shotIdx) % KANJI.length];
     var size = Math.min(W * 0.62, H * 1.05);
+    if (ANDROID) {
+      var key = kj + "|" + shotMode + "|" + W + "x" + H + "|" + accent;
+      if (kanjiKey !== key) {
+        var sp = buildKanjiCache(kj, size);
+        kanjiCache = sp;
+        kanjiExt = sp ? sp.ext : 0;
+        kanjiKey = key;
+      }
+      if (kanjiCache) {
+        g.save();
+        g.translate(W * 0.52 + (RM ? 0 : Math.sin(now * 0.0007) * 10), H * 0.52);
+        g.rotate(-0.06);
+        g.drawImage(kanjiCache.c, -kanjiExt / 2, -kanjiExt / 2, kanjiExt, kanjiExt);
+        g.restore();
+        return;
+      }
+    }
     g.save();
     g.translate(W * 0.52 + (RM ? 0 : Math.sin(now * 0.0007) * 10), H * 0.52);
     g.rotate(-0.06);
@@ -1149,7 +1327,9 @@ addEventListener('message', function (e) {
     var col = shotMode === "paper" ? "rgba(11,10,9," : "rgba(240,232,214,";
     g.save();
     g.translate(cx, cy);
-    var n = 34;
+    /* 手机端速度线 34 → 20：每根是一次独立三角形填充，强拍时数量减半，
+       放射方向和高频感还在，少掉的多是重叠在暗部的短线。 */
+    var n = ANDROID ? 20 : 34;
     for (var i = 0; i < n; i++) {
       var a = rnd() * Math.PI * 2;
       var inner = Math.min(W, H) * (0.22 + rnd() * 0.26);
@@ -1169,7 +1349,9 @@ addEventListener('message', function (e) {
   }
 
   function spawnSplats(level) {
-    var count = 8 + Math.round(level * 14);
+    /* 手机端每次强拍少撒一点、存活上限也压低：每个血点都是两次 arc 填充
+       + save/rotate，150 个在安卓上纯属填充率浪费，70 个观感已经足够。 */
+    var count = ANDROID ? (6 + Math.round(level * 8)) : (8 + Math.round(level * 14));
     for (var i = 0; i < count; i++) {
       var a = Math.random() * Math.PI * 2;
       var sp = 70 + Math.random() * 290 * (0.5 + level);
@@ -1185,7 +1367,8 @@ addEventListener('message', function (e) {
         shape: Math.random() < 0.35 ? 1 : 0
       });
     }
-    if (splats.length > 150) splats.splice(0, splats.length - 150);
+    var cap = ANDROID ? 70 : 150;
+    if (splats.length > cap) splats.splice(0, splats.length - cap);
   }
   function updateSplats(dt) {
     for (var i = splats.length - 1; i >= 0; i--) {
@@ -1235,13 +1418,14 @@ addEventListener('message', function (e) {
   /* ============================================================
      8. 主词大字 / 竖排对话框 / 标题态
      ============================================================ */
-  function drawGlyph(g, ch, size, alpha, rot, sc) {
-    if (!ch || ch === " " || ch === "\n") return;
-    if (!(alpha > 0.001)) return;
-    g.save();
-    g.globalAlpha = alpha;
-    g.rotate(rot || 0);
-    g.scale(sc || 1, sc || 1);
+  /* ---- 手机端：歌词单字精灵缓存 ----
+     每个字每帧要做 3 次 fillText + 2 次 strokeText（其中一次是 0.145em 的粗描边）
+     + 4 道干笔划痕；一行 8–20 个字就是上百次文字栅格化。字形本身不随时间变，
+     只有外层的 alpha / 旋转 / 缩放是动画，所以按「字 + 字号」烘成小图，
+     每帧 drawImage 一次即可。缓存按换句清空，避免整首歌累积几百张。 */
+  var glyphCache = {}, glyphCacheN = 0;
+
+  function paintGlyph(g, ch, size, a) {
     g.font = "900 " + Math.round(size) + "px " + FONT_BRUSH;
     g.textAlign = "center";
     g.textBaseline = "middle";
@@ -1261,7 +1445,7 @@ addEventListener('message', function (e) {
     g.fillText(ch, 0, 0);
     /* 干笔划痕 */
     var rnd = mulberry32(900 + (ch.charCodeAt(0) || 1) * 29 + Math.round(size));
-    g.globalAlpha = alpha * 0.5;
+    g.globalAlpha = (a == null ? 1 : a) * 0.5;
     g.strokeStyle = "rgba(9,8,7,0.30)";
     for (var i = 0; i < 4; i++) {
       g.lineWidth = size * (0.012 + rnd() * 0.014);
@@ -1272,6 +1456,55 @@ addEventListener('message', function (e) {
       g.lineTo(xs + size * (0.42 + rnd() * 0.45), yy + (rnd() - 0.5) * size * 0.06);
       g.stroke();
     }
+  }
+
+  function buildGlyphSprite(ch, size) {
+    /* 1.4em 见方：字形本体 + 粗描边 + 阴影偏移 + 划痕都在这个范围内 */
+    var ext = Math.ceil(size * 1.4);
+    var px = Math.max(1, Math.round(ext * DPR));
+    var c = document.createElement("canvas");
+    c.width = px;
+    c.height = px;
+    var g = c.getContext("2d");
+    if (!g) return null;
+    g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    g.translate(ext / 2, ext / 2);
+    try { paintGlyph(g, ch, size); } catch (e) { return null; }
+    return { c: c, ext: ext };
+  }
+
+  function drawGlyph(g, ch, size, alpha, rot, sc) {
+    if (!ch || ch === " " || ch === "\n") return;
+    if (!(alpha > 0.001)) return;
+    g.save();
+    g.globalAlpha = alpha;
+    g.rotate(rot || 0);
+    g.scale(sc || 1, sc || 1);
+    if (ANDROID) {
+      var key = ch + "|" + Math.round(size);
+      var sp;
+      if (key in glyphCache) {
+        sp = glyphCache[key];
+      } else {
+        sp = buildGlyphSprite(ch, size);
+        glyphCache[key] = sp;
+        glyphCacheN++;
+        if (glyphCacheN > 64) {
+          glyphCache = {};
+          glyphCacheN = 0;
+          glyphCache[key] = sp;
+        }
+      }
+      /* 弹入瞬间会放大到 2.5 倍，这时贴精灵图会糊，退回直接绘制；
+         整个弹入只有 0.22s，代价可以忽略。 */
+      if (sp && (sc || 1) <= 1.35) {
+        g.drawImage(sp.c, -sp.ext / 2, -sp.ext / 2, sp.ext, sp.ext);
+        g.restore();
+        return;
+      }
+      /* 建缓存失败 / 正在放大，退回逐字绘制（alpha/rot/scale 已经设好） */
+    }
+    paintGlyph(g, ch, size, alpha);
     g.restore();
   }
 
@@ -1382,14 +1615,19 @@ addEventListener('message', function (e) {
     g.restore();
   }
 
+  /* 竖排对话框的字数组只跟当前句有关，换句时算一次，别每帧 Array.from + trim */
+  function buildBubbleChars() {
+    bubbleChars = [];
+    var L = (S.idx >= 0 && S.lines[S.idx]) ? S.lines[S.idx] : null;
+    if (!L || !L.text) return;
+    try { bubbleChars = Array.from(String(L.text).trim()); } catch (e) { bubbleChars = String(L.text).split(""); }
+    if (bubbleChars.length > 26) bubbleChars = bubbleChars.slice(0, 26);
+  }
+
   function drawBubble(g, now, tearProg) {
     if (state !== "lyric" || S.idx < 0) return;
-    var L = S.lines[S.idx];
-    if (!L || !L.text) return;
-    var chars = [];
-    try { chars = Array.from(String(L.text).trim()); } catch (e) { chars = String(L.text).split(""); }
+    var chars = bubbleChars;
     if (!chars.length) return;
-    if (chars.length > 26) chars = chars.slice(0, 26);
     var fs = clamp(Math.min(W, H) * 0.024, 11, 20);
     var step = fs * 1.2;
     var maxH = H * 0.54;
@@ -1509,9 +1747,9 @@ addEventListener('message', function (e) {
     g.strokeStyle = "rgba(10,9,8,0.55)";
     g.lineWidth = 1;
     g.stroke();
-    /* 纤维 */
+    /* 纤维：手机端隔 4 根画一根（撕口白边本身还在，纤维只是毛刺感） */
     var rnd = mulberry32(500 + Math.floor(tear.seed * 100));
-    for (var f = 0; f < pts.length; f += 2) {
+    for (var f = 0; f < pts.length; f += (ANDROID ? 4 : 2)) {
       var pt = pts[f];
       if (!pt) continue;
       var dir = (side < 0 ? 1 : -1);
@@ -1561,11 +1799,12 @@ addEventListener('message', function (e) {
       g.restore();
     }
 
-    /* 飞散的纸屑 */
+    /* 飞散的纸屑：手机端 14 → 10，转场只持续 0.47s，少几片看不出来 */
+    var scraps = ANDROID ? 10 : 14;
     var rnd = mulberry32(Math.floor(tear.seed * 777) + 3);
     g.save();
-    for (var s = 0; s < 14; s++) {
-      var yy = H * (s / 14) + (rnd() - 0.5) * H * 0.05;
+    for (var s = 0; s < scraps; s++) {
+      var yy = H * (s / scraps) + (rnd() - 0.5) * H * 0.05;
       var idx = Math.max(0, Math.min(pts.length - 1, Math.round((yy + H * 0.03) / (H * 1.06) * (pts.length - 1))));
       var base = pts[idx];
       if (!base) continue;
@@ -1608,6 +1847,30 @@ addEventListener('message', function (e) {
   /* ============================================================
      10. 场景总装
      ============================================================ */
+
+  /* ---- 手机端：暗角缓存 ----
+     暗角是每帧一次全屏 radial 渐变填充，安卓上纯属填充率开销；渐变本身极平滑，
+     用 320 宽的离屏图拉伸回全屏完全看不出，省掉一次全屏渐变光栅化。 */
+  var vigCache = null, vigCacheKey = "";
+
+  function drawVignetteCached(g) {
+    var key = shotMode + "|" + W + "x" + H;
+    if (vigCacheKey !== key) {
+      var vw = 320, vh = Math.max(1, Math.round(320 * H / W));
+      vigCache = document.createElement("canvas");
+      vigCache.width = vw;
+      vigCache.height = vh;
+      var v = vigCache.getContext("2d");
+      if (v) {
+        var vg = safeGrad(v, "radial", [vw * 0.5, vh * 0.5, Math.min(vw, vh) * 0.32, vw * 0.5, vh * 0.5, Math.max(vw, vh) * 0.80],
+          [[0, "rgba(0,0,0,0)"], [0.72, "rgba(0,0,0,0.05)"], [1, shotMode === "paper" ? "rgba(52,38,24,0.30)" : "rgba(0,0,0,0.66)"]]);
+        if (vg) { v.fillStyle = vg; v.fillRect(0, 0, vw, vh); }
+      }
+      vigCacheKey = key;
+    }
+    if (vigCache) g.drawImage(vigCache, 0, 0, W, H);
+  }
+
   function drawScene(g, now) {
     g.setTransform(DPR, 0, 0, DPR, 0, 0);
     g.globalAlpha = 1;
@@ -1622,10 +1885,18 @@ addEventListener('message', function (e) {
     drawSpeedLines(g, now);
     drawSplats(g);
     /* 全球纸纹 + 暗角 */
-    fillPat(g, shotMode === "paper" ? P.grainDark : P.grainLight, 0.32, 0, 0, W, H);
-    var vg = safeGrad(g, "radial", [W * 0.5, H * 0.5, Math.min(W, H) * 0.32, W * 0.5, H * 0.5, Math.max(W, H) * 0.80],
-      [[0, "rgba(0,0,0,0)"], [0.72, "rgba(0,0,0,0.05)"], [1, shotMode === "paper" ? "rgba(52,38,24,0.30)" : "rgba(0,0,0,0.66)"]]);
-    if (vg) { g.fillStyle = vg; g.fillRect(0, 0, W, H); }
+    if (!ANDROID) {
+      /* 手机端的整屏纸纹已经烘进背景缓存（画格自带纸纹），
+         省掉每帧一次全屏 pattern 填充 */
+      fillPat(g, shotMode === "paper" ? P.grainDark : P.grainLight, 0.32, 0, 0, W, H);
+    }
+    if (ANDROID) {
+      drawVignetteCached(g);
+    } else {
+      var vg = safeGrad(g, "radial", [W * 0.5, H * 0.5, Math.min(W, H) * 0.32, W * 0.5, H * 0.5, Math.max(W, H) * 0.80],
+        [[0, "rgba(0,0,0,0)"], [0.72, "rgba(0,0,0,0.05)"], [1, shotMode === "paper" ? "rgba(52,38,24,0.30)" : "rgba(0,0,0,0.66)"]]);
+      if (vg) { g.fillStyle = vg; g.fillRect(0, 0, W, H); }
+    }
     if (state === "lyric") drawLyric(g, now);
     else drawTitleState(g, now);
     /* 场景角落小标记 */
@@ -1783,8 +2054,11 @@ addEventListener('message', function (e) {
     ctx.fillStyle = sceneBg;
     ctx.fillRect(0, 0, cv.width, cv.height);
 
-    /* 旋转残影：多帧旋转叠加 */
-    var n = RM ? 0 : Math.min(5, Math.round(hitEnergy * 4 + Math.min(3, Math.abs(cam.rv) * 0.7)));
+    /* 旋转残影：多帧旋转叠加。每一层都是一次全屏、带旋转重采样的 drawImage，
+       5 层就是 5 次全屏合成，是安卓 WebView 最大的填充率开销之一；手机端压到
+       2 层，拖尾方向和高频摇摆感保留，只是尾巴短一点。 */
+    var maxGhost = ANDROID ? 2 : 5;
+    var n = RM ? 0 : Math.min(maxGhost, Math.round(hitEnergy * 4 + Math.min(3, Math.abs(cam.rv) * 0.7)));
     for (var i = n; i >= 1; i--) {
       var f = i / (n + 1);
       drawCamera(cam.rot + cam.rv * 0.0085 * i, -cam.xv * 0.0065 * i, -cam.yv * 0.0065 * i, 0.16 * (1 - f * 0.7));

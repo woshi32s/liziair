@@ -26,6 +26,7 @@
      第一帧就把新旧两条底栏都藏住，--player-h 归零让视图铺到底。
      目前没有任何脚本会摘掉这个类；以后要加新底栏，再用这套机制接管。 -->
 <body class="pbn-off">
+<script src="splash.js"></script>
 
 <!-- 背景：封面取色的光斑 + 可选的封面大图。都是背景层，不参与交互 -->
 <div class="backdrop" aria-hidden="true">
@@ -1031,7 +1032,8 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
         <span class="setpage__label">版本</span>
         <span class="setpage__val" id="set-app-version">1.0.0</span>
         <span class="setpage__updstate" id="set-upd-state" role="status" aria-live="polite"></span>
-        <!-- 仅桌面壳显示（app.js 在 window.__desktop 存在时取消 hidden） -->
+        <!-- 仅桌面壳 / 安卓壳显示（app.js 在 window.__desktop 或
+             window.__liziNative 存在时取消 hidden） -->
         <button class="setpage__checkupd" id="set-check-update" type="button" hidden>检查更新</button>
       </div>
       <p class="setpage__note">折射和形态渲染已固定为默认值；形态切换在播放页右侧抽屉里。</p>
@@ -1275,7 +1277,7 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
   <div class="stage-tap" id="stage-tap" aria-hidden="true"></div>
 
   <div class="stagebar" id="stage-hud">
-    <button class="btn btn--ghost lg-surface lg-sheen" id="stage-back" data-liquid-glass='{"autoScale":true,"scaleRef":56}'>
+    <button class="btn btn--ghost lg-surface lg-sheen" id="stage-back" aria-label="返回" data-liquid-glass='{"autoScale":true,"scaleRef":56}'>
       <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg><span>返回</span>
     </button>
 
@@ -1315,12 +1317,14 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
       </div>
 
       <button class="btn btn--ghost lg-surface lg-sheen" id="stage-settings-btn"
+              aria-label="设置"
               data-liquid-glass='{"autoScale":true,"scaleRef":56}'
               aria-haspopup="dialog" aria-expanded="false" aria-controls="stage-settings" hidden>
         <svg class="ico" aria-hidden="true"><use href="#i-settings"/></svg><span>设置</span>
       </button>
 
       <button class="btn btn--ghost lg-surface lg-sheen" id="stage-pick-btn"
+              aria-label="形态"
               data-liquid-glass='{"autoScale":true,"scaleRef":56}'
               aria-haspopup="listbox" aria-expanded="false" aria-controls="stage-menu-pop">
         <svg class="ico" aria-hidden="true"><use href="#i-grid"/></svg><span>形态</span>
@@ -1546,6 +1550,27 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
     <button class="updtoast__btn updtoast__btn--go" id="upd-now" type="button">立即下载</button>
   </div>
 </aside>
+
+<!-- 安卓壳：新版本居中弹窗（默认隐藏）。
+     只在 window.__liziAndroid && window.__liziNative 时由 app.js 末尾的
+     initAndroidUpdate() 显示；桌面端没有这个桥，这段标记永远不出现。
+     页面被 sync.js 固定成 width=1280 后整体缩放，所以字号按 1280 布局给足
+     （标题 30 / 正文 24 / 按钮 26），玻璃语言与上面的 .updtoast 同一套。 -->
+<div class="updmodal" id="upd-modal" hidden>
+  <section class="updmodal__card lg-surface" role="dialog" aria-modal="true"
+           aria-labelledby="upd-modal-title">
+    <div class="updmodal__head">
+      <span class="updmodal__dot" aria-hidden="true"></span>
+      <b class="updmodal__title" id="upd-modal-title">发现新版本 <i id="upd-modal-ver">v1.0.1</i></b>
+      <button class="updmodal__x" id="upd-modal-close" type="button" aria-label="关闭更新提示">×</button>
+    </div>
+    <p class="updmodal__desc">新版本已经准备好。GitHub 连不上时，用网盘下载即可。</p>
+    <div class="updmodal__acts">
+      <button class="updmodal__btn updmodal__btn--go" id="upd-modal-pan" type="button">网盘下载</button>
+      <button class="updmodal__btn" id="upd-modal-gh" type="button">GitHub</button>
+    </div>
+  </section>
+</div>
 
 <script src="assets/liquid-glass.js"></script>
 <script src="hall/grainient.js"></script>

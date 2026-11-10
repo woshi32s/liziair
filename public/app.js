@@ -1655,7 +1655,9 @@
     { id: '549', name: '竹林剑意', desc: '3D风雨翠竹林穿梭与寒芒剑气空间切割', url: 'stages/549-wuxia-bamboo-blade.html' },
     { id: '550', name: '青花金缮', desc: '3D汝窑/青花瓷器开片裂纹与液态纯金修补流淌', url: 'stages/550-porcelain-kintsugi-gold.html' },
     { id: '551', name: '走马皮影', desc: '3D多层镂空宣纸灯笼光影投射与民俗幻彩', url: 'stages/551-shadow-puppet-lantern.html' },
-    { id: '552', name: '烟雨江南', desc: '乌篷船摇进无尽烟雨，词句落在前方水上', url: 'stages/552-ink-wash-rain-pavilion.html' },
+    /* camera:true 只是给宿主的提前提示（避免第一次进形态时先弹一下展开的
+       迷你播放器）；真正的协议声明在形态 ready payload 里，见 onReady。 */
+    { id: '552', name: '烟雨江南', desc: '乌篷船摇进无尽烟雨，词句落在前方水上', camera: true, url: 'stages/552-ink-wash-rain-pavilion.html' },
     { id: '553', name: '九龙霓虹', desc: '3D密集港风复古霓虹灯牌森林穿梭与故障闪烁', url: 'stages/553-neon-kowloon-signboard.html' },
     { id: '554', name: '万字碑林', desc: '3D悬浮碑林文字矩阵穿梭与金石拓片剥落', url: 'stages/554-calligraphy-sword-matrix.html' },
     { id: '555', name: '太虚琉璃宫', desc: '3D悬浮白玉云宫仙境与月华流光丝带', url: 'stages/555-celestial-jade-palace.html' },
@@ -1875,6 +1877,19 @@
     let tickTimer = 0;
     let idleTimer = 0;
     let lastLive = 0;
+    /* 相机 / 风景形态：形态在 ready payload 里声明 camera:true。
+       这类形态的画面本身要拖动转头，宿主不再盖点击层，浮层也切成极简版
+       （见 app.css 的 .is-cinema）。记在 Set 里，切回同一个形态时不用等
+       ready 就能用对样式；老形态不发这个字段，一切照旧。 */
+    let cameraStage = false;
+    const cameraStageIds = new Set();
+    const CINEMA_IDLE_MS = 2000;
+    /* 桌面「看片模式」：指针静止后连窗口三键和光标一起退场。
+       hudHeld = 真的按着浮层上的控件（拖进度条 / 长按按钮），只有这时
+       才允许 armIdle 续命；单纯把鼠标停在浮层上不再无限续命。 */
+    let hudHeld = false;
+    let hudHeldTimer = 0;
+    let stageCursorStyle = null;
 
     const post = (type, payload) => {
       if (!frame || !frame.contentWindow) return;
@@ -1947,12 +1962,49 @@
     }
     function stopTick() { if (tickTimer) clearInterval(tickTimer); tickTimer = 0; }
 
-    /** 鼠标静止 2.6 秒后把浮层淡出，只留作品。
-     *  指针还压在浮层上时不淡出 —— 否则人会看着按钮在指尖下消失。 */
+    /* 形态页「看片模式」：桌面端指针静止后，窗口三键和光标跟浮层一起退场。
+       光标必须写进 iframe 自己的 document —— 指针落在 iframe 上时，
+       宿主 body 的 cursor:none 管不到里面的内容。 */
+    function setStageCursorHidden(hidden) {
+      let doc = null;
+      try { doc = frame && frame.contentDocument; } catch (_) { doc = null; }
+      if (!doc) return;
+      if (hidden) {
+        if (stageCursorStyle && stageCursorStyle.ownerDocument === doc
+          && stageCursorStyle.parentNode) return;
+        stageCursorStyle = doc.createElement('style');
+        stageCursorStyle.setAttribute('data-lizi-cursor', 'none');
+        stageCursorStyle.textContent = 'html, body, * { cursor: none !important; }';
+        (doc.head || doc.documentElement).appendChild(stageCursorStyle);
+      } else if (stageCursorStyle) {
+        try { stageCursorStyle.remove(); } catch (_) {}
+        stageCursorStyle = null;
+      }
+    }
+    /** on=true：进看片模式（只在非触屏 + 形态页里生效）。
+        on=false：任何 pointermove / 点击 / 按键走 wake() 时恢复。 */
+    function setChromeIdle(on) {
+      /* 手机端不进入看片模式（没有光标、也没有三键），但 off 永远要能清干净 */
+      if (on && TOUCH_HUD) return;
+      const body = document.body;
+      if (!body) return;
+      if (on && !body.classList.contains('is-stage')) return;
+      const was = body.classList.contains('is-chrome-idle');
+      if (was === !!on) {
+        if (on) setStageCursorHidden(true);   // 换文档后补一次
+        return;
+      }
+      body.classList.toggle('is-chrome-idle', !!on);
+      setStageCursorHidden(!!on);
+    }
+
+    /** 鼠标静止 2~2.6 秒后把浮层淡出（影院模式 2.0s，普通 2.6s），只留作品；
+     *  桌面端连三键和光标一起收。只有真的按着浮层上的控件（hudHeld）才续命
+     *  —— 指针只是停在那儿不该让浮层永远不消失（像看视频一样，动一下才回来）。 */
     function armIdle() {
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
-        if (hoverCapable && hud.matches(':hover')) { armIdle(); return; }
+        if (hoverCapable && hudHeld) { armIdle(); return; }
         /* 面板 / 形态下拉还开着时先不收：它们挂在浮层里，收起来就没法继续操作。
            用 getElementById 而不是 $() —— $() 取不到元素会返回 truthy 的 Proxy。 */
         const panel = document.getElementById('stage-settings');
@@ -1961,17 +2013,25 @@
           armIdle(); return;
         }
         /* 触屏：展开态跟着整条一起淡出，但不摘 is-near —— 下次 wake 时
-           胶囊已经是展开的，不会每弹一次都从 0 宽重新长一遍。 */
-        if (!TOUCH_HUD) hud.classList.remove('is-near');
+           胶囊已经是展开的，不会每弹一次都从 0 宽重新长一遍。
+           相机形态例外：收起时把迷你播放器也收回，下次只露一排图标。 */
+        if (!TOUCH_HUD || cameraStage) hud.classList.remove('is-near');
         hud.classList.add('is-idle');
-        /* 浮层已经看不见了：在 iframe 上盖一层点击层，手机点屏幕先弹浮层 */
-        if (stageView) stageView.classList.add('is-hud-armed');
-      }, 2600);
+        /* 浮层已经看不见了：在 iframe 上盖一层点击层，手机点屏幕先弹浮层。
+           相机形态不盖 —— 点击层会把拖动的第一下吃掉；唤出浮层改由
+           iframe 内的 pointerdown/up 判定（见 hookStageTap）。 */
+        if (stageView && !cameraStage) stageView.classList.add('is-hud-armed');
+        /* 桌面：窗口三键和光标也一起退场；触屏函数内部直接 return */
+        setChromeIdle(true);
+      }, cameraStage ? CINEMA_IDLE_MS : 2600);
     }
     function wake() {
+      /* 任何移动 / 点击 / 按键都会走到这里：先把三键和光标叫回来 */
+      setChromeIdle(false);
       hud.classList.remove('is-idle');
-      /* 触屏没有 hover：浮层一露脸，迷你播放器就保持展开 */
-      if (TOUCH_HUD) hud.classList.add('is-near');
+      /* 触屏没有 hover：普通形态浮层一露脸，迷你播放器就保持展开。
+         相机形态保持收起（只留封面），点封面才展开，避免大块胶囊挡风景。 */
+      if (TOUCH_HUD && !cameraStage) hud.classList.add('is-near');
       /* 浮层一出来就撤掉点击层，形态恢复正常接收所有点击 */
       if (stageView) stageView.classList.remove('is-hud-armed');
       armIdle();
@@ -1999,12 +2059,66 @@
        点击层也要挂一份：浮层收起时它盖在形态上面，第一下只会叫醒浮层、
        第二下才落进形态，两边共用同一份计时才算得上"双击"。
        用 pointerup 而不是 dblclick：安卓 WebView 的双击不一定派发 dblclick，
-       自己按 340ms + 48px 判定，鼠标和手指都能用。 */
+       自己按 340ms + 48px 判定，鼠标和手指都能用。
+
+       相机形态（ready 里声明 camera:true）多一份「点按 vs 拖动」判定：
+       位移 < 28px 且按住 < 400ms 才算点按，点按才唤出浮层；拖动完全不碰
+       浮层，镜头怎么转画面都不弹东西。
+       28 是按 1280 固定视口算的：手机上整个 1280 布局被缩到屏幕宽，
+       手指正常的抖动换算到 iframe 坐标里就有十几到二十几 px，
+       用桌面鼠标的 8~12px 会把点按误判成拖动。 */
     let tapAt = 0;
     let tapX = 0;
     let tapY = 0;
+    const CAM_TAP_PX = 28;
+    const CAM_TAP_MS = 400;
+    let camAt = 0;
+    let camX = 0;
+    let camY = 0;
+    let camMoved = false;
+    function onStageDown(e) {
+      if (!cameraStage) return;
+      if (!e || (typeof e.button === 'number' && e.button > 0)) return;
+      camAt = performance.now();
+      camX = e.clientX;
+      camY = e.clientY;
+      camMoved = false;
+    }
+    function onStageMove(e) {
+      if (!cameraStage || !e) return;
+      if (!camAt) {
+        /* 没按键，只是鼠标移过画面：桌面端把浮层 / 三键 / 光标叫回来。
+           相机形态没有点击层，iframe 里的 pointermove 不会冒泡到宿主。 */
+        if (!TOUCH_HUD) wake();
+        return;
+      }
+      if (!camMoved
+        && (Math.abs(e.clientX - camX) > CAM_TAP_PX || Math.abs(e.clientY - camY) > CAM_TAP_PX)) {
+        camMoved = true;
+        /* 真的在转镜头：浮层立刻退场，别挡景（桌面三键 / 光标一起收） */
+        clearTimeout(idleTimer);
+        hud.classList.remove('is-near');
+        hud.classList.add('is-idle');
+        setChromeIdle(true);
+      }
+    }
+    function onStageCancel() {
+      camAt = 0;
+      camMoved = false;
+    }
     function onStageTap(e) {
       if (!e || (typeof e.button === 'number' && e.button > 0)) return;
+      if (cameraStage) {
+        const moved = camMoved
+          || Math.abs(e.clientX - camX) > CAM_TAP_PX
+          || Math.abs(e.clientY - camY) > CAM_TAP_PX;
+        const held = camAt ? performance.now() - camAt : 0;
+        camAt = 0;
+        camMoved = false;
+        /* 拖动 / 长按：不叫醒浮层，也不参与下面的双击计时 */
+        if (moved || held > CAM_TAP_MS) { tapAt = 0; return; }
+        wake();
+      }
       const t = performance.now();
       const near = Math.abs(e.clientX - tapX) < 48 && Math.abs(e.clientY - tapY) < 48;
       if (tapAt && t - tapAt < 340 && near) {
@@ -2019,20 +2133,57 @@
     if (tapLayer) tapLayer.addEventListener('pointerup', onStageTap, { passive: true });
 
     /* iframe 每次换文档（首次进入 / 换形态）都要重新挂：src 一清空就是新 document。
-       load 事件 + 进入时各调一次，__liziDbl 标记防重复挂。 */
+       load 事件 + 进入时各调一次，__liziDbl 标记防重复挂。
+       pointerdown/move/cancel 只服务相机形态的点按判定，普通形态里直接 return。 */
     function hookStageTap() {
       let doc = null;
       try { doc = frame && frame.contentDocument; } catch (_) { doc = null; }
       if (!doc || doc.__liziDbl) return;
       doc.__liziDbl = true;
+      doc.addEventListener('pointerdown', onStageDown, true);
+      doc.addEventListener('pointermove', onStageMove, true);
       doc.addEventListener('pointerup', onStageTap, true);
+      doc.addEventListener('pointercancel', onStageCancel, true);
+      /* 换文档时如果宿主还在看片模式，把 cursor:none 补回新文档 */
+      if (document.body.classList.contains('is-chrome-idle')) setStageCursorHidden(true);
     }
     if (frame) {
       frame.addEventListener('load', hookStageTap);
       hookStageTap();
     }
-    /* 点浮层上的按钮也算“有操作”，把 2.6 秒的倒计时重新起算 */
-    hud.addEventListener('pointerdown', () => wake(), { passive: true });
+    /* 点浮层上的按钮也算“有操作”，把倒计时重新起算。
+       hudHeld 让 armIdle 知道用户正按着控件（拖进度条 / 长按按钮），
+       单纯把鼠标停在浮层上不再续命 —— 要像看视频一样静止就退场。 */
+    function clearHudHeld() {
+      hudHeld = false;
+      clearTimeout(hudHeldTimer);
+      hudHeldTimer = 0;
+    }
+    hud.addEventListener('pointerdown', () => {
+      hudHeld = true;
+      clearTimeout(hudHeldTimer);
+      /* 兜底：pointerup 丢在窗口外时，8 秒后也要能重新开始 idle */
+      hudHeldTimer = setTimeout(clearHudHeld, 8000);
+      wake();
+    }, { passive: true });
+    addEventListener('pointerup', clearHudHeld, { passive: true });
+    addEventListener('pointercancel', clearHudHeld, { passive: true });
+    addEventListener('blur', clearHudHeld);
+
+    /* 相机形态（触屏）默认只露封面；点一下封面才展开迷你播放器。
+       这里只负责「展开」：有的 WebView 在触摸时会先派发 stageRight 的
+       pointerenter 把 is-near 加上，再用 toggle 反而会把它关掉。
+       收起交给 2 秒的 idle（armIdle 会摘 is-near）。
+       播放键 / 进度条上的点击不触发展开，只正常操作播放。 */
+    const stageSongEl = document.getElementById('stage-song');
+    if (stageSongEl) {
+      stageSongEl.addEventListener('click', (e) => {
+        if (!cameraStage || !TOUCH_HUD) return;
+        if (e.target && e.target.closest && e.target.closest('.snow__body')) return;
+        hud.classList.add('is-near');
+        wake();
+      });
+    }
 
     /* ---------- 形态页操作条自动反色（2026-11-08） ----------
        白底作品上，操作条那套浅色玻璃 / 白字几乎看不见，需要换成黑字 / 黑进度。
@@ -2206,6 +2357,12 @@
         const s = STAGES.find((x) => x.id === id) || STAGES[1];
         current = s;
         ready = false;
+        /* 换形态：先按静态提示 / 上次 ready 的声明切样式（普通形态两者都没有）。
+           新文档的 ready 到了会再确认一次。 */
+        cameraStage = !!(s.camera || cameraStageIds.has(s.id));
+        if (stageView) stageView.classList.toggle('is-cinema', cameraStage);
+        /* 从普通形态切过来时 is-near 可能还挂着：相机形态先收回迷你播放器 */
+        if (cameraStage) hud.classList.remove('is-near');
         // 换形态时整块重载：同一时刻只能有一个作品在跑
         if (s.url) frame.src = s.url;
         else frame.removeAttribute('src');
@@ -2221,6 +2378,11 @@
       /** 进入形态视图 */
       enter() {
         if (!current || !current.url) current = STAGES[1];
+        /* 离开再进来时 leave() 已经把 cameraStage 清掉了，这里按静态提示 /
+           上次的声明恢复，避免重新进 552 时又先弹一下展开的迷你播放器。 */
+        cameraStage = !!(current.camera || cameraStageIds.has(current.id));
+        if (stageView) stageView.classList.toggle('is-cinema', cameraStage);
+        if (cameraStage) hud.classList.remove('is-near');
         /* 换/重装 iframe 就是新文档：ready 要重新等，否则新文档永远收不到 init */
         if (!frame.getAttribute('src')) { ready = false; frame.src = current.url; }
         startTick();
@@ -2234,9 +2396,15 @@
       leave() {
         stopTick();
         clearTimeout(idleTimer);
+        clearHudHeld();
+        /* 非形态页不隐藏三键 / 光标：离开时立刻恢复（含 iframe 里的 cursor） */
+        setChromeIdle(false);
         hud.classList.remove('is-near');
         /* 离开时把点击层也撤掉，避免下次进来带着上一次的隐藏态 */
         if (stageView) stageView.classList.remove('is-hud-armed');
+        /* 影院模式同理；Set 里记着的形态 id 留着，下次进来不用等 ready */
+        cameraStage = false;
+        if (stageView) stageView.classList.remove('is-cinema');
         /* 离开形态：反色轮询停掉，类也摘掉（下次进来按新背景重新判断） */
         stopLightWatch();
         hud.classList.remove('is-on-light');
@@ -2253,7 +2421,29 @@
         pushInit();
       },
 
-      onReady() {
+      onReady(payload) {
+        /* 形态可以在 ready 里声明 camera:true：画面本身要拖动转头。
+           宿主对这类形态不盖点击层，浮层切成极简版（见 app.css .is-cinema），
+           触屏上只认「点按」唤出。老形态不发这个字段，行为一字不变。
+           只有 payload 里真的带了布尔 camera 才改状态 —— 有的形态会在 init
+           之后补发一次不带 payload 的 ready，不能把相机模式冲掉。 */
+        if (payload && typeof payload.camera === 'boolean') {
+          cameraStage = payload.camera;
+          if (current && current.id) {
+            if (cameraStage) cameraStageIds.add(current.id);
+            else cameraStageIds.delete(current.id);
+          }
+          if (stageView) {
+            stageView.classList.toggle('is-cinema', cameraStage);
+            if (cameraStage) stageView.classList.remove('is-hud-armed');
+          }
+          if (cameraStage) {
+            /* enter() 的 wake() 已经按普通形态展开过迷你播放器，这里收回；
+               idle 计时器也换成影院节奏（2s）。 */
+            if (TOUCH_HUD) hud.classList.remove('is-near');
+            armIdle();
+          }
+        }
         /* 只认第一次 ready：有的舞台每次收到 init 都回一次 ready，
            这里再 pushInit(true) 就会 ping-pong —— 一秒几千次 init，
            而且每次都 startTick() 把 66ms 定时器重置掉，tick 一次都发不出去。
@@ -2283,6 +2473,13 @@
         if (total > 0) $('stage-fill').style.width = (cur / total * 100) + '%';
       },
       wake,
+      /** 形态内部转发的鼠标活动（mousemove / pointerdown）。
+          相机形态在触屏上只认「点按」：拖动时形态会一直发 activity，
+          不能让它把浮层叫出来。桌面端保留原来的「一动就浮出」。 */
+      onActivity() {
+        if (cameraStage && TOUCH_HUD) return;
+        wake();
+      },
       /* 给 stage:ready / 换形态补测用 */
       probeLight: probeStageLight,
     };
@@ -2653,13 +2850,18 @@
        会把 StageHost 标记成就绪、抢走本该发给舞台的 init/tick。 */
     const stageFrame = $('stage-frame');
     if (!stageFrame || e.source !== stageFrame.contentWindow) return;
-    if (d.type === 'ready') StageHost.onReady();
+    if (d.type === 'ready') StageHost.onReady(d.payload || null);
     // 作品内部的鼠标活动也要转发过来。
     // pointermove 挂在父文档上，但鼠标移到 iframe 上时事件不会冒泡到父文档 ——
     // 细条淡出之后就再也唤不醒，人就卡在舞台里出不来了（这是之前最要命的 bug）。
-    else if (d.type === 'activity') StageHost.wake();
+    // 相机形态在触屏上例外：拖动镜头会一直发 activity，不能让它叫醒浮层。
+    else if (d.type === 'activity') StageHost.onActivity();
     // 舞台里按的空格（焦点在 iframe 内，父页面收不到，只能由舞台转发过来）
-    else if (d.type === 'key' && d.payload && d.payload.key === 'Space') Player.toggle();
+    // 按键也算「有操作」：先 wake() 把浮层 / 三键 / 光标叫回来，再执行动作。
+    else if (d.type === 'key' && d.payload && d.payload.key === 'Space') {
+      StageHost.wake();
+      Player.toggle();
+    }
     else if (d.type === 'error') console.warn('[stage] 作品报错：', d.payload);
   });
 
@@ -2830,6 +3032,13 @@
     }
   }
   $('view-stage').addEventListener('pointermove', () => StageHost.wake(), { passive: true });
+  /* 桌面形态页：拖动带 / 窗口三键这些不在 #view-stage 里的元素，鼠标一动
+     也要把看片模式叫回来。手机端不挂，保持原来的节奏。 */
+  if (!TOUCH_HUD) {
+    window.addEventListener('pointermove', () => {
+      if (document.body.classList.contains('is-stage')) StageHost.wake();
+    }, { passive: true });
+  }
   window.addEventListener('keydown', () => StageHost.wake());
 
   /* 播放页顶栏和形态浮层同一套节奏：点屏幕弹出，2.6 秒不操作收起。
@@ -8384,11 +8593,36 @@
        变量只写在 #hall-plat 上（--marq-card-w / --marq-gap / --plat-scale 是卡片的
        局部尺寸），不碰 :root，别的视图/普通态不受影响。卡宽没变就早退，resize
        不会每帧重排。 */
+    /** 手机跑马带放得下的最大卡宽：由面板高度反解（2026-11-10）。
+        安卓壳（sync.js 的触屏覆盖）里，条高固定 56、面内边距 20、gap 8、
+        跑马带上下留白 10×scale×2，字号还有 14 / 12.5px 的下限。卡宽 w 时：
+          卡高 = w + 4.49% + 1.3×max(14, 8.01%w) + 1.3×max(12.5, 6.73%w)
+          w ≤ 185.7 → 面板高 H = 118.45 + 1.1859w
+          w >  185.7 → 面板高 H = 84 + 1.3775w
+        留 4px 余量，避免行高取整后正好贴住面板下沿。 */
+    function phoneMarqMaxCardW(panelH) {
+      const h = panelH - 4;
+      const w = h <= 339 ? (h - 118.45) / 1.1859 : (h - 84) / 1.3775;
+      return Math.max(96, Math.floor(w));
+    }
+
+    /** 是否命中安卓壳的触屏覆盖（sync.js 注入了固定条高 / 字号下限那一套） */
+    function isPhoneMarq() {
+      try {
+        return !!window.__liziAndroid
+          && matchMedia('(max-width: 1280px) and (pointer: coarse)').matches;
+      } catch { return false; }
+    }
+
     function fitPlatScale() {
       const panel = H.plat;
       if (!platMode || !panel || panel.hidden || panel.offsetHeight <= 0) return;
       const panelH = panel.clientHeight;
-      const cardW = Math.round(Math.max(156, Math.min(320, (panelH - 28) * 0.578)));
+      let cardW = Math.round(Math.max(156, Math.min(320, (panelH - 28) * 0.578)));
+      /* 手机字号有下限，桌面 1.29 的卡高比例不成立：同样的面板高推出来的卡
+         会比带子高，底部歌手名被 #hall-plat 裁掉。这里按手机真实卡高再反解
+         一个上限，只收不放；桌面（非安卓壳 / 细指针）数值一个像素不变。 */
+      if (isPhoneMarq()) cardW = Math.min(cardW, phoneMarqMaxCardW(panelH));
       const gap = Math.round(Math.max(16, Math.min(32, cardW * 0.1026)));
       if (cardW === platCardW) return;         // 高度没变：别重复重量/重排
       platCardW = cardW;
@@ -12768,8 +13002,12 @@
     { id: 'kugou', label: '酷狗', hint: '酷狗音乐' },
     { id: 'qishui', label: '汽水', hint: '汽水音乐' },
     { id: 'bodian', label: '波点', hint: '波点音乐' },
-    { id: 'spotify', label: 'Spotify', hint: 'Spotify · 仅元数据' },
+    /* 2026-11-10：Spotify 整块下线（和设置页那边同一决定），搜索栏不再露出。
+       OAuth 回调在本机回不来，留着只会让用户以为能搜。 */
   ];
+  /* 老用户 localStorage 里可能还存着 'spotify'：表里没有就回落到网易云，
+     否则搜索栏一个按钮都不高亮、hint 还会显示「Spotify」。 */
+  if (!SEARCH_SOURCES.some((s) => s.id === searchSource)) searchSource = 'netease';
   const srcLabel = (id) => (SEARCH_SOURCES.find((s) => s.id === id) || {}).hint || id;
   const isAll = () => searchSource === 'all';
 
@@ -13480,11 +13718,16 @@
     let checking = false;
     let stateTimer = 0;
 
-    function showUpdate(version) {
+    /* opts.preview：只看样式用，不记「已提示过」，
+       所以预览完刷新页面还能再看一次，也不会影响真实的新版本提示。 */
+    function showUpdate(version, opts) {
       const v = version ? String(version) : '';
-      if (!v || v === seenVersion || !toast) return;
-      seenVersion = v;
-      try { sessionStorage.setItem(SEEN_KEY, v); } catch { /* 隐私模式 */ }
+      if (!v || !toast) return;
+      if (!(opts && opts.preview)) {
+        if (v === seenVersion) return;
+        seenVersion = v;
+        try { sessionStorage.setItem(SEEN_KEY, v); } catch { /* 隐私模式 */ }
+      }
       if (verEl) verEl.textContent = 'v' + v;
       toast.hidden = false;
     }
@@ -13511,6 +13754,15 @@
         if (info && info.version) showUpdate(info.version);
       });
     }
+
+    /* 预览：地址栏带 ?upd=1.0.1 时直接亮出提示条。桌面壳里用
+       LIZI_UPDATE_PREVIEW=1.0.1 启动会自动把这个参数带上（见 desktop/main.js），
+       浏览器里也能直接开 http://127.0.0.1:<端口>/?upd=1.0.1 看样式。 */
+    let previewVersion = '';
+    try {
+      previewVersion = new URLSearchParams(location.search).get('upd') || '';
+    } catch { /* 老内核没有 URLSearchParams */ }
+    if (previewVersion) showUpdate(previewVersion, { preview: true });
 
     if (closeBtn) closeBtn.addEventListener('click', closeToast);
     if (panBtn) panBtn.addEventListener('click', () => {
@@ -13563,5 +13815,204 @@
         checkBtn.textContent = '检查更新';
       }
     });
+  })();
+
+  /* ==========================================================================
+     安卓壳：新版本居中弹窗 + 设置页「检查更新」
+     - 只认 window.__liziAndroid && window.__liziNative（MainActivity 里
+       addJavascriptInterface("__liziNative")）；桌面 / 浏览器整块跳过，
+       桌面提示条仍由上面的 initDesktopUpdate 管，两者互不影响
+     - 启动后延迟 6s 查一次 GitHub Release；localStorage 节流 12 小时
+     - 同一版本关掉后不再弹（记 dismissed 版本）；网络失败 / 已是最新都静默
+     - 设置页按钮复用同一条检查逻辑，结果写在 #set-upd-state
+     ========================================================================== */
+  (function initAndroidUpdate() {
+    if (!window.__liziAndroid) return;
+    const native = window.__liziNative;
+    if (!native || typeof native.version !== 'function'
+        || typeof native.openExternal !== 'function') return;
+
+    const API_URL = 'https://api.github.com/repos/woshi32s/liziair/releases/latest';
+    const PAN_URL = 'https://pan.quark.cn/s/6c6e65f3ee4c';
+    const GH_URL = 'https://github.com/woshi32s/liziair/releases/latest';
+    const LS_LAST = 'lizi.android.update.lastCheck';
+    const LS_DISMISSED = 'lizi.android.update.dismissed';
+    const CHECK_EVERY = 12 * 60 * 60 * 1000;   /* 12 小时 */
+    const BOOT_DELAY = 6000;                   /* 启动后 6 秒再查，避开首屏 */
+
+    const modal = document.getElementById('upd-modal');
+    const modalVer = document.getElementById('upd-modal-ver');
+    const modalClose = document.getElementById('upd-modal-close');
+    const modalPan = document.getElementById('upd-modal-pan');
+    const modalGh = document.getElementById('upd-modal-gh');
+    const checkBtn = document.getElementById('set-check-update');
+    const stateEl = document.getElementById('set-upd-state');
+    const versionEl = document.getElementById('set-app-version');
+
+    let checking = false;
+    let stateTimer = 0;
+    let currentVersion = '';
+
+    /* ---------- 版本号：按 x.y.z 的数字逐段比，不做字符串比 ---------- */
+    function localVersion() {
+      try {
+        const v = native.version();
+        return v ? String(v).trim().replace(/^v/i, '') : '';
+      } catch { return ''; }
+    }
+    function parseVersion(v) {
+      return String(v || '').trim().replace(/^v/i, '')
+        .split(/[.+-]/).slice(0, 3)
+        .map((n) => { const x = parseInt(n, 10); return Number.isFinite(x) ? x : 0; });
+    }
+    function compareVersions(a, b) {
+      const A = parseVersion(a);
+      const B = parseVersion(b);
+      for (let i = 0; i < 3; i++) {
+        const x = A[i] || 0;
+        const y = B[i] || 0;
+        if (x !== y) return x > y ? 1 : -1;
+      }
+      return 0;
+    }
+
+    /* ---------- localStorage 节流 ---------- */
+    function markChecked() {
+      try { localStorage.setItem(LS_LAST, String(Date.now())); } catch { /* 隐私模式 */ }
+    }
+    function dismissedVersion() {
+      try { return localStorage.getItem(LS_DISMISSED) || ''; } catch { return ''; }
+    }
+    function shouldAutoCheck() {
+      let last = 0;
+      try { last = Number(localStorage.getItem(LS_LAST) || 0) || 0; } catch { /* 隐私模式 */ }
+      return !last || Date.now() - last >= CHECK_EVERY;
+    }
+
+    /* ---------- 检查 GitHub Release ---------- */
+    async function checkLatest() {
+      const local = localVersion();
+      if (!local) return { status: 'error' };
+      /* 先记时间再请求：失败也算「检查过」，保证 12 小时内不会反复重试；
+         手动检查不受节流限制，仍然随时可用。 */
+      markChecked();
+      let resp;
+      try {
+        const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+        const timer = ctrl ? setTimeout(() => ctrl.abort(), 10000) : 0;
+        try {
+          resp = await fetch(API_URL, {
+            headers: { Accept: 'application/vnd.github+json' },
+            cache: 'no-store',
+            signal: ctrl ? ctrl.signal : undefined,
+          });
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      } catch {
+        return { status: 'error' };   /* 离线 / 被墙 / 超时：静默 */
+      }
+      if (!resp || !resp.ok) return { status: 'error' };
+      let data;
+      try { data = await resp.json(); } catch { return { status: 'error' }; }
+      const tag = data && (data.tag_name || data.name);
+      if (!tag) return { status: 'error' };
+      const remote = String(tag).trim().replace(/^v/i, '');
+      if (!remote) return { status: 'error' };
+      return compareVersions(remote, local) > 0
+        ? { status: 'available', version: remote, local }
+        : { status: 'latest', local };
+    }
+
+    /* ---------- 居中弹窗 ---------- */
+    function showModal(version) {
+      const v = String(version || '');
+      if (!v || !modal) return false;
+      if (v === dismissedVersion()) return false;
+      currentVersion = v;
+      if (modalVer) modalVer.textContent = 'v' + v;
+      modal.hidden = false;
+      return true;
+    }
+    function closeModal() {
+      if (modal) modal.hidden = true;
+      if (currentVersion) {
+        try { localStorage.setItem(LS_DISMISSED, currentVersion); } catch { /* 隐私模式 */ }
+      }
+    }
+    function openExternal(url) {
+      try { native.openExternal(url); } catch { /* 桥调用失败就当没点 */ }
+    }
+
+    if (modal) {
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();   /* 点遮罩关闭 */
+      });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal && !modal.hidden) closeModal();
+    });
+    if (modalClose) modalClose.addEventListener('click', closeModal);
+    if (modalPan) modalPan.addEventListener('click', () => {
+      openExternal(PAN_URL);
+      closeModal();
+    });
+    if (modalGh) modalGh.addEventListener('click', () => {
+      openExternal(GH_URL);
+      closeModal();
+    });
+
+    /* ---------- 设置页：版本号 + 检查更新 ---------- */
+    function setState(text, tone) {
+      if (!stateEl) return;
+      stateEl.textContent = text || '';
+      if (tone) stateEl.dataset.tone = tone;
+      else delete stateEl.dataset.tone;
+      clearTimeout(stateTimer);
+      if (text) stateTimer = setTimeout(() => {
+        stateEl.textContent = '';
+        delete stateEl.dataset.tone;
+      }, 4000);
+    }
+
+    if (versionEl) {
+      const v = localVersion();
+      if (v) versionEl.textContent = v;
+    }
+    if (checkBtn) {
+      checkBtn.hidden = false;
+      checkBtn.addEventListener('click', async () => {
+        if (checking) return;
+        checking = true;
+        checkBtn.disabled = true;
+        checkBtn.textContent = '检查中…';
+        setState('');
+        try {
+          const r = await checkLatest();
+          if (r.status === 'available') {
+            /* 同一版本已经关过：不再弹窗，只在按钮旁给结果（和桌面壳一致） */
+            if (!showModal(r.version)) setState(`发现新版本 v${r.version}`, 'ok');
+          } else if (r.status === 'latest') {
+            setState('已是最新', 'ok');
+          } else {
+            setState('检查失败，稍后再试', 'err');
+          }
+        } catch {
+          setState('检查失败，稍后再试', 'err');
+        } finally {
+          checking = false;
+          checkBtn.disabled = false;
+          checkBtn.textContent = '检查更新';
+        }
+      });
+    }
+
+    /* ---------- 自动检查：延迟启动，失败 / 已是最新都静默 ---------- */
+    setTimeout(() => {
+      if (checking || !shouldAutoCheck()) return;
+      checkLatest().then((r) => {
+        if (r && r.status === 'available') showModal(r.version);
+      }).catch(() => { /* 静默 */ });
+    }, BOOT_DELAY);
   })();
 })();

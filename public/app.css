@@ -2341,6 +2341,105 @@ body.is-desktop .stagebar { padding-right: 160px; }
   .stagebar .btn:hover { transform: none; }
 }
 
+/* ---- 影院模式（.is-cinema）：风景 / 相机形态的极简浮层 ----
+   形态在 ready payload 里声明 camera:true 时，app.js 给 #view-stage 加
+   .is-cinema。目的只有一个：画面本身是风景时，浮层不挡景。
+   具体做法：
+   · 拆掉液态玻璃底板（tint / 描边 / 折射 / 高光），只留一层很淡的深色圆点；
+   · 按钮只留图标（文字 span 隐藏），40px → 36px；歌曲胶囊收起时只露 32px 封面；
+   · 触屏点封面才展开迷你播放器，静止 2 秒自动收回（app.js CINEMA_IDLE_MS）；
+   · 淡出比普通形态更快：240ms / 320ms（普通是 380ms / 460ms）。
+   普通形态没有 .is-cinema，一个字节都不变。 */
+#view-stage.is-cinema .stagebar {
+  padding: 12px 16px;
+  gap: 8px;
+  transition-duration: 240ms, 320ms;
+}
+#view-stage.is-cinema .stagebar.is-idle { transform: translateY(-4px); }
+/* 桌面窗口三键仍在右上角：影院模式也不能把右侧让位吃掉 */
+body.is-desktop #view-stage.is-cinema .stagebar { padding-right: 160px; }
+
+/* 去掉玻璃：底色压到几乎只剩轮廓，折射 / 高光 / 外投影全部关掉 */
+#view-stage.is-cinema .stagebar .btn,
+#view-stage.is-cinema .snow__pill {
+  background: oklch(0% 0 0 / 0.16);
+  border-color: oklch(100% 0 0 / 0.14);
+  box-shadow: 0 1px 8px oklch(0% 0 0 / 0.16);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+#view-stage.is-cinema .stagebar .lg-sheen::after { display: none; }
+
+/* 三个操作按钮：图标圆点，不再带文字 */
+#view-stage.is-cinema .stagebar .btn {
+  width: 36px; height: 36px;
+  padding: 0;
+  border-radius: 50%;
+  color: oklch(100% 0 0 / 0.92);
+}
+#view-stage.is-cinema .stagebar .btn span { display: none; }
+#view-stage.is-cinema .stagebar .btn .ico { width: 17px; height: 17px; }
+#view-stage.is-cinema .stagebar .btn:active { background: oklch(0% 0 0 / 0.3); }
+
+/* 歌曲胶囊：收起时只有封面；展开（is-near）才回到能放下迷你播放器的高度 */
+#view-stage.is-cinema .snow__pill {
+  height: 36px;
+  padding: 2px;
+  border-radius: 12px;
+  transition: height 260ms var(--ease-out),
+              padding 260ms var(--ease-out),
+              border-radius 260ms var(--ease-out);
+}
+#view-stage.is-cinema .snow__art {
+  width: 32px; height: 32px;
+  border-radius: 10px;
+  transition: width 260ms var(--ease-out),
+              height 260ms var(--ease-out),
+              border-radius 260ms var(--ease-out);
+}
+#view-stage.is-cinema .stagebar.is-near .snow__pill {
+  height: 60px;              /* 比普通版 64 略矮，但留够两行信息 + 进度条 */
+  padding: 4px;
+  border-radius: 16px;
+}
+#view-stage.is-cinema .stagebar.is-near .snow__art {
+  width: 48px; height: 48px;
+  border-radius: 12px;
+}
+#view-stage.is-cinema .stagebar.is-near .snow__body {
+  width: 260px;
+  padding: 0 8px 0 10px;
+}
+/* 悬停热区也收窄：影院模式下不需要往左扩 300px，避免误触展开 */
+#view-stage.is-cinema .sbar-right::before { inset: -10px -8px -16px -80px; }
+
+/* 浅色风景：圆点换成半透明白，图标压深（和 is-on-light 那套反色一致） */
+#view-stage.is-cinema #stage-hud.is-on-light .btn,
+#view-stage.is-cinema #stage-hud.is-on-light .snow__pill {
+  background: oklch(100% 0 0 / 0.3);
+  border-color: oklch(0% 0 0 / 0.12);
+  color: oklch(18% .01 270);
+}
+
+/* ---- 形态页「看片模式」：静止后连窗口三键和光标一起退场 ----
+   app.js 的 armIdle 在桌面 / 非触屏下给 body 加 .is-chrome-idle。
+   三键只动 opacity / transform，display 仍是 flex —— 不用 display:none，
+   避免窗口右上角在隐藏/恢复时发生布局跳变；pointer-events:none 防止
+   点到看不见的按钮。光标本体在宿主 body；iframe 里的 cursor:none 由
+   app.js 注入到形态自己的 document（父页 CSS 管不到 iframe 内容）。
+   大厅 / 播放页 / 设置页没有 .is-stage，规则不生效。 */
+body.is-desktop .win-controls {
+  transition: opacity 320ms var(--ease-out), transform 320ms var(--ease-out);
+}
+body.is-stage.is-chrome-idle .win-controls {
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+}
+body.is-stage.is-chrome-idle,
+body.is-stage.is-chrome-idle .stage__frame,
+body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
+
 /* ---- 形态下拉：贴着「形态」按钮往下，两列 65 项 ---- */
 .smenu {
   position: absolute; top: calc(100% + 10px); right: 0; z-index: 6;
@@ -2386,7 +2485,7 @@ body.is-desktop .stagebar { padding-right: 160px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stagebar, .snow { transition-duration: 1ms; }
+  .stagebar, .snow, .win-controls { transition-duration: 1ms; }
 }
 
 /* 「形态长廊」：把全部形态铺在一颗球面上。
@@ -6463,6 +6562,12 @@ span.pstrip__crumb-seg { cursor: default; }
 /* 只有铺色态显示；普通态/窄窗留白不够时藏起来 */
 .hall-rail:not(.is-plat) .hall-sidekeys { display: none; }
 @media (max-width: 900px) { .hall-sidekeys { display: none; } }
+/* 2026-11-10：桌面端（鼠标 pointer:fine）不要轨道最下面那个「收起面板」三角。
+   用户明确要求去掉 —— 桌面版没有折叠面板的用法，留着只会被误点。
+   手机铺色态（pointer:coarse）折的是海报，那个三角还要用，所以只按指针类型藏。 */
+@media (hover: hover) and (pointer: fine) {
+  .srail__fold { display: none; }
+}
 
 /* ---------- 铺色面板：四面长方体（2026-11-08 晚） ----------
    歌曲 / 形态长廊 / 我的专辑 / 工具箱 = 四个面，绕 X 轴翻滚切换。
@@ -8040,6 +8145,24 @@ body.pbn-off #player { display: none !important; }
      折叠后「指下」= 把海报拉回来。桌面的 is-plat-folded rotate 规则不参与。 */
   #view-hall.is-plat-mode .srail__fold { transform: rotate(180deg); }
   #view-hall.is-plat-mode.is-hero-folded .srail__fold { transform: rotate(0deg); }
+
+  /* 跑马带高度跟着卡片实际高度走（2026-11-10）。
+     sync.js 注入的 `.hall-marq { min-height: 0 }` 只有一个类，压不过 app.css
+     里 `.plat-face--song .hall-marq`（两个类）的那条 `228px * scale`，所以手机上
+     带子仍被撑到 228×scale，比 flex 分到的剩余空间还高；卡片在带子里居中后，
+     底部的歌手名会越过面板下沿，被 #hall-plat 的 overflow:hidden 切掉。
+     这里用和卡片同源的算式给真实最小高度：封面(width) + 歌名/歌手两行按
+     14 / 12.5px 下限算出的行高 + 带子上下留白 10×scale×2。卡宽已经由 app.js
+     的 fitPlatScale 按同一套高度反解过，所以这个下限不会超过 flex 分配值。
+     只在粗指针 + ≤1280 生效，桌面仍走上面的 228×scale。 */
+  .plat-face--song .hall-marq {
+    min-height: calc(
+      var(--marq-card-w, 156px) * 1.0577
+      + max(14px, var(--marq-card-w, 156px) * 0.0801) * 1.3
+      + max(12.5px, var(--marq-card-w, 156px) * 0.0673) * 1.3
+      + 20px * var(--plat-scale, 1)
+    );
+  }
 }
 
 /* ==========================================================================
@@ -8373,4 +8496,110 @@ body.is-stage .updtoast { bottom: 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .updtoast { animation: none; }
+}
+
+/* ==========================================================================
+   安卓壳：新版本居中弹窗
+   —— 页面被 sync.js 固定成 width=1280 后整体缩放到手机屏，所以尺寸和字号
+      按 1280 布局视口给足（标题 30 / 正文 24 / 按钮 26）。
+      卡片沿用 .lg-surface 的兜底模糊，tint / 描边 / 绿点照 .updtoast 那一套；
+      遮罩只做半透明黑，不铺大面积 backdrop-filter（安卓上大块模糊会掉帧）。
+   ========================================================================== */
+.updmodal {
+  position: fixed;
+  inset: 0;
+  z-index: 980;                 /* 压在 ma-fs（900）、mig（260）、toast（150）之上 */
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: oklch(0% 0 0 / .58);
+  animation: updmodal-fade 200ms var(--ease-out);
+}
+.updmodal[hidden] { display: none; }
+
+.updmodal__card {
+  position: relative;
+  width: min(760px, 86vw);
+  padding: 34px 40px 38px;
+  border-radius: 26px;
+  --lg-radius: 26px;
+  --lg-tint: oklch(21% 0.016 272 / 0.88);
+  --lg-edge: oklch(100% 0 0 / 0.20);
+  color: oklch(98% 0.004 270);
+  box-shadow:
+    inset 0 1px 0 oklch(100% 0 0 / 0.20),
+    inset 0 0 0 1px oklch(100% 0 0 / 0.04),
+    0 40px 96px oklch(0% 0 0 / 0.52),
+    0 12px 32px oklch(0% 0 0 / 0.34);
+  animation: updmodal-in 260ms var(--ease-out);
+}
+
+.updmodal__head { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.updmodal__dot {
+  flex: none; width: 12px; height: 12px; border-radius: 50%;
+  background: oklch(78% .16 155);
+  box-shadow: 0 0 14px oklch(78% .16 155 / .85);
+}
+.updmodal__title {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 30px; font-weight: var(--fw-semi); line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: oklch(99% 0 0 / .97);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.updmodal__title i {
+  font-style: normal; font-variant-numeric: tabular-nums;
+  color: oklch(100% 0 0 / .68);
+}
+.updmodal__x {
+  flex: none; display: grid; place-items: center;
+  width: 44px; height: 44px; margin: -6px -8px -6px 0; padding: 0;
+  border: 0; border-radius: 50%;
+  background: transparent; color: oklch(100% 0 0 / .58);
+  font: inherit; font-size: 30px; line-height: 1;
+  cursor: pointer;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+.updmodal__x:hover { background: oklch(100% 0 0 / .1); color: oklch(100% 0 0 / .94); }
+.updmodal__x:active { transform: scale(.94); }
+
+.updmodal__desc {
+  margin: 18px 0 0;
+  font-size: 24px; line-height: 1.55;
+  color: oklch(100% 0 0 / .70);
+}
+
+.updmodal__acts { display: flex; gap: 14px; margin-top: 34px; }
+.updmodal__btn {
+  flex: 1 1 0; min-width: 0;
+  height: 62px; padding: 0 16px;
+  border: 1px solid oklch(100% 0 0 / .18);
+  border-radius: 16px;
+  background: oklch(100% 0 0 / .07);
+  color: oklch(100% 0 0 / .88);
+  font: inherit; font-size: 26px; line-height: 1;
+  white-space: nowrap; cursor: pointer;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out),
+              transform 160ms var(--ease-out);
+}
+.updmodal__btn:hover { background: oklch(100% 0 0 / .14); color: #fff; }
+.updmodal__btn:active { transform: scale(.97); }
+.updmodal__btn--go {
+  border-color: transparent;
+  background: oklch(100% 0 0 / .92);
+  color: oklch(20% .01 270);
+  font-weight: var(--fw-semi);
+}
+.updmodal__btn--go:hover { background: #fff; color: oklch(16% .01 270); }
+
+@keyframes updmodal-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes updmodal-in {
+  from { opacity: 0; transform: translateY(14px) scale(.97); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .updmodal, .updmodal__card { animation: none; }
 }

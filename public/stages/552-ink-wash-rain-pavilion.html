@@ -47,7 +47,7 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
 /* ---------- 设置面板 ---------- */
 window.__stagePanel = {
   title: "烟雨江南",
-  hint: "按住画面拖动可以自己转头，松手会慢慢回正。",
+  hint: "按住画面拖动可以自己转头，松手会慢慢回正。轻点画面唤出操作条（拖动不会弹出），点封面展开播放器。",
   items: [
     { key: "view", label: "视角", type: "segment", def: "third",
       options: [{ v: "third", t: "船夫身后" }, { v: "first", t: "船夫第一人称" }] },
@@ -126,7 +126,9 @@ var readySent = false;
 function sendReady(){
   if (readySent) return;
   readySent = true;
-  try { parent.postMessage({ __c100: 1, type: "ready" }, "*"); } catch(e){}
+  /* camera:true —— 画面本身要拖动转头：宿主不要在这上面盖点击层，
+     浮层切成极简版，触屏上只认「点按」唤出。老宿主不认这个字段，行为不变。 */
+  try { parent.postMessage({ __c100: 1, type: "ready", payload: { camera: true } }, "*"); } catch(e){}
 }
 requestAnimationFrame(sendReady);
 setTimeout(sendReady, 800);
@@ -2047,6 +2049,10 @@ addEventListener("blur", onDragUp);
 
 /* 活动转发 */
 function fwdActivity(){
+  /* 正在拖镜头时不要把鼠标活动转给宿主：宿主收到 activity 会叫醒操作条，
+     而用户此刻只想安静地看风景。松开后不拖动的 mousemove 仍会转发，
+     桌面端把鼠标移回画面照样能唤出操作条。 */
+  if (dragOn) return;
   try { parent.postMessage({ __c100: 1, type: "activity" }, "*"); } catch(e){}
 }
 addEventListener("mousemove", fwdActivity, { passive: true });

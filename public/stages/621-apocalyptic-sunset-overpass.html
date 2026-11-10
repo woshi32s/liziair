@@ -1511,7 +1511,10 @@ function getGlyphMask(ch){
       }
     }
     var bottom = (GSZ * 0.5 - maxY) / GFONT;
-    out = { empty: false, adv: adv, bottom: bottom, pts: pts };
+    /* 墨迹高度（em）。正常方块字约 0.95em；「一 / ー / - / —」这类
+       只剩一条横线的字只有 0.06~0.14em。纵向排版要靠它区分「扁平字」。 */
+    var inkH = (maxY - minY) / GFONT;
+    out = { empty: false, adv: adv, bottom: bottom, inkH: inkH, pts: pts };
     glyphCache[ch] = out;
     return out;
   } catch(e){
@@ -1524,6 +1527,20 @@ function getGlyphMask(ch){
 /* ---------- 13) 断桥上的巨型块字 ---------- */
 var glyphDummy = null;
 var coolRim = null, warmRim = null;
+
+/* 扁平字的纵向修正。
+   本形态所有字都按「墨迹底边贴桥面」对齐（buildGlyph 里的 mask.bottom）。
+   正常方块字的墨迹底边≈基线，墨迹高约 0.95em，视觉中心在桥面上方约 0.47em；
+   而「一 / ー / - / — / ·」这类字墨迹只有中间一条横线，墨迹高只有
+   0.06~0.14em，且墨迹底边本来就悬在字身中部（离字身中线只差 0~0.1em）。
+   按底边对齐后整条横线落在桥面高度——也就是整句字的最底边，
+   看上去就是沉到画面底部，而不是像其它字那样浮在中间。
+   修正：只对「墨迹很扁」且「墨迹底边明显高于正常基线」的字，把墨迹中心
+   抬到正常方块字的视觉中心。正常字（含 二/三/，/。/…/_）两个条件不成立，
+   位移仍为 0，位置、字号、动效完全不变。 */
+var INK_FLAT_H = 0.30;          /* em：墨迹高度小于此值才算扁平字 */
+var INK_FLOAT_BOTTOM = -0.22;   /* em：墨迹底边高于此值才算「悬空字」，正常字约 -0.42~-0.55 */
+var INK_CENTER_EM = 0.47;       /* em：正常方块字墨迹中心相对桥面的高度 */
 
 function buildLetterRoot(){
   letterRoot = new THREE.Group();
@@ -1542,6 +1559,13 @@ function buildGlyph(ch, mask, font, cx, yBase, zRow, charT, rotSeed, delay, dust
   var mesh = new THREE.InstancedMesh(LETTER_GEO, mat, count);
   var cell = GSTEP / GFONT * font * 1.06;
   var depthBase = font * 0.30 + 0.10;
+  /* 扁平字（一 / ー / - / — / ·）把墨迹中心抬到正常字视觉中心的高度；
+     其它字 flatLift 恒为 0，矩阵与原来逐位相同。只抬实例、不动 group 原点：
+     halo、扬尘和入场落点仍按桥面高度算，与正常字一致。 */
+  var flatLift = 0;
+  if (isFinite(mask.inkH) && mask.inkH < INK_FLAT_H && mask.bottom > INK_FLOAT_BOTTOM){
+    flatLift = (INK_CENTER_EM - mask.inkH * 0.5) * font;
+  }
   var col = new THREE.Color();
   var j, p;
   for (j = 0; j < count; j++){
@@ -1550,7 +1574,7 @@ function buildGlyph(ch, mask, font, cx, yBase, zRow, charT, rotSeed, delay, dust
     var h2 = hash2(j, 2.9, rotSeed * 11.0 + 5.3);
     var h3 = hash2(j, 4.7, rotSeed * 7.0 + 8.9);
     var lx = p.x * font + (h1 - 0.5) * cell * 0.12;
-    var ly = (p.y - mask.bottom) * font + (h2 - 0.5) * cell * 0.12;
+    var ly = (p.y - mask.bottom) * font + flatLift + (h2 - 0.5) * cell * 0.12;
     var lz = (h1 - 0.5) * font * 0.09;
     var depth = depthBase * (0.80 + h3 * 0.42);
     glyphDummy.position.set(lx, ly, lz);

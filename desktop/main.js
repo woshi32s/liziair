@@ -17,7 +17,7 @@
    没有打包成 asar：保持散装，改 public/ 里的文件刷新窗口就生效
    （和浏览器工作流一致，这是这个项目的开发方式）。
    ========================================================================== */
-const { app, BrowserWindow, Tray, Menu, globalShortcut, shell, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, shell, nativeImage, dialog, screen } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -116,6 +116,84 @@ async function ensureServer() {
 
 /* ---------------------------------------------------------------- 窗口 ---- */
 
+/* 正常态尺寸：还原时以它为准。
+   Windows 自己会记「最大化前的尺寸」，但透明无边框窗口在个别路径下会丢；
+   而且 win.unmaximize() 不保证每次都精确回到原位。窗口每次处于正常态
+   （显示 / 移动 / 拖边）就记一份，还原时用来核对和兜底。 */
+let normalBounds = null;
+/* 最大化 / 还原过程中 Windows 会连发几次 resize，中间态的尺寸不能当正常态记。
+   进入切换后先静默一段时间，等窗口落定再恢复记录。 */
+let boundsSettlingUntil = 0;
+
+/** 窗口是不是铺满了当前显示器的工作区。
+    系统级最大化时 Electron 的 isMaximized() 可能不认，几何上却能看出来。 */
+function coversWorkArea() {
+  if (!win || win.isDestroyed()) return false;
+  const b = win.getBounds();
+  const wa = screen.getDisplayMatching(b).workArea;
+  return b.x <= wa.x + 2 && b.y <= wa.y + 2
+    && b.width >= wa.width - 16 && b.height >= wa.height - 16;
+}
+
+function rememberNormalBounds() {
+  if (!win || win.isDestroyed()) return;
+  if (Date.now() < boundsSettlingUntil) return;   // 切换动画中间态
+  if (win.isMaximized() || win.isFullScreen() || win.isMinimized()) return;
+  if (coversWorkArea()) return;              // 最大化途中 / 系统级最大化，不能当正常态
+  const b = win.getBounds();
+  if (b.width < 200 || b.height < 150) return;
+  normalBounds = b;
+}
+
+/** 真实的最大化状态：Electron 的标记 + 工作区几何兜底。图标状态跟它走。 */
+function isMaximizedNow() {
+  return !!win && !win.isDestroyed() && (win.isMaximized() || coversWorkArea());
+}
+
+/** 点一下放大键 = 最大化到工作区；再点 = 精确回到记下的正常尺寸和位置 */
+function toggleMaximize() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isFullScreen()) { win.setFullScreen(false); return; }
+  if (isMaximizedNow()) {
+    boundsSettlingUntil = Date.now() + 900;
+    const target = normalBounds;
+    win.unmaximize();
+    /* unmaximize 之后核对一次：没回到正常尺寸就自己摆回去。
+       个别情况下（窗口被系统按最大化处理）Electron 的 unmaximize 会空转。 */
+    setTimeout(() => {
+      if (!win || win.isDestroyed()) return;
+      if (target && !win.isMaximized() && coversWorkArea()) win.setBounds(target);
+      pushWinState();
+    }, 180);
+  } else {
+    rememberNormalBounds();
+    boundsSettlingUntil = Date.now() + 900;
+    win.maximize();
+  }
+}
+
+/** 双击顶栏 / 顶部拖动带 = 最大化 / 还原（Windows 习惯）。
+    这两块是 -webkit-app-region: drag（非客户区），页面的 dblclick 收不到；
+    Windows 会把双击翻译成 WM_SYSCOMMAND(SC_MAXIMIZE)，但无边框窗口自己不处理。
+    在主进程接住这条命令，和右上角放大键走同一个 toggle。 */
+function hookCaptionDoubleClick() {
+  if (process.platform !== 'win32' || typeof win.hookWindowMessage !== 'function') return;
+  win.hookWindowMessage(0x0112 /* WM_SYSCOMMAND */, (wParam) => {
+    let cmd = 0;
+    try {
+      cmd = Buffer.isBuffer(wParam) ? wParam.readUInt32LE(0) : Number(wParam) >>> 0;
+    } catch { return; }
+    if ((cmd & 0xfff0) !== 0xf030 /* SC_MAXIMIZE */) return;
+    const before = isMaximizedNow();
+    /* 等默认处理走完再核对：系统若已经自己翻了状态，就不要再翻一次 */
+    setTimeout(() => {
+      if (!win || win.isDestroyed()) return;
+      if (isMaximizedNow() !== before) { pushWinState(); return; }
+      toggleMaximize();
+    }, 0);
+  });
+}
+
 function createWindow(port) {
   win = new BrowserWindow({
     width: 1320,
@@ -140,9 +218,13 @@ function createWindow(port) {
     },
   });
 
-  win.loadURL(`http://127.0.0.1:${port}/`);
+  /* 预览更新提示条：LIZI_UPDATE_PREVIEW=1.0.1 启动时给页面带上 ?upd=，
+     只为在桌面壳里看样式（app.js 里按 preview 分支直接亮出来）。
+     不带这个环境变量时 URL 和原来完全一样。 */
+  const previewUpd = String(process.env.LIZI_UPDATE_PREVIEW || '').trim();
+  win.loadURL(`http://127.0.0.1:${port}/${previewUpd ? `?upd=${encodeURIComponent(previewUpd)}` : ''}`);
 
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { win.show(); rememberNormalBounds(); });
 
   /* 点歌、登录这类新窗口一律走系统浏览器（server 的登录流程在浏览器里更顺） */
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -164,6 +246,16 @@ function createWindow(port) {
   for (const evName of ['maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen', 'resize', 'show', 'hide']) {
     win.on(evName, pushWinState);
   }
+  /* 最大化 / 还原切换期间先别记尺寸（Windows 会连发中间态 resize） */
+  win.on('maximize', () => { boundsSettlingUntil = Date.now() + 900; });
+  win.on('unmaximize', () => { boundsSettlingUntil = Date.now() + 900; });
+  /* 正常态的尺寸随时记：移动 / 拖边 / 从托盘显示回来都要更新 */
+  win.on('move', rememberNormalBounds);
+  win.on('resize', rememberNormalBounds);
+  win.on('show', rememberNormalBounds);
+
+  /* 双击顶栏 / 拖动带（非客户区）：接住系统发的 SC_MAXIMIZE */
+  hookCaptionDoubleClick();
 
   win.webContents.on('did-finish-load', () => log('页面加载完成'));
   /* 页面一加载好先给一次真实状态（页面启动时也会自己读一次 isMaximized） */
@@ -206,19 +298,16 @@ function sendToPage(channel) {
 /* ---- 自绘窗口控制：最小化 / 最大化 / 关闭(到托盘) ---- */
 const { ipcMain } = require('electron');
 ipcMain.on('win:minimize', () => win && win.minimize());
-ipcMain.on('win:maximize', () => {
-  if (!win) return;
-  win.isMaximized() ? win.unmaximize() : win.maximize();
-});
+ipcMain.on('win:maximize', toggleMaximize);
 ipcMain.on('win:close', () => win && win.hide());        // 关 = 到托盘
-ipcMain.on('win:isMaximized', (e) => { e.returnValue = win ? win.isMaximized() : false; });
+ipcMain.on('win:isMaximized', (e) => { e.returnValue = isMaximizedNow(); });
 
 /* ---- 窗口状态（新增）：页面点完三键不能靠猜，真实状态只有主进程知道 ---- */
 
 /** 一次性读全：最大化 / 最小化 / 全屏 / 可见 */
 function winState() {
   return {
-    maximized: !!win && win.isMaximized(),
+    maximized: isMaximizedNow(),
     minimized: !!win && win.isMinimized(),
     fullscreen: !!win && win.isFullScreen(),
     visible: !!win && win.isVisible(),
@@ -331,6 +420,39 @@ function checkForUpdatesOnce() {
   return checkingUpdates;
 }
 
+/* 下载失败要有反馈：以前只写日志，用户点了「立即下载」后什么也看不到，
+   还以为在后台下。GitHub 直连在国内经常断，必须给一条能走的路。 */
+let downloadErrorOpen = false;
+async function downloadFailed(err) {
+  downloading = false;
+  clearDownloadProgress();
+  const detail = err && err.message ? String(err.message) : '';
+  log('[update] 下载失败', detail);
+  if (downloadErrorOpen || quitting) return;
+  downloadErrorOpen = true;
+  try {
+    const panReady = !/PLACEHOLDER/i.test(PAN_QUARK_URL);
+    const buttons = panReady ? ['改用网盘下载', '重试', '关闭'] : ['重试', '关闭'];
+    const { response } = await showBox({
+      type: 'warning',
+      title: 'LIZI 更新',
+      message: '下载失败',
+      detail: '可能是网络连不上 GitHub。'
+        + (panReady ? '网盘里有同一个安装包，可以直接下。' : ''),
+      buttons,
+      defaultId: 0,
+      cancelId: buttons.length - 1,
+      noLink: true,
+    });
+    if (panReady && response === 0) openUrl(PAN_QUARK_URL);
+    else if (response === (panReady ? 1 : 0)) startDownload();
+  } catch (e) {
+    log('[update] 下载失败提示没弹出来', e && e.message ? e.message : e);
+  } finally {
+    downloadErrorOpen = false;
+  }
+}
+
 /* 用户选了「立即下载」：只走应用内下载，不打开浏览器；下完再问要不要重启。 */
 function startDownload() {
   if (!updater || downloading) return;
@@ -339,16 +461,10 @@ function startDownload() {
   try {
     const p = updater.downloadUpdate();
     if (p && typeof p.catch === 'function') {
-      p.catch((err) => {
-        downloading = false;
-        clearDownloadProgress();
-        log('[update] 下载失败（已忽略）', err && err.message ? err.message : err);
-      });
+      p.catch((err) => downloadFailed(err));
     }
   } catch (err) {
-    downloading = false;
-    clearDownloadProgress();
-    log('[update] 下载启动失败（已忽略）', err && err.message ? err.message : err);
+    downloadFailed(err);
   }
 }
 
@@ -443,6 +559,9 @@ function initAutoUpdate() {
       promptRestart(info).catch((err) => log('[update] 重启提示失败', err));
     });
     updater.on('error', (err) => {
+      /* 只有正在下载时才算「用户可见的失败」——后台自动检查失败照旧静默，
+         不影响启动，也不要半夜弹窗吓人。 */
+      if (downloading) { downloadFailed(err); return; }
       downloading = false;
       clearDownloadProgress();
       log('[update] 更新失败（已忽略，不影响启动）', err && err.message ? err.message : err);

@@ -2,8 +2,8 @@
   "name": "lyric-glass-player",
   "productName": "LIZI",
   "version": "1.0.0",
-  "description": "网易云音乐 · 液态玻璃 —— 60 种歌词可视化形态的演出器",
-  "author": "86186",
+  "description": "粒子播放器",
+  "author": "LIZI",
   "license": "MIT",
   "repository": {
     "type": "git",

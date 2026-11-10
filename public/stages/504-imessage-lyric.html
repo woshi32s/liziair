@@ -867,17 +867,22 @@ function applyShot(i, force){
    ========================================================== */
 var freeRX = 9, freeRY = 22, freeS = 1.35;
 var freeDrag = null;
+var freeResetToken = 0;   /* 离开自由视角后延迟恢复基础分层的令牌 */
 
 function applyFree(){
   if (!tiltEl) return;
   var W = innerWidth || 1440;
   var px = W * 0.5 - anchorPx;
-  tiltEl.style.transition = 'transform 90ms linear';
+  /* 安卓不能再用 90ms 缓动：缓动期间相机角度落后于 freeRX/freeRY 目标值，
+     往回缩的那几帧真实角度仍接近侧视，层距会低于守卫值又闪一下。
+     桌面深度精度够，保留原来的 90ms 手感。 */
+  tiltEl.style.transition = ANDROID ? 'none' : 'transform 90ms linear';
   tiltEl.style.transform =
     'translate3d(' + px.toFixed(1) + 'px,0,0) ' +
     'rotateX(' + freeRX.toFixed(2) + 'deg) ' +
     'rotateY(' + freeRY.toFixed(2) + 'deg) rotateZ(0deg) ' +
     'scale(' + freeS.toFixed(3) + ')';
+  freeDepthUpdate();   /* 安卓自由视角：按当前 freeS/角度重排层距（不重建 DOM） */
   metaZoomHide = (freeS > 1.55); syncMeta();
 }
 
@@ -1113,8 +1118,20 @@ function onSetting(p){
 
   if (k === 'mode'){
     endDrag();
+    var modeTok = ++freeResetToken;
     if (P.mode === 'free'){ enterFree(); }
-    else { lastBucket = -9999; rezoom(); }
+    else {
+      /* 离开自由视角不能立刻把层距改回基础值：自由机位可能停在 0.80/侧视，
+         镜头要 0.8–1.8s 才摇回固定机位，过渡前半段仍很极端，立刻重建又会闪。
+         等镜头落位（最长 1780ms）后再恢复基础分层；期间沿用自由视角的大层距。 */
+      if (ANDROID){
+        setTimeout(function(){
+          if (modeTok !== freeResetToken) return;   /* 期间又切过模式，作废 */
+          if (P.mode !== 'free') buildLayers();
+        }, 1900);
+      }
+      lastBucket = -9999; rezoom();
+    }
   } else if (k === 'shot'){
     if (P.mode === 'hold'){ lastBucket = -9999; rezoom(); }
   } else if (k === 'every'){
@@ -1233,6 +1250,8 @@ function frame(now){
         parEl.style.transform = 'rotateY(' + tiltX.toFixed(2) + 'deg) rotateX(' +
           (-tiltY).toFixed(2) + 'deg)';
       }
+      /* 安卓自由视角：视差也会改变实际视角，层距守卫跟着走（层数没变时内部直接 return） */
+      if (ANDROID && P.mode === 'free') freeDepthUpdate();
     }
 
     S.frames++;
@@ -1270,8 +1289,12 @@ try {
    桌面固定 40 层、层距 1.47px。
    ⚠ 安卓 WebView 深度缓冲精度不足：层距 <2.4px 时 3D 排序会翻，侧壁整块闪到前面。
    页面整体还要乘 --k 缩放，运镜再叠加 scale(s)，实际层距 = gap × K × s；
-   所以安卓按当前 K 动态分层，保证最广镜头（s=1.18）下实际层距 ≥2.6px。 */
+   所以安卓按当前 K 动态分层，保证最广镜头（s=1.18）下实际层距 ≥2.6px。
+   自由视角还会再乘 freeS(0.80–2.60) 和视角余弦，固定层距不够用；
+   进入 free 后由 freeDepthUpdate() 按需减层、放大 gap（见下）。
+   桌面 GPU 深度精度足够，整套守卫只在 ANDROID 分支生效。 */
 var ANDROID = /Android/i.test(navigator.userAgent || '');
+var layerEls = null, layerBack = null, layerBaseN = 0, layerCurN = 0, layerCurGap = 0;
 function buildLayers(){
   var lyEl = $('layers'), NL, gap, i, t, li, lum, zz, need, kk, back;
   if (!lyEl) return;
@@ -1302,13 +1325,77 @@ function buildLayers(){
     lyEl.appendChild(li);
   }
 
-  /* 背板：安卓至少与最深层隔一个 gap，避免和挤层贴太近翻到前面 */
+  /* 背板：安卓与最深层至少隔 2 个 gap —— 只隔 1 个时它和挤层也贴太近，同样会翻 */
   back = document.createElement('i');
   back.style.transform = ANDROID
-    ? 'translateZ(' + (-(58.8 + gap)).toFixed(2) + 'px)'
+    ? 'translateZ(' + (-((NL + 2) * gap)).toFixed(2) + 'px)'
     : 'translateZ(-60px)';
   back.style.background = 'radial-gradient(72% 50% at 32% 30%,#2a2a33,#0e0e12 72%)';
   lyEl.appendChild(back);
+
+  /* 安卓：记住层片引用与基础层数，自由视角守卫只改这些元素的 style，不再建 DOM */
+  if (ANDROID){
+    layerEls = [];
+    for (i = 0; i < lyEl.children.length - 1; i++) layerEls.push(lyEl.children[i]);
+    layerBack = lyEl.children[lyEl.children.length - 1];
+    layerBaseN = NL; layerCurN = NL; layerCurGap = gap;
+    if (P.mode === 'free' && !PORTRAIT) freeDepthUpdate(true);   /* 尺寸变化后按新 K 重排 */
+  }
+}
+
+/* ==========================================================
+   自由视角层距守卫（仅安卓）
+   ----------------------------------------------------------
+   安卓 WebView 的 3D 排序在投影层距 <2.4px 时会翻，实测 2.42px 起稳定。
+   自由视角的投影层距 = gap × K × freeS × cos(rx) × cos(ry)，
+   再被 perspective:1250 轻微缩小；而 buildLayers 的 gap 只按 s=1.18 算。
+   所以缩到 0.80 或转到 ±34°/±62° 时，层距会掉到 0.7–1.8px（见验收数据），
+   深色层片就会翻到屏幕前面 = 整屏闪。
+
+   这里不放大机身：总厚基本仍按 58.8 算，只把层数 n 减少、gap 放大成 58.8/n
+   （只有极小 K 的兜底会略超），保证最深层那一对的投影层距 ≥2.75px（含透视余量）。
+   层数只在跨阈值时变，改的是已有 <i> 的 transform/背景，拖动时不会重建 DOM。
+   桌面（!ANDROID）不调用、数值与分支都不变。 */
+var FREE_DEPTH_MIN = 2.75;
+function freeDepthUpdate(force){
+  if (!ANDROID || !layerEls || !layerEls.length) return;
+  if (P.mode !== 'free' || PORTRAIT) return;
+  var k = K;
+  if (!isFinite(k) || k <= 0) k = 0.56;                    /* 与 buildLayers 的兜底一致 */
+  var s = freeS;
+  if (!isFinite(s) || s <= 0) s = 1;
+  /* .par 的鼠标视差还会再叠 ±5.4°/±3.6°，按最坏方向一起算进视角余弦 */
+  var prx = Math.abs(freeRX) + Math.abs(tiltY);
+  var pry = Math.abs(freeRY) + Math.abs(tiltX);
+  var c = Math.abs(Math.cos(prx * Math.PI / 180) * Math.cos(pry * Math.PI / 180));
+  if (c < 0.28) c = 0.28;                                  /* 兜底，正常 ±34°/±62° 不会触发 */
+  var kz = 58.8 * k * s;                                   /* 整叠层片的相机空间深度 */
+  var persp = 1250 / (1250 + kz);                          /* 最深层被透视缩小的比例 */
+  var need = FREE_DEPTH_MIN / (k * s * c * persp * persp); /* 局部坐标下需要的层距 */
+  var n = Math.floor(58.8 / need + 1e-9);
+  if (n > layerBaseN) n = layerBaseN;
+  if (n < 3) n = 3;                                        /* 至少 3 层，侧壁才不至于只剩两块板 */
+  /* 迟滞 4%：角度停在阈值上时不让层数来回跳（少层=大 gap 永远安全，所以只迟滞“增层”） */
+  if (n > layerCurN && need > (58.8 / n) * 0.96) n = layerCurN;
+  var gap = 58.8 / n;
+  if (gap < need) gap = need;                              /* 极小 K 时宁可略厚，也不破阈值 */
+  if (!force && n === layerCurN && Math.abs(gap - layerCurGap) < 0.01) return;
+  layerCurN = n; layerCurGap = gap;
+
+  var i, li, t, lum;
+  for (i = 0; i < layerEls.length; i++){
+    li = layerEls[i];
+    if (i >= n){ li.style.visibility = 'hidden'; continue; }
+    li.style.visibility = '';
+    li.style.transform = 'translateZ(' + (-(i + 1) * gap).toFixed(2) + 'px)';
+    t = (n > 1) ? i / (n - 1) : 1;
+    lum = 0.28 + 0.72 * Math.pow(t, 0.75);
+    li.style.background = 'rgb(' + Math.round(10 + 74 * lum) + ',' +
+      Math.round(10 + 74 * lum) + ',' + Math.round(13 + 82 * lum) + ')';
+  }
+  /* 背板退到「最深层再往后 2 个 gap」；n=3 且 gap=need 时总厚会略超 58.8，不能写死 58.8 */
+  if (layerBack) layerBack.style.transform =
+    'translateZ(' + (-((n + 2) * gap)).toFixed(2) + 'px)';
 }
 
 fit();
