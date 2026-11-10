@@ -477,13 +477,13 @@ async function askUpdate(info) {
        直接少一个「网盘备用」，文案里那句「网盘里有同一个安装包」也一起去掉。 */
     const panReady = !/PLACEHOLDER/i.test(PAN_QUARK_URL);
     const buttons = panReady
-      ? ['立即下载', '打开下载页', '网盘备用', '以后再说']
+      ? ['立即下载', '打开下载页', '夸克网盘', '百度网盘', '以后再说']
       : ['立即下载', '打开下载页', '以后再说'];
     const { response } = await showBox({
       type: 'info',
       title: 'LIZI 更新',
       message: `有新版本 v${version}`,
-      detail: panReady ? 'GitHub 直连不稳的话，网盘里有同一个安装包。' : '',
+      detail: panReady ? 'GitHub 直连不稳的话，可以从夸克或百度网盘下载同一个安装包。' : '',
       buttons,
       defaultId: 0,
       cancelId: buttons.length - 1,
@@ -500,6 +500,10 @@ async function askUpdate(info) {
     }
     if (panReady && response === 2) {
       openUrl(PAN_QUARK_URL);
+      return;
+    }
+    if (panReady && response === 3) {
+      openUrl(PAN_BAIDU_URL);
       return;
     }
     log('[update] 用户选择以后再说');
@@ -615,6 +619,7 @@ ipcMain.handle('update:download', () => {
 /** 只允许打开两个固定地址，避免把任意 URL 开成系统浏览器。 */
 ipcMain.handle('update:open', (_e, target) => {
   if (target === 'pan') { openUrl(PAN_QUARK_URL); return true; }
+  if (target === 'pan-bd') { openUrl(PAN_BAIDU_URL); return true; }
   if (target === 'github') { openUrl(RELEASES_URL); return true; }
   return false;
 });

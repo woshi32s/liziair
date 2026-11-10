@@ -13750,6 +13750,7 @@
     const verEl = document.getElementById('upd-ver');
     const closeBtn = document.getElementById('upd-close');
     const panBtn = document.getElementById('upd-pan');
+    const panBdBtn = document.getElementById('upd-pan-bd');
     const ghBtn = document.getElementById('upd-gh');
     const nowBtn = document.getElementById('upd-now');
     const checkBtn = document.getElementById('set-check-update');
@@ -13813,6 +13814,10 @@
     if (closeBtn) closeBtn.addEventListener('click', closeToast);
     if (panBtn) panBtn.addEventListener('click', () => {
       desktop.update.open('pan');
+      closeToast();
+    });
+    if (panBdBtn) panBdBtn.addEventListener('click', () => {
+      desktop.update.open('pan-bd');
       closeToast();
     });
     if (ghBtn) ghBtn.addEventListener('click', () => {
@@ -13880,6 +13885,7 @@
 
     const API_URL = 'https://api.github.com/repos/woshi32s/liziair/releases/latest';
     const PAN_URL = 'https://pan.quark.cn/s/6c6e65f3ee4c';
+    const PAN_BAIDU_URL = 'https://pan.baidu.com/s/1crtOz-RxF6YyKLn9uxykWQ?pwd=lizi';
     const GH_URL = 'https://github.com/woshi32s/liziair/releases/latest';
     const LS_LAST = 'lizi.android.update.lastCheck';
     const LS_DISMISSED = 'lizi.android.update.dismissed';
@@ -13890,6 +13896,7 @@
     const modalVer = document.getElementById('upd-modal-ver');
     const modalClose = document.getElementById('upd-modal-close');
     const modalPan = document.getElementById('upd-modal-pan');
+    const modalPanBd = document.getElementById('upd-modal-pan-bd');
     const modalGh = document.getElementById('upd-modal-gh');
     const checkBtn = document.getElementById('set-check-update');
     const stateEl = document.getElementById('set-upd-state');
@@ -14001,6 +14008,10 @@
     if (modalClose) modalClose.addEventListener('click', closeModal);
     if (modalPan) modalPan.addEventListener('click', () => {
       openExternal(PAN_URL);
+      closeModal();
+    });
+    if (modalPanBd) modalPanBd.addEventListener('click', () => {
+      openExternal(PAN_BAIDU_URL);
       closeModal();
     });
     if (modalGh) modalGh.addEventListener('click', () => {
