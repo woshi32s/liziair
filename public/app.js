@@ -13873,8 +13873,8 @@
      - 只认 window.__liziAndroid && window.__liziNative（MainActivity 里
        addJavascriptInterface("__liziNative")）；桌面 / 浏览器整块跳过，
        桌面提示条仍由上面的 initDesktopUpdate 管，两者互不影响
-     - 启动后延迟 6s 查一次 GitHub Release；localStorage 节流 12 小时
-     - 同一版本关掉后不再弹（记 dismissed 版本）；网络失败 / 已是最新都静默
+     - 每次启动延迟 6s 查一次 GitHub Release，不做跨启动节流
+     - 关掉的版本只在本次运行内不再弹，大退重进会重新提示；网络失败 / 已是最新都静默
      - 设置页按钮复用同一条检查逻辑，结果写在 #set-upd-state
      ========================================================================== */
   (function initAndroidUpdate() {
@@ -13887,9 +13887,6 @@
     const PAN_URL = 'https://pan.quark.cn/s/6c6e65f3ee4c';
     const PAN_BAIDU_URL = 'https://pan.baidu.com/s/1crtOz-RxF6YyKLn9uxykWQ?pwd=lizi';
     const GH_URL = 'https://github.com/woshi32s/liziair/releases/latest';
-    const LS_LAST = 'lizi.android.update.lastCheck';
-    const LS_DISMISSED = 'lizi.android.update.dismissed';
-    const CHECK_EVERY = 12 * 60 * 60 * 1000;   /* 12 小时 */
     const BOOT_DELAY = 6000;                   /* 启动后 6 秒再查，避开首屏 */
 
     const modal = document.getElementById('upd-modal');
@@ -13905,6 +13902,7 @@
     let checking = false;
     let stateTimer = 0;
     let currentVersion = '';
+    let sessionDismissed = '';                 /* 只在本次运行内记住关掉的版本 */
 
     /* ---------- 版本号：按 x.y.z 的数字逐段比，不做字符串比 ---------- */
     function localVersion() {
@@ -13929,26 +13927,10 @@
       return 0;
     }
 
-    /* ---------- localStorage 节流 ---------- */
-    function markChecked() {
-      try { localStorage.setItem(LS_LAST, String(Date.now())); } catch { /* 隐私模式 */ }
-    }
-    function dismissedVersion() {
-      try { return localStorage.getItem(LS_DISMISSED) || ''; } catch { return ''; }
-    }
-    function shouldAutoCheck() {
-      let last = 0;
-      try { last = Number(localStorage.getItem(LS_LAST) || 0) || 0; } catch { /* 隐私模式 */ }
-      return !last || Date.now() - last >= CHECK_EVERY;
-    }
-
     /* ---------- 检查 GitHub Release ---------- */
     async function checkLatest() {
       const local = localVersion();
       if (!local) return { status: 'error' };
-      /* 先记时间再请求：失败也算「检查过」，保证 12 小时内不会反复重试；
-         手动检查不受节流限制，仍然随时可用。 */
-      markChecked();
       let resp;
       try {
         const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
@@ -13981,7 +13963,7 @@
     function showModal(version) {
       const v = String(version || '');
       if (!v || !modal) return false;
-      if (v === dismissedVersion()) return false;
+      if (v === sessionDismissed) return false;
       currentVersion = v;
       if (modalVer) modalVer.textContent = 'v' + v;
       modal.hidden = false;
@@ -13989,9 +13971,7 @@
     }
     function closeModal() {
       if (modal) modal.hidden = true;
-      if (currentVersion) {
-        try { localStorage.setItem(LS_DISMISSED, currentVersion); } catch { /* 隐私模式 */ }
-      }
+      if (currentVersion) sessionDismissed = currentVersion;
     }
     function openExternal(url) {
       try { native.openExternal(url); } catch { /* 桥调用失败就当没点 */ }
@@ -14066,7 +14046,7 @@
 
     /* ---------- 自动检查：延迟启动，失败 / 已是最新都静默 ---------- */
     setTimeout(() => {
-      if (checking || !shouldAutoCheck()) return;
+      if (checking) return;
       checkLatest().then((r) => {
         if (r && r.status === 'available') showModal(r.version);
       }).catch(() => { /* 静默 */ });
