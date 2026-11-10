@@ -255,7 +255,9 @@ if (!fs.existsSync(syncScript)) fail(`找不到同步脚本：${syncScript}`);
 run(process.execPath, [syncScript], { cwd: ANDROID_DIR });
 
 if (process.platform === 'win32') {
-  run('cmd.exe', ['/c', 'gradlew.bat', 'assembleDebug'], { cwd: ANDROID_DIR });
+  /* 用绝对路径：某些环境设置了 NoDefaultCurrentDirectoryInExePath，
+     cmd 不会在当前目录里找 gradlew.bat。 */
+  run('cmd.exe', ['/c', path.join(ANDROID_DIR, 'gradlew.bat'), 'assembleDebug'], { cwd: ANDROID_DIR });
 } else {
   run('./gradlew', ['assembleDebug'], { cwd: ANDROID_DIR });
 }
