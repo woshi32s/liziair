@@ -6404,6 +6404,9 @@ span.pstrip__crumb-seg { cursor: default; }
   font-size: 12px; opacity: .72;
 }
 .marq__card--more .marq__art--more { background: transparent; }
+/* 歌单层的分组卡（我创建的歌单 / 我收藏的歌单）：虚线方框，只分隔不可点 */
+.marq__card--group { cursor: default; }
+.marq__card--group .marq__art--more { opacity: .52; font-size: 12px; }
 
 /* ---------- 3. （2026-11-08 晚已删）底部扁工具带 .hall-pcards ----------
    原先是四张工具卡并成一条 48px 高的 GlassSurface 玻璃带；这次整条砍掉，

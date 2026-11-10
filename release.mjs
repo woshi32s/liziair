@@ -271,7 +271,7 @@ if (apkSources.length === 0) fail(`APK 输出目录里没有 .apk：${apkDir}`);
 const apkCopies = apkSources.map((src) => {
   const base = path.basename(src);
   const arch = /arm64/i.test(base) ? 'arm64-v8a' : (/x86_64|x86-64/i.test(base) ? 'x86_64' : 'universal');
-  const dest = path.join(DIST, `LIZI-Android-${version}-${arch}-debug.apk`);
+  const dest = path.join(DIST, `LIZI-Android-${version}-${arch}.apk`);
   fs.copyFileSync(src, dest);
   return dest;
 });

@@ -312,7 +312,12 @@ async function handle(req, res, url) {
   }
 
   if (p === '/user/playlists') {
-    const r = await call('user_playlists');
+    /* 库的 user_playlists 只对 collected 走 catalog 分页（limit 1..100、offset 从 0 起）。
+       以前这里忽略 query，永远只读第一页（默认 50 张），主服务翻页也只能拿同一页。 */
+    const r = await call('user_playlists', {
+      limit: Math.min(100, Math.max(1, Number(q.get('limit')) || 50)),
+      offset: Math.max(0, Number(q.get('offset')) || 0),
+    });
     if (!r.ok) return json(res, failBody(r.error).code, failBody(r.error));
     return json(res, 200, { code: 200, owned: r.data.owned || null, liked: r.data.liked || null, collected: r.data.collected || null });
   }

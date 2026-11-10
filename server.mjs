@@ -964,18 +964,42 @@ async function handleQQ(req, res, url) {
     }
 
     if (part === 'user/playlists') {
-      const r = await qqRequest('/user/playlist', { cookie });
-      const d = r.data || {};
-      if (Number(d.code) !== 200) {
-        return json(res, 200, {
-          code: d.code || 401, source: 'qq', playlists: [],
-          error: d.code === 401 ? '先在卡片上扫码登录 QQ 音乐' : (d.message || '取我的歌单失败'),
-        });
+      /* 上游 /user/playlist 第一轮把收藏读到 1000 张就停（more=true + nextFavoriteOffset），
+         不续读会截掉第 1000 张之后的收藏。边车 getUserPlaylist 已经接收 favoriteOffset，
+         这里带 offset 逐轮续读并去重。more=true 但拿不到续读位置（上游空页/重复页）时
+         立即停，避免原地打转。 */
+      const MAX_ROUNDS = 20;
+      const playlists = [];
+      const seen = new Set();
+      let favoriteOffset = 0;
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        const path = favoriteOffset > 0
+          ? `/user/playlist?favoriteOffset=${favoriteOffset}`
+          : '/user/playlist';
+        const r = await qqRequest(path, { cookie });
+        const d = r.data || {};
+        if (Number(d.code) !== 200) {
+          if (round === 0) {
+            return json(res, 200, {
+              code: d.code || 401, source: 'qq', playlists: [],
+              error: d.code === 401 ? '先在卡片上扫码登录 QQ 音乐' : (d.message || '取我的歌单失败'),
+            });
+          }
+          break;
+        }
+        for (const it of (Array.isArray(d.playlist) ? d.playlist : [])) {
+          const p = qqPlaylist(it);
+          if (!p.id || seen.has(p.id)) continue;
+          seen.add(p.id);
+          playlists.push(p);
+        }
+        /* 停法：more=false、没有可用的续读位置、续读位置不前进、翻到轮数上限 */
+        if (!d.more) break;
+        const next = Number(d.nextFavoriteOffset);
+        if (!Number.isSafeInteger(next) || next <= favoriteOffset) break;
+        favoriteOffset = next;
       }
-      return json(res, 200, {
-        code: 200, source: 'qq',
-        playlists: (d.playlist || []).map(qqPlaylist).filter((p) => p.id),
-      });
+      return json(res, 200, { code: 200, source: 'qq', playlists });
     }
 
     /* 「我的收藏专辑」：边车返回 { albums,total,more }，这里统一成网易云
@@ -2264,18 +2288,40 @@ async function handleKugou(req, res, url) {
     }
 
     if (part === 'user/playlists') {
-      const r = await scRequest('kugou', '/user/playlist', { cookie });
-      const d = (r.data && r.data.data) || {};
-      const list = Array.isArray(d.info) ? d.info : [];
-      if (!Array.isArray(d.info)) {
-        return json(res, 200, {
-          code: 401, source: 'kugou', playlists: [],
-          error: '先在卡片上扫码登录酷狗（这个接口要登录）',
-        });
+      /* 上游 kugoumusicapi 的 /user/playlist 默认 page=1、pagesize=30，只取一次会把
+         30 张以后的歌单截掉。边车的动态路由把 query 原样透传给 module/user_playlist.js，
+         所以这里逐页翻到底，再按 id 去重。 */
+      const PAGE_SIZE = Math.min(100, Math.max(1, Number(q.get('pagesize')) || 100));
+      const MAX_PAGES = 20;
+      const playlists = [];
+      const seen = new Set();
+      let total = 0;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const r = await scRequest('kugou', `/user/playlist?page=${page}&pagesize=${PAGE_SIZE}`, { cookie });
+        const d = (r.data && r.data.data) || {};
+        if (!Array.isArray(d.info)) {
+          if (page === 1) {
+            return json(res, 200, {
+              code: 401, source: 'kugou', playlists: [],
+              error: '先在卡片上扫码登录酷狗（这个接口要登录）',
+            });
+          }
+          break;
+        }
+        if (d.total != null && Number.isFinite(Number(d.total))) total = Number(d.total);
+        for (const it of d.info) {
+          const p = kugouPlaylist(it);
+          if (!p.id || seen.has(p.id)) continue;
+          seen.add(p.id);
+          playlists.push(p);
+        }
+        /* 停法：空页、短页、累计到上游 total、翻到页数上限 */
+        if (d.info.length === 0 || d.info.length < PAGE_SIZE) break;
+        if (total > 0 && seen.size >= total) break;
       }
       return json(res, 200, {
         code: 200, source: 'kugou',
-        playlists: list.map(kugouPlaylist).filter((p) => p.id),
+        playlists,
       });
     }
 
@@ -2715,19 +2761,45 @@ async function handleQishui(req, res, url) {
 
     /* ---- 账号曲库：汽水的第一张特殊歌单（type=1）就是「我喜欢的音乐」 ---- */
     if (part === 'user/playlists') {
+      /* 边车的 /user/playlists 支持 limit/offset，并回 hasMore/nextOffset/total。
+         以前只传 limit、丢掉 hasMore，超过 limit 的歌单就被截掉；这里按 offset 翻页去重。 */
       const limit = Math.min(500, Math.max(1, Number(q.get('limit')) || 100));
-      const r = await scRequest('qishui', `/user/playlists?limit=${limit}`, { timeout: 25000 });
-      const d = r.data || {};
-      if (d.code !== 200) {
-        return json(res, 200, {
-          code: d.code || 401, source: 'qishui', playlists: [],
-          error: d.code === 401 ? '先在卡片上扫码登录汽水音乐' : (d.error || '取汽水歌单失败'),
-        });
+      const MAX_PAGES = 20;
+      const playlists = [];
+      const seen = new Set();
+      let offset = 0;
+      let total = 0;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const r = await scRequest('qishui', `/user/playlists?limit=${limit}&offset=${offset}`, { timeout: 25000 });
+        const d = r.data || {};
+        if (d.code !== 200) {
+          if (page === 0) {
+            return json(res, 200, {
+              code: d.code || 401, source: 'qishui', playlists: [],
+              error: d.code === 401 ? '先在卡片上扫码登录汽水音乐' : (d.error || '取汽水歌单失败'),
+            });
+          }
+          break;
+        }
+        const items = Array.isArray(d.items) ? d.items : [];
+        if (Number(d.total) > 0) total = Math.max(total, Number(d.total));
+        for (const it of items) {
+          const p = qishuiPlaylist(it);
+          if (!p.id || seen.has(p.id)) continue;
+          seen.add(p.id);
+          playlists.push(p);
+        }
+        /* 停法：空页、hasMore=false、offset 不前进（上游异常）、翻到页数上限 */
+        if (items.length === 0 || !d.hasMore) break;
+        const next = Number(d.nextOffset);
+        const step = Number.isSafeInteger(next) && next > offset ? next : offset + items.length;
+        if (step <= offset) break;
+        offset = step;
       }
       return json(res, 200, {
         code: 200, source: 'qishui',
-        playlists: (d.items || []).map(qishuiPlaylist).filter((p) => p.id),
-        total: d.total || 0,
+        playlists,
+        total: total || 0,
       });
     }
 
@@ -3025,29 +3097,49 @@ async function handleBodian(req, res, url) {
       });
     }
 
-    /* ---- 账号曲库：owned / liked / collected 三块合起来 ---- */
+    /* ---- 账号曲库：owned / liked 一次全量，collected 按 offset 翻页，三块合起来 ---- */
     if (part === 'user/playlists') {
-      const r = await scRequest('bodian', '/user/playlists', { timeout: 25000 });
-      const d = r.data || {};
-      if (d.code !== 200) {
-        return json(res, 200, {
-          code: d.code || 401, source: 'bodian', playlists: [],
-          error: d.code === 401 ? '先在卡片上扫码登录波点音乐' : (d.error || '取波点歌单失败'),
-        });
-      }
-      const rows = [
-        ...bodianPlaylistRows(d.owned),
-        ...bodianPlaylistRows(d.liked),
-        ...(d.liked && d.liked.id ? [d.liked] : []),
-        ...bodianPlaylistRows(d.collected),
-      ];
-      const seen = new Set();
+      /* 边车 /user/playlists 现在把 limit/offset 透传给库的 user_playlists；
+         collected 回 { playLists, bodianPagination }。按 nextOffset 翻到底，
+         owned/liked 只取第一轮，全部按 id 去重。 */
+      const PAGE_LIMIT = 100;
+      const MAX_PAGES = 20;
       const playlists = [];
-      for (const it of rows) {
-        const p = bodianPlaylist(it);
-        if (!p.id || seen.has(p.id)) continue;
-        seen.add(p.id);
-        playlists.push(p);
+      const seen = new Set();
+      const addRows = (src) => {
+        for (const it of bodianPlaylistRows(src)) {
+          const p = bodianPlaylist(it);
+          if (!p.id || seen.has(p.id)) continue;
+          seen.add(p.id);
+          playlists.push(p);
+        }
+      };
+      let offset = 0;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const r = await scRequest('bodian',
+          `/user/playlists?limit=${PAGE_LIMIT}&offset=${offset}`, { timeout: 25000 });
+        const d = r.data || {};
+        if (d.code !== 200) {
+          if (page === 0) {
+            return json(res, 200, {
+              code: d.code || 401, source: 'bodian', playlists: [],
+              error: d.code === 401 ? '先在卡片上扫码登录波点音乐' : (d.error || '取波点歌单失败'),
+            });
+          }
+          break;
+        }
+        if (page === 0) {
+          addRows(d.owned);
+          addRows(d.liked);
+          if (d.liked && d.liked.id) addRows([d.liked]);
+        }
+        addRows(d.collected);
+        /* 停法：hasMore=false、nextOffset 缺失或不前进、翻到页数上限 */
+        const pg = (d.collected && d.collected.bodianPagination) || {};
+        if (!pg.hasMore) break;
+        const next = Number(pg.nextOffset);
+        if (!Number.isSafeInteger(next) || next <= offset) break;
+        offset = next;
       }
       return json(res, 200, { code: 200, source: 'bodian', playlists });
     }
@@ -3762,6 +3854,9 @@ async function normalize(name, data, channel = 'weapi') {
           trackCount: p.trackCount,
           playCount: p.playCount,
           subscribed: !!p.subscribed,
+          /* 5 =「我喜欢的音乐」系统歌单：原来被这里抹掉，前端那几条
+             specialType !== 5 / === 5 的过滤实际一直没生效。 */
+          specialType: Number(p.specialType) || 0,
         })),
       };
 

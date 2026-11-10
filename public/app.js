@@ -10297,7 +10297,27 @@
       }
     }
 
-    /** 我收藏的歌单 */
+    /** 网易云「我的歌单」分成两组：
+         自己创建（subscribed !== true）和收藏（subscribed === true）。
+         `/user/playlist` 两组是一起返回的，以前只取 subscribed，创建的歌单就全被丢了。
+         「我喜欢的音乐」是系统歌单（specialType 5 / 同名），归「我的喜欢」入口，
+         这里不再重复列；按 id 去重，防止上游把同一张歌单同时标进两组。 */
+    function ncPlaylistGroups(lists) {
+      const seen = new Set();
+      const mine = [];
+      const sub = [];
+      for (const p of lists || []) {
+        if (!p || !p.id) continue;
+        const key = String(p.id);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (p.specialType === 5 || /我喜欢的音乐|喜欢的音乐/.test(p.name || '')) continue;
+        (p.subscribed === true ? sub : mine).push(p);
+      }
+      return { mine, sub };
+    }
+
+    /** 收藏的歌单：网易云的自己创建 + 收藏都列出来，按组分段 */
     async function openMyPlaylists(pid) {
       const seq = ++platSeq;
       emptyList('正在载入…');
@@ -10306,13 +10326,16 @@
           if (!profile || !profile.userId) { emptyList('先在设置里登录网易云，才能看「我收藏的歌单」'); return; }
           const d = await API.userPlaylists(profile.userId);
           if (!platAlive(seq)) return;
-          const lists = (d && d.playlists) || [];
-          /* 优先只列「收藏的」（subscribed），没有就退成全部（不含我喜欢） */
-          const sub = lists.filter((p) => p.subscribed === true);
-          const use = sub.length ? sub : lists.filter((p) => p.specialType !== 5);
-          if (!use.length) { emptyList('还没有收藏任何歌单'); return; }
-          hint(`网易云 · 我收藏的歌单 · ${use.length} 个`);
-          renderPlaylistRows(use, 'netease', '我收藏的歌单');
+          const { mine, sub } = ncPlaylistGroups((d && d.playlists) || []);
+          const use = mine.concat(sub);
+          if (!use.length) { emptyList('你的网易云账号下还没有歌单'); return; }
+          hint(`网易云 · 我创建的歌单 ${mine.length} 个 · 我收藏的歌单 ${sub.length} 个`);
+          const headings = {};
+          if (mine.length) headings[0] = '我创建的歌单';
+          if (sub.length) headings[mine.length] = '我收藏的歌单';
+          renderPlaylistRows(use, 'netease', '我收藏的歌单', (p) => openPlatPlaylist(
+            p, p.subscribed === true ? '我收藏的歌单' : '我创建的歌单', 'netease'
+          ), headings);
           return;
         }
         if (pid === 'qq') {
@@ -10390,11 +10413,19 @@
     }
 
     /** 歌单 / 电台列表（不是曲目）：复用 .track 那一套行，点一张展开它的曲目。
-        onClick 可选：电台频道 / 场景不是歌单，点开走各自的取法。 */
-    function renderPlaylistRows(list, pid, label, onClick) {
+        onClick 可选：电台频道 / 场景不是歌单，点开走各自的取法。
+        headings 可选：{ 索引: 标题 }，在对应行前插一条 .track-group 分组标题
+        （和 renderTracks 用的是同一套样式）。 */
+    function renderPlaylistRows(list, pid, label, onClick, headings) {
       el.tracks.innerHTML = '';
       const frag = document.createDocumentFragment();
-      for (const p of list) {
+      list.forEach((p, i) => {
+        if (headings && headings[i]) {
+          const h = document.createElement('li');
+          h.className = 'track-group';
+          h.textContent = headings[i];
+          frag.appendChild(h);
+        }
         const li = document.createElement('li');
         li.className = 'track';
         li.style.cursor = 'pointer';
@@ -10415,7 +10446,7 @@
           onClick ? onClick(p) : openPlatPlaylist(p, label || '精选', pid || p.source || 'netease')
         ));
         frag.appendChild(li);
-      }
+      });
       el.tracks.appendChild(frag);
     }
 
@@ -10783,10 +10814,18 @@
       if (pid === 'netease') {
         if (!profile || !profile.userId) return railNone('先在设置里登录网易云，才能看「我收藏的歌单」');
         const d = await API.userPlaylists(profile.userId);
-        const lists = (d && d.playlists) || [];
-        const sub = lists.filter((p) => p.subscribed === true);
-        const use = sub.length ? sub : lists.filter((p) => p.specialType !== 5);
-        return railColls('netease', use, '还没有收藏任何歌单');
+        const { mine, sub } = ncPlaylistGroups((d && d.playlists) || []);
+        if (!mine.length && !sub.length) return railNone('还没有收藏或创建任何歌单');
+        /* 自己创建的歌单放前面，收藏的放后面；两组都有时各插一张分组卡
+           （marqCardHtml 认 _group，不挂 data-coll，点了不响应）。
+           「我创建的歌单」即使只有一组也插，免得它藏在一个叫「收藏的歌单」的层里。 */
+        const items = [];
+        const sep = (name, id) => ({ id, name, _group: true });
+        if (mine.length) items.push(sep('我创建的歌单', 'group:mine'));
+        items.push(...mine);
+        if (mine.length && sub.length) items.push(sep('我收藏的歌单', 'group:sub'));
+        items.push(...sub);
+        return railColls('netease', items, '还没有收藏或创建任何歌单');
       }
       if (pid === 'qq') {
         const d = await API.qqUserPlaylists();
@@ -10977,6 +11016,13 @@
     /** 单张卡 HTML（i = 全量数组下标）。首批和后续批次都走这里，
         data-i / data-malb / data-coll 始终指向 railShown 里的完整位置。 */
     function marqCardHtml(t, i) {
+      /* 歌单分组卡：不是歌单，没有 data-coll，点了不响应，只做「我创建 / 我收藏」分隔 */
+      if (t._group) {
+        return `
+          <div class="marq__card marq__card--group" role="separator" aria-label="${esc(t.name)}">
+            <span class="marq__art marq__art--more"><span>${esc(t.name)}</span></span>
+          </div>`;
+      }
       /* 专辑卡：封面 + 专辑名 + 艺人；点击直接开专辑详情页，不下钻曲目 */
       if (railShownType === 'albums') {
         const sub = t.trackCount ? `${t.trackCount} 首` : '';
@@ -14014,5 +14060,21 @@
         if (r && r.status === 'available') showModal(r.version);
       }).catch(() => { /* 静默 */ });
     }, BOOT_DELAY);
+  })();
+
+  /* 设置 → 关于：QQ 群一行（桌面 / 安卓 / 浏览器都用同一份设置页）。
+     桌面壳没有通用 openExternal：window.open 会被主进程的
+     setWindowOpenHandler 转给系统浏览器；安卓壳直接走 __liziNative。 */
+  (function initQqGroupRow() {
+    const row = document.getElementById('set-qq-group');
+    if (!row) return;
+    const QQ_GROUP_URL = 'https://qm.qq.com/q/nITZnfZadc';
+    row.addEventListener('click', () => {
+      const native = window.__liziNative;
+      if (native && typeof native.openExternal === 'function') {
+        try { native.openExternal(QQ_GROUP_URL); return; } catch { /* 桥调用失败退回 window.open */ }
+      }
+      window.open(QQ_GROUP_URL, '_blank', 'noopener');
+    });
   })();
 })();
