@@ -1,0 +1,1426 @@
+/* ==========================================================================
+   LIZI · 手机大厅 · 搜索 / 我的 / 设置
+   --------------------------------------------------------------------------
+   三个整页浮层，共用 m.css 的 .sheet 骨架（从底部推上来、返回键可关）。
+   这里只做各自的版式：搜索的平台页签与起始页、个人主页的横幅卡、设置分区。
+   比例按 390×844 调：左右 16px，触控行 ≥56px，安全区由外层给。
+   ========================================================================== */
+
+/* 顶栏中间的 logo 现在也是「我的」入口：去掉按钮的默认框，保留原排版 */
+button.brand {
+  width: 100%;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  border-radius: 14px;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+button.brand:active { opacity: .62; transform: scale(.98); }
+
+.sheet--search .sheet__top,
+.sheet--set .sheet__top,
+.sheet--me .sheet__top { gap: 4px; }
+.sheet--set .sheet__title,
+.sheet--me .sheet__title { margin-left: 2px; }
+
+/* ==========================================================================
+   搜索 —— 照桌面 #view-browse：一条平台细线页签 + 右侧计数，
+   下面是大行（大封面 / 标题 / 歌手·专辑 / VIP / 时长），行右侧一层封面取色的雾。
+   ========================================================================== */
+
+.searchbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px 4px;
+}
+.searchsrc {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 18px;
+  padding: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.searchsrc::-webkit-scrollbar { display: none; }
+
+.searchtab {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.searchtab.is-on { background: none; color: var(--ink); }
+.searchtab.is-on::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+.searchhint {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.searchbody { padding: 0 8px calc(var(--m-safe-b) + 16px); }
+
+.searchstart {
+  padding: 34px 8px 10px;
+  text-align: center;
+}
+.searchstart__ico {
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--ink-3);
+}
+.searchstart__ico .ico { width: 22px; height: 22px; }
+.searchstart b {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-2);
+}
+.searchstart p {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+
+.recent {
+  margin: 22px 8px 0;
+  text-align: left;
+}
+.recent__h {
+  margin: 0 0 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  color: var(--ink-3);
+}
+.recent__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.recent__chip {
+  height: 32px;
+  max-width: 100%;
+  padding: 0 13px;
+  border-radius: var(--r-full, 999px);
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent__chip:active { background: color-mix(in oklab, var(--ink) 5%, transparent); }
+
+/* 分组标题（全部平台时） */
+.searchgroup {
+  margin: 0;
+  padding: 18px 8px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  color: var(--ink-3);
+}
+
+.searchbody .srow {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 76px;
+  gap: 14px;
+  padding: 8px 10px;
+  border-radius: 16px;
+}
+/* 行右侧那团取色：用椭圆渐变本身就柔，不做 filter 模糊，滚起来不掉帧 */
+.searchbody .srow::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 46%;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(80% 90% at 100% 22%, var(--c1, transparent) 0%, transparent 68%),
+    radial-gradient(90% 100% at 100% 88%, var(--c2, transparent) 0%, transparent 72%),
+    linear-gradient(270deg, var(--c3, transparent) 0%, transparent 78%);
+  transition: opacity .2s var(--ease-out);
+}
+.searchbody .srow.has-wash::after { opacity: .34; }
+.searchbody .srow__art { width: 58px; height: 58px; border-radius: 12px; }
+.searchbody .srow__name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.012em;
+}
+.searchbody .srow__sub { margin-top: 4px; font-size: 11.5px; }
+.searchbody .srow__badge { display: none; }
+
+/* 行里的歌手 / 专辑入口：墨迹下划线，点得进去才出现 */
+.srow__a {
+  color: inherit;
+  border-bottom: 1px solid color-mix(in oklab, var(--ink-3) 45%, transparent);
+  padding: 0;
+  font: inherit;
+  line-height: 1.2;
+}
+.srow__a:active { color: var(--ink); border-bottom-color: var(--ink); }
+
+.srow__flag {
+  flex: none;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: oklch(52% 0.12 78);
+  background: oklch(84% 0.13 82 / .3);
+}
+.srow__dur {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.skel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 76px;
+  padding: 8px 10px;
+}
+.skel__art {
+  width: 58px; height: 58px;
+  flex: none;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.skel__lines { flex: 1; min-width: 0; }
+.skel__line {
+  display: block;
+  height: 9px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+}
+.skel__line + .skel__line {
+  width: 46%;
+  margin-top: 9px;
+  opacity: .7;
+}
+
+/* ==========================================================================
+   我的
+   ========================================================================== */
+
+.mebody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: 0 16px calc(var(--m-safe-b) + 28px);
+}
+
+.mesrc {
+  display: flex;
+  gap: 6px;
+  padding: 2px 0 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.mesrc::-webkit-scrollbar { display: none; }
+.mesrc__b {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--r-full, 999px);
+  border: 1px solid var(--rule);
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mesrc__b img {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  opacity: .55;
+}
+.mesrc__b.is-on {
+  color: var(--paper-2);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.mesrc__b.is-on img {
+  opacity: 1;
+  filter: grayscale(1) brightness(0) invert(1);
+}
+
+.mehero {
+  position: relative;
+  border-radius: 24px;
+  overflow: hidden;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  box-shadow: 0 22px 50px -40px color-mix(in oklab, var(--ink) 65%, transparent);
+}
+.mehero__banner {
+  position: relative;
+  height: 156px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 100% at 12% 0%,
+      color-mix(in oklab, var(--me-accent, #ea3e3c) 34%, var(--paper-2)), transparent 68%),
+    radial-gradient(110% 100% at 92% 18%,
+      color-mix(in oklab, var(--me-accent, #ea3e3c) 19%, var(--paper-2)), transparent 70%),
+    linear-gradient(155deg, var(--paper), var(--paper-2));
+}
+.mehero__banner img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.mehero__banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top,
+    var(--paper-2) 0%,
+    color-mix(in oklab, var(--paper-2) 62%, transparent) 26%,
+    transparent 68%);
+  pointer-events: none;
+}
+/* 头像压住横幅底边；白边和卡面同色，叠在一起像一张贴纸 */
+.mehero__body {
+  position: relative;
+  padding: 0 18px 20px;
+  margin-top: -38px;
+}
+.mehero__ava {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 3px solid var(--paper-2);
+  background-color: color-mix(in oklab, var(--ink) 8%, var(--paper));
+  color: var(--ink-2);
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 1;
+  overflow: hidden;
+  box-shadow: 0 10px 26px -16px oklch(0% 0 0 / .45);
+}
+.mehero__avaimg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.mehero__avaph { position: relative; }
+.mehero__line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.mehero__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0 2px 0 0;
+  font-family: var(--font-display);
+  font-size: 23px;
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -.01em;
+  color: var(--ink);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mehero__pl,
+.mehero__lv,
+.mehero__vip {
+  flex: none;
+  height: 19px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+}
+.mehero__pl {
+  color: color-mix(in oklab, var(--me-accent, #ea3e3c) 55%, var(--ink));
+  border: 1px solid color-mix(in oklab, var(--me-accent, #ea3e3c) 30%, transparent);
+}
+.mehero__lv {
+  font-family: var(--font-mono);
+  color: var(--ink-2);
+  border: 1px solid var(--rule);
+}
+.mehero__vip {
+  color: var(--accent);
+  border: 1px solid color-mix(in oklab, var(--accent) 28%, transparent);
+}
+.mehero__sign {
+  margin: 9px 0 0;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--ink-2);
+}
+.mehero__sign.is-empty { color: var(--ink-3); }
+
+.mehero__stats {
+  display: flex;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+}
+.mehero__stat {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.mehero__stat b {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--ink);
+}
+.mehero__stat span {
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.mehero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 13px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.mehero__meta span + span::before {
+  content: '·';
+  margin-right: 10px;
+  opacity: .55;
+}
+
+.menote {
+  margin: 14px 4px 0;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--ink-3);
+}
+
+.meguide { padding: 52px 18px 20px; text-align: center; }
+.meguide__ico {
+  width: 62px;
+  height: 62px;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--ink-3);
+}
+.meguide__ico .ico { width: 24px; height: 24px; }
+.meguide b {
+  display: block;
+  margin-bottom: 7px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--ink);
+}
+.meguide p {
+  max-width: 280px;
+  margin: 0 auto;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--ink-3);
+}
+.meguide button {
+  height: 40px;
+  margin-top: 20px;
+  padding: 0 18px;
+  border-radius: var(--r-full, 999px);
+  background: var(--ink);
+  color: var(--paper-2);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+/* ==========================================================================
+   设置
+   ========================================================================== */
+
+.setbody { padding-top: 2px; }
+
+.setgroup { margin: 0 0 26px; }
+.setgroup:last-child { margin-bottom: 0; }
+.setgroup__h {
+  margin: 0 4px 9px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .13em;
+  color: var(--ink-3);
+}
+.setgroup__note {
+  margin: 0 4px 10px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  color: var(--ink-3);
+}
+
+.setcard {
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--paper-2);
+  overflow: hidden;
+}
+.setcard .setrow {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.setcard .setrow:last-child { border-bottom: 0; }
+.setcard .setline { border-bottom: 0; }
+
+.setaccts { padding: 0; }
+.setaccts__loading {
+  margin: 0;
+  padding: 18px 14px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.setacct {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 58px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--rule);
+}
+.setacct:last-child { border-bottom: 0; }
+.setacct__logo {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: 5px;
+}
+.setacct__text { flex: 1 1 auto; min-width: 0; }
+.setacct__name {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.setacct__sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.setacct__state {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+}
+.setacct__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: 1px solid var(--ink-3);
+  opacity: .55;
+}
+.setacct.is-on .setacct__dot {
+  border-color: var(--ink);
+  background: var(--ink);
+  opacity: 1;
+}
+.setacct.is-on .setacct__state { color: var(--ink-2); }
+
+.setbody .sheet__foot {
+  margin: 12px 4px 8px;
+  font-size: 10.5px;
+}
+
+@media (max-width: 340px) {
+  .mehero__body { padding-left: 15px; padding-right: 15px; }
+  .mehero__name { font-size: 21px; }
+  .mehero__stat b { font-size: 15px; }
+  .searchbar { padding-left: 12px; padding-right: 12px; }
+  .mebody { padding-left: 12px; padding-right: 12px; }
+}
+
+/* ==========================================================================
+   歌手 / 专辑：桌面 pages/*.js 直接搬进来，这里只把 120px 头像、4 列专辑墙
+   这些宽屏尺寸收成手机尺寸，版式本身一字不改。
+   ========================================================================== */
+
+.sheet--artist .sheet__top,
+.sheet--album .sheet__top { background: var(--paper); }
+
+.artistbody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  background: var(--paper-2);
+  padding: 0 16px calc(var(--m-safe-b) + 28px);
+  scrollbar-width: none;
+}
+.artistbody::-webkit-scrollbar { display: none; }
+.artistbody .pg { padding: 0; }
+
+/* 歌手头：86px 圆头像 + 名字 / 计数 / 简介 */
+.artistbody .pg-head { gap: 14px; align-items: center; padding-bottom: 18px; }
+.artistbody .pg-ava { width: 86px; height: 86px; border-radius: 50%; }
+.artistbody .pg-head__text { padding-top: 0; }
+.artistbody .pg-name { font-size: 25px; letter-spacing: -.03em; }
+.artistbody .pg-counts { margin-top: 5px; font-size: 11px; }
+.artistbody .pg-brief {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.artistbody .pg-sec { padding-top: 16px; }
+.artistbody .pg-sec__h { padding-bottom: 6px; }
+.artistbody .pg-sec__h b { font-size: 14px; }
+.artistbody .pg-sec__h span { font-size: 9.5px; }
+
+.artistbody .pg-row { height: 46px; gap: 10px; grid-template-columns: 26px minmax(0, 1fr) 44px; }
+.artistbody .pg-row__n { font-size: 13.5px; }
+.artistbody .pg-row__d { font-size: 10px; }
+.artistbody .pg-row__a { font-size: 11px; }
+
+.artistbody .pg-albums { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 10px; }
+.artistbody .pg-album__name { margin-top: 7px; font-size: 11.5px; }
+.artistbody .pg-album__meta { font-size: 9px; }
+
+.artistbody .pg-tools { flex-wrap: wrap; gap: 8px; }
+.artistbody .pg-search { flex: 1 1 100%; height: 36px; border-radius: 10px; }
+.artistbody .pg-sort { border-radius: 8px; overflow: hidden; }
+.artistbody .pg-sort button { height: 30px; padding: 0 12px; }
+.artistbody .pg-more { height: 30px; border-radius: 999px; }
+
+/* 专辑页：封面收窄到 62vw，信息压在下面 */
+.artistbody .pg-album-hero { gap: 16px; padding-bottom: 18px; }
+.artistbody .pg-album-art {
+  width: 66vw;
+  max-width: 280px;
+  height: auto;
+  aspect-ratio: 1;
+  border-radius: 10px;
+  align-self: center;
+}
+.artistbody .pg-album-name { font-size: 26px; margin-top: 8px; }
+.artistbody .pg-album-artist { margin-top: 8px; font-size: 13px; }
+.artistbody .pg-meta { gap: 12px 20px; margin-top: 16px; padding-top: 12px; }
+.artistbody .pg-meta dd { font-size: 12px; }
+.artistbody .pg-acts { margin-top: 18px; }
+.artistbody .pg-play { height: 40px; padding: 0 22px; font-size: 13px; }
+.artistbody .pg-collect { height: 40px; font-size: 12px; padding: 0 14px; border-radius: 999px; }
+.artistbody .pg-desc { margin-top: 16px; font-size: 12.5px; }
+.artistbody .pg-tbl { max-width: none; }
+.artistbody .pg-tbl .pg-row { grid-template-columns: 26px minmax(0, 1fr) 44px; gap: 9px; }
+.artistbody .pg-tbl .pg-row--head span:nth-child(3) { display: none; }
+.artistbody .pg-album-tracks .pg-row__a { display: none; }
+
+/* ==========================================================================
+   主播放界面：深色、大封面、粗进度、下面歌词。
+   背景只用取色的静态渐变，不做整屏 blur，也不逐帧改模糊。
+   ========================================================================== */
+
+.nowsheet {
+  --ease-apple: cubic-bezier(.32, .72, 0, 1);
+  /* 控制键高度 54 + 上内边距 8 + main 底部留白 14 + 面板与按键之间 6 = 82（再加安全区） */
+  --now-ctl-space: calc(var(--m-safe-b) + 82px);
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  color: #fff;
+  background: #0d0d10;
+  transform: translateY(100%);
+  transition: transform .46s var(--ease-apple);
+  overscroll-behavior: contain;
+  overflow: hidden;
+}
+.nowsheet.is-on { transform: translateY(0); }
+/* 下拉手势期间关掉过渡，整个播放页 1:1 跟手 */
+.nowsheet.is-drag { transition: none; will-change: transform; }
+.nowsheet[hidden] { display: none; }
+
+/* 背景：桌面是「封面大图 blur 64 + 暗角」。手机同样两件套：
+   一张静态模糊的封面（只算一次，不逐帧改 filter），
+   下面那层取色渐变只作兜底 / 封面色偏灰时补氛围。 */
+.nowsheet__bg {
+  position: absolute;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(80% 56% at 22% 4%,
+      color-mix(in oklab, var(--tone-a, #5b5bd6) 62%, #17171c) 0%, transparent 68%),
+    radial-gradient(86% 60% at 88% 22%,
+      color-mix(in oklab, var(--tone-b, #b04f8c) 48%, #17171c) 0%, transparent 70%),
+    radial-gradient(120% 80% at 50% 100%,
+      color-mix(in oklab, var(--tone-c, #2f6f8f) 34%, #0b0b0e) 0%, transparent 72%),
+    linear-gradient(180deg, #1a1a20 0%, #0b0b0e 62%, #08080a 100%);
+  opacity: .96;
+}
+/* 大半径 + 低透明：只剩封面的色光，不留下"糊成一片"的图块边缘 */
+.nowsheet__photo {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background-size: cover;
+  background-position: center;
+  filter: blur(96px) saturate(165%) brightness(.92);
+  opacity: .42;
+  transform: scale(1.5);
+  transition: opacity .6s var(--ease-apple);
+}
+.nowsheet__bg::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 64% at 50% -8%, rgb(255 255 255 / .05) 0%, transparent 62%),
+    linear-gradient(180deg,
+      rgb(9 9 14 / .2) 0%,
+      rgb(7 7 12 / .5) 40%,
+      rgb(4 4 7 / .84) 100%);
+}
+
+.nowsheet__top {
+  position: relative;
+  z-index: 1;
+  flex: none;
+  height: calc(52px + var(--m-safe-t));
+  padding: var(--m-safe-t) 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 下拉手势由 m.js 自己接：不交给浏览器的纵向 pan，避免 pointercancel 抢走 */
+  touch-action: none;
+}
+.nowsheet__btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: rgb(255 255 255 / .82);
+  transition: background-color var(--dur-fast);
+}
+.nowsheet__btn:active { background: rgb(255 255 255 / .1); }
+.nowsheet__btn .ico { width: 24px; height: 24px; transform: rotate(-90deg); }
+.nowsheet__kicker {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: .18em;
+  color: rgb(255 255 255 / .58);
+}
+/* 右上角「形态」：从播放页直接换可视化 */
+.nowsheet__form {
+  margin-left: auto;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / .12);
+  color: rgb(255 255 255 / .84);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  transition: background-color .16s var(--ease-apple), transform .16s var(--ease-apple);
+}
+.nowsheet__form:active { background: rgb(255 255 255 / .2); transform: scale(.96); }
+
+.nowsheet__main {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 24px calc(var(--m-safe-b) + 14px);
+}
+
+.nowart {
+  position: relative;
+  flex: none;
+  width: min(70vw, 300px);
+  aspect-ratio: 1;
+  margin: clamp(8px, 2.6vh, 22px) auto 0;
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgb(255 255 255 / .06);
+  box-shadow:
+    0 26px 60px rgb(0 0 0 / .55),
+    0 0 0 1px rgb(255 255 255 / .07);
+  /* 桌面：播放时封面 1.02 倍（Apple 的小动作） */
+  transform: scale(1);
+  transition: transform 420ms var(--ease-apple), box-shadow 420ms var(--ease-apple);
+  will-change: transform;
+  touch-action: none;             /* 封面也是下拉起手区 */
+}
+.nowart.is-playing { transform: scale(1.02); }
+/* 桌面是悬停浮出播放/暂停；手机改成点一下封面闪一下 */
+.nowart__cue {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgb(255 255 255 / .95);
+  background: rgb(0 0 0 / .26);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms var(--ease-apple);
+}
+.nowart.is-cue .nowart__cue { opacity: 1; }
+.nowart__cue .ico {
+  width: 46px;
+  height: 46px;
+  filter: drop-shadow(0 3px 14px rgb(0 0 0 / .55));
+}
+.nowart__cue-pause { display: none; }
+.nowart.is-playing .nowart__cue-play { display: none; }
+.nowart.is-playing .nowart__cue-pause { display: block; }
+.nowart__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nowart__img[hidden] { display: none; }
+.nowart__ph {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: rgb(255 255 255 / .32);
+}
+.nowart__ph[hidden] { display: none; }
+.nowart__ph .ico { width: 56px; height: 56px; }
+
+/* 歌词抽屉抓手：封面正下方居中的一条细条。
+   按钮 96×44 是透明热区（≥44px），真正看见的只有中间 76×4、圆角 999 的白条。 */
+.nowgrip {
+  position: relative;
+  flex: none;
+  width: 96px;
+  height: 44px;
+  margin: 2px auto 0;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.nowgrip i {
+  display: block;
+  width: 76px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / .24);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / .2),
+    0 1px 0 rgb(0 0 0 / .22);
+  transition: background-color .18s var(--ease-apple);
+}
+.nowgrip:active i { background: rgb(255 255 255 / .38); }
+/* 展开面板底部那条抓手：和收起入口同一视觉，贴住面板下沿 */
+.nowgrip--bot { margin: 0 auto; }
+
+.nowinfo {
+  flex: none;
+  margin: 2px 2px 0;
+  min-width: 0;
+  touch-action: none;             /* 歌名区也可以起手下拉 */
+}
+/* 桌面 app.css 里 body.is-now 的最终覆盖压过了前面那条 21px/700 的规则：
+   系统字体 + 22px/600/-0.022em。之前用 font-display（衬线）当歌名，
+   就是"字体不对"的来源；后来换 Geist 也不对，这里照桌面终版。 */
+.nowsheet { --now-font: -apple-system, "SF Pro Display", "SF Pro Text", "PingFang SC",
+  "Helvetica Neue", "Microsoft YaHei", system-ui, sans-serif; }
+.nowinfo__t {
+  margin: 0;
+  font-family: var(--now-font);
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -.022em;
+  line-height: 1.24;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nowseek {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: clamp(12px, 2.2vh, 20px);
+}
+.nowseek__t {
+  flex: none;
+  width: 34px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: rgb(255 255 255 / .5);
+  font-variant-numeric: tabular-nums;
+}
+.nowseek__t:last-child { text-align: right; }
+.nowseek__bar {
+  position: relative;
+  flex: 1 1 auto;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.nowseek__bar::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / .2);
+}
+.nowseek__bar i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 4px;
+  background: rgb(255 255 255 / .92);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+.nowseek__bar b {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / .35);
+}
+
+.nowctl {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  /* 贴在屏幕最底部：把 main 里剩余的纵向空间全部吃掉 */
+  margin-top: auto;
+  padding-top: 8px;
+}
+.nowctl__side {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: rgb(255 255 255 / .55);
+  transition: background 160ms var(--ease-apple), transform 160ms var(--ease-apple), color 160ms var(--ease-apple);
+}
+.nowctl__side.is-on { color: #fff; }
+.nowctl__side:active { background: rgb(255 255 255 / .08); transform: scale(.94); }
+.nowctl__side .ico { width: 18px; height: 18px; }
+.nowctl__main {
+  display: flex;
+  align-items: center;
+  gap: clamp(18px, 7vw, 30px);
+}
+/* 桌面终版是"裸三角"：60px 热区、没有白圆底板；
+   手机照这个比例收一档，免得三个键比歌词还抢眼。 */
+.nowctl__b {
+  /* 左右键按桌面终版的比例保持 40px；视觉只有中间 20px 的白色图标 */
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  transition: background 160ms var(--ease-apple), transform 160ms var(--ease-apple);
+}
+.nowctl__b:active { background: rgb(255 255 255 / .1); transform: scale(.94); }
+.nowctl__b .ico { width: 20px; height: 20px; }
+.nowctl__play {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: none;
+  color: #fff;
+  transition: transform .16s var(--ease-out), opacity .16s var(--ease-out);
+}
+.nowctl__play:active { transform: scale(.92); }
+/* 和桌面 #ntr-play 一模一样的「三角裂成两道」：两半各自补 d 属性 */
+.nowctl__play .pn-svg {
+  width: 30px;
+  height: 30px;
+  fill: currentColor;
+  stroke: none;
+  overflow: visible;
+}
+.nowctl__play .pn { transition: d .34s var(--ease-apple); }
+.nowctl__play .pn-l { d: path("M8 4.6L13.6 8.2L13.6 15.8L8 19.4Z"); }
+.nowctl__play .pn-r { d: path("M14.4 8.3L20 12L20 12L14.4 15.7Z"); }
+body.is-playing .nowctl__play .pn-l { d: path("M8 5L11.2 5L11.2 19L8 19Z"); }
+body.is-playing .nowctl__play .pn-r { d: path("M13.8 5L17 5L17 19L13.8 19Z"); }
+
+/* 歌词：默认收起，点封面下细条后展开成覆盖层 ——
+   从顶栏下沿（main 的 top）一直盖到控制键上方，圆角深色玻璃面板。
+   背景接近不透明，所以不用整屏 backdrop-filter；只有面板自己有极小的体量。 */
+.nowlyr {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 0;
+  bottom: var(--now-ctl-space, calc(var(--m-safe-b) + 82px));
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg,
+      rgb(22 22 28 / .965) 0%,
+      rgb(11 11 16 / .975) 58%,
+      rgb(7 7 11 / .98) 100%);
+  border: 1px solid rgb(255 255 255 / .07);
+  box-shadow:
+    0 28px 70px rgb(0 0 0 / .52),
+    inset 0 1px 0 rgb(255 255 255 / .08);
+  overflow: hidden;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(12px) scale(.985);
+  transform-origin: 50% 100%;
+  transition:
+    opacity .26s var(--ease-apple),
+    transform .34s var(--ease-apple),
+    visibility 0s linear .34s;
+}
+.nowsheet.is-lyr .nowlyr {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  transition:
+    opacity .26s var(--ease-apple),
+    transform .34s var(--ease-apple),
+    visibility 0s;
+}
+
+/* 面板里的滚动区：歌词行都在这里，保持「到句即亮」的类名切换 */
+.nowlyr__scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 16px 20px 28px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 82%, transparent 97%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 82%, transparent 97%);
+}
+.nowlyr__scroll::-webkit-scrollbar { display: none; }
+/* 高亮必须"到句就亮"：只过渡颜色，filter 直接切换。
+   之前把 color/filter/weight 全挂 420ms 过渡，每行还带 will-change，
+   安卓 WebView 上几十个合成层会把过渡冻住，看起来就是"永远不高亮"。 */
+.nowlyr__l {
+  margin: 0;
+  padding: 7px 0;
+  font-family: var(--font-body);
+  font-size: clamp(22px, 6vw, 30px);
+  font-weight: 500;
+  letter-spacing: -.018em;
+  line-height: 1.32;
+  color: rgb(255 255 255 / .34);
+  filter: blur(2.5px);
+  transform-origin: left center;
+}
+.nowlyr__l.is-on {
+  color: #fff;
+  filter: none;
+  text-shadow: 0 6px 30px rgb(0 0 0 / .35);
+}
+.nowlyr__tr {
+  display: block;
+  margin-top: 5px;
+  font-size: clamp(12px, 3.2vw, 16px);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: rgb(255 255 255 / .42);
+}
+.nowlyr__hint {
+  margin: 18px 0;
+  font-size: 12px;
+  color: rgb(255 255 255 / .32);
+  text-align: center;
+}
+/* 桌面 ly__main：当前行只放大正文层，折行/行高都不动 */
+.nowlyr__l { cursor: pointer; }
+.nowlyr__main {
+  display: inline-block;
+  max-width: 100%;
+  transform: scale(.8);
+  transform-origin: left center;
+  transition: transform 420ms var(--ease-apple);
+}
+.nowlyr__l.is-on .nowlyr__main { transform: scale(1); }
+
+/* 进场：顶栏/封面/元信息/进度/控制/歌词依次浮上来（桌面 nowRise） */
+@keyframes nowRise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+.nowsheet.is-on .nowsheet__top { animation: nowRise 520ms var(--ease-apple) backwards; }
+.nowsheet.is-on .nowart { animation: nowRise 620ms var(--ease-apple) 40ms backwards; }
+.nowsheet.is-on .nowgrip { animation: nowRise 620ms var(--ease-apple) 80ms backwards; }
+.nowsheet.is-on .nowinfo { animation: nowRise 620ms var(--ease-apple) 100ms backwards; }
+.nowsheet.is-on .nowseek { animation: nowRise 620ms var(--ease-apple) 150ms backwards; }
+.nowsheet.is-on .nowctl { animation: nowRise 620ms var(--ease-apple) 190ms backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .nowsheet.is-on .nowsheet__top,
+  .nowsheet.is-on .nowart,
+  .nowsheet.is-on .nowgrip,
+  .nowsheet.is-on .nowinfo,
+  .nowsheet.is-on .nowseek,
+  .nowsheet.is-on .nowctl { animation: none; }
+  .nowlyr__main { transition: none; }
+}
+
+@media (max-height: 700px) {
+  .nowart { width: min(56vw, 232px); margin-top: 6px; }
+  .nowgrip { height: 40px; margin-top: 0; }
+  .nowinfo { margin-top: 2px; }
+  .nowinfo__t { font-size: 20px; }
+  .nowseek { margin-top: 8px; }
+  /* 矮屏也要贴底：只收 padding，不把 margin-top:auto 换掉 */
+  .nowctl { margin-top: auto; padding-top: 6px; }
+}
+
+/* ==========================================================================
+   音乐形态 / 横屏舞台
+   ========================================================================== */
+
+.formsbody { padding: 0 16px calc(var(--m-safe-b) + 20px); }
+.formsgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 12px;
+}
+.formcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--paper-2);
+  border: 1px solid var(--rule);
+  transition: transform .18s var(--ease-out);
+}
+.formcard:active { transform: scale(.975); }
+.formcard__img {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: color-mix(in oklab, var(--ink) 8%, var(--paper));
+}
+.formcard__body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 10px 11px;
+  min-width: 0;
+}
+.formcard__n {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.formcard__d {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.formcard__id {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .12em;
+  color: color-mix(in oklab, var(--ink-3) 70%, transparent);
+}
+
+.stageview {
+  --ease-apple: cubic-bezier(.32, .72, 0, 1);
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  background: #000;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity .28s var(--ease-out);
+}
+.stageview.is-on { opacity: 1; }
+.stageview[hidden] { display: none; }
+/* 画布按横屏尺寸排版：竖屏时是 100dvh×100dvw，转 90° 正好铺满 */
+.stageview__canvas {
+  position: absolute;
+  top: 50%;
+  top: 50dvh;
+  left: 50%;
+  left: 50dvw;
+  width: 100vh;
+  width: 100dvh;
+  height: 100vw;
+  height: 100dvw;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center center;
+  transition: transform 460ms var(--ease-apple), width 460ms var(--ease-apple), height 460ms var(--ease-apple);
+  will-change: transform;
+}
+.stageview__canvas iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #000;
+}
+.stageview__hud {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: calc(10px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 26px calc(14px + env(safe-area-inset-left));
+  background: linear-gradient(180deg, rgb(0 0 0 / .55), transparent);
+  color: #fff;
+  pointer-events: none;
+  transition: opacity .3s var(--ease-out);
+}
+.stageview__hud > * { pointer-events: auto; }
+.stageview__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 12px 0 8px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / .16);
+  color: #fff;
+  font-size: 12px;
+  backdrop-filter: none;
+}
+.stageview__name {
+  min-width: 0;
+  font-size: 11.5px;
+  letter-spacing: .02em;
+  color: rgb(255 255 255 / .82);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stageview__spacer { flex: 1 1 auto; }
+
+/* 横屏时画布换回正常方向；尺寸规则和竖屏数值相同，所以只有旋转在过渡 */
+@media (orientation: landscape) {
+  .stageview__canvas {
+    width: 100vw;
+    width: 100dvw;
+    height: 100vh;
+    height: 100dvh;
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  .stageview__hud { padding-top: calc(6px + env(safe-area-inset-top)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stageview__canvas { transition: none; }
+}
+
+/* ==========================================================================
+   工具箱 / 我的专辑
+   ========================================================================== */
+
+.toolcards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+.toolcard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-height: 128px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--rule);
+  background: var(--paper-2);
+  text-align: left;
+  transition: transform .16s var(--ease-out);
+}
+.toolcard:active { transform: scale(.975); }
+.toolcard__ico {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 8px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink-2);
+}
+.toolcard__ico svg { width: 19px; height: 19px; }
+.toolcard__n { font-size: 13.5px; font-weight: 600; }
+.toolcard__c { font-size: 10.5px; color: var(--ink-3); }
+.toolcard__go {
+  position: absolute;
+  right: 13px;
+  bottom: 12px;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+
+.albumsgrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 12px;
+  padding-top: 4px;
+}
+.albumcard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  text-align: left;
+}
+.albumcard__art {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--ink) 8%, var(--paper-2));
+  display: grid;
+  place-items: center;
+  color: var(--ink-3);
+  box-shadow: 0 12px 26px -20px oklch(20% 0.03 270 / .55), 0 0 0 1px var(--rule);
+}
+.albumcard__art img { width: 100%; height: 100%; object-fit: cover; }
+.albumcard__art .ico { width: 26px; height: 26px; }
+.albumcard__body { min-width: 0; }
+.albumcard__n {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.albumcard__a {
+  display: block;
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

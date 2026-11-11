@@ -116,6 +116,8 @@ const API = (() => {
     lyric: (id) => call('lyric', { id }),
     search: (s, limit = 30) => call('search', { s, limit }),
     personalized: () => call('personalized'),
+    /** 网易云「每日推荐」歌曲（和桌面大厅同一条路）；未登录时上游回空，调用方自己降级 */
+    neteaseDaily: () => call('netease/recommend/songs', {}, 'GET'),
     /** 推荐歌单（大厅下滑那一屏）。返回 { playlists:[{id,name,cover,count,creator,tracks}] } */
     topPlaylists: (limit = 12, cat = '全部', order = 'hot') =>
       call('top/playlist', { limit, cat, order }),

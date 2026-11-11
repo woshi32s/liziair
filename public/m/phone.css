@@ -1,0 +1,361 @@
+/* ==========================================================================
+   手机层 · 只做手机宽度（≤560px）的排版修正
+   --------------------------------------------------------------------------
+   页面本体完全复用桌面 index.html / app.css / app.js，这一层只在最后加载，
+   用「#view-now + body.is-now」这类更高权重选择器覆盖桌面规则。
+   桌面（>560px）一个字节都不受影响。
+   ========================================================================== */
+
+/* 进度线由 phone.js 插入；宽屏不显示，也不占位 */
+#phone-progress { display: none; }
+
+@media (max-width: 560px) {
+
+  /* ---------------- 安全区 / 横向溢出 ---------------- */
+  html, body { overflow-x: hidden; }
+
+  /* 顶栏整体抬高一个刘海，视图的 top:var(--topbar-h) 也会跟着让开 */
+  :root { --topbar-h: calc(64px + env(safe-area-inset-top)); }
+  .topbar { padding-top: env(safe-area-inset-top); }
+
+  /* 播放页顶栏是 fixed top:0 的，单独让出刘海；
+     手机上没有 hover，返回 / 控制必须常显（桌面靠 hover 或点屏 2.6s 才出现） */
+  body.is-now .now__bar {
+    padding: calc(env(safe-area-inset-top) + 12px) 14px 10px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* ---------------- 播放页：单列 ---------------- */
+  /* 桌面在窄屏是 grid（--stage-col 那两列），这里整个换成 flex 单列。
+     #view-now 的选择器权重压过 body.is-now .now__stage 的两列写法。 */
+  #view-now .now__stage {
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+    grid-template-rows: none;
+    gap: 0;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: calc(env(safe-area-inset-top) + 84px) 16px calc(env(safe-area-inset-bottom) + 16px);
+    transition: none;
+  }
+
+  body.is-now #view-now .now {
+    padding-bottom: 0;
+  }
+
+  /* app.js 的 alignArtToLyrics() 会往这里写 inline translateY（为桌面两栏对齐）；
+     单列里必须清零，否则封面会被推到歌词行的位置。 */
+  #view-now .now__art {
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    transform: none !important;
+    transition: none;
+  }
+
+  /* DOM 顺序是 disc → meta → transport → peek；用 order 把它排成
+     封面 → 歌名 → 进度线 → 细条 → 控制键（传输排贴底）
+     进度线紧跟歌名，不再悬在歌名和细条之间 */
+  #view-now .now__art > .disc { order: 1; }
+  #view-now .now__art > .now__meta { order: 2; }
+  #view-now .now__art > #phone-progress { order: 3; }
+  #view-now .now__art > .peek { order: 4; }
+  #view-now .now__art > .now__transport { order: 5; }
+
+  /* 封面：min(82vw,336px)（390 下约 320）；圆角 / 投影沿用桌面。
+     margin-top:auto 配合 .peek 的 margin-bottom:auto，把「封面 + 歌名 +
+     进度线 + 细条」这一组在顶栏与底部控制键之间垂直居中 */
+  #view-now .disc {
+    width: min(82vw, 336px);
+    max-width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    flex: none;
+    margin: auto 0 16px;         /* 底部 16px：歌名不要贴着封面下沿 */
+  }
+
+  /* 歌名 / 歌手：桌面终版 22px 600 · -0.022em · 1.24，不换字体 */
+  #view-now .now__meta {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    text-align: center;
+  }
+  #view-now .now__title {
+    margin: 0;
+    font-family: var(--now-font);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.022em;
+    line-height: 1.24;
+    color: var(--now-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #view-now .now__sub {
+    margin: 3px 0 0;
+    font-family: var(--now-font);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--now-fg-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 透明细条：只留 #pull 那条抓手，隐藏 3 行预览和上拉提示。
+     视觉 76×4，按钮本体 96×48（热区 ≥ 44）。 */
+  #view-now .peek {
+    /* 桌面 body.is-now .peek{display:none} 会把抓手整块藏掉；手机上必须显式还原 */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: auto;
+    min-height: 0;
+    flex: none;
+    gap: 0;
+    /* 细条紧跟进度线；margin-bottom:auto 把它上面那组推到顶栏与控制键之间居中 */
+    margin: 6px 0 auto;
+    padding: 0;
+    overflow: visible;
+    opacity: 1;
+    transform: none;
+    pointer-events: none;          /* 细条以外点不到，不会误触桌面的「常开歌词」 */
+  }
+  #view-now .peek::before { display: none; }
+  #view-now .peek__lines,
+  #view-now .peek__hint { display: none; }
+  #view-now .peek__grip {
+    pointer-events: auto;
+    width: 96px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    background: none;
+    touch-action: manipulation;
+  }
+  #view-now .peek__grip:hover { background: none; }
+  #view-now .peek__bar {
+    width: 76px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.24);
+  }
+
+  /* 手机进度线：细白条，数据来自 Player 的 time 事件（phone.js），
+     不编造数据；紧贴歌名下方，宽 100% 但不超过 336，与封面同宽 */
+  #phone-progress {
+    display: block;
+    order: 3;
+    position: relative;
+    width: 100%;
+    max-width: 336px;
+    height: 2px;
+    flex: none;
+    margin: 12px 0 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    overflow: hidden;
+  }
+  #phone-progress > i {
+    position: absolute;
+    inset: 0;
+    display: block;
+    border-radius: inherit;
+    background: rgba(255, 255, 255, 0.82);
+    transform: scaleX(0);
+    transform-origin: 0 50%;
+    transition: transform 240ms linear;
+    pointer-events: none;
+  }
+
+  /* 传输排：贴底，圆形按钮 56 / 播放键 66（桌面触屏语言），
+     保留桌面 .pn 三角裂两道的动画；stage 底部已留安全区 + 16px */
+  #view-now .now__transport {
+    order: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    flex: none;
+    gap: 10px;
+    margin: 0;
+    padding: 0;
+    transition: none;
+  }
+  #view-now .ntr-side { flex: 1 1 0; min-width: 0; gap: 10px; }
+  #view-now .ntr-side--l { justify-content: flex-end; }
+  #view-now .ntr-side--r { justify-content: flex-start; }
+  /* 圆形按钮：桌面 .ntr 本来就是 50%，手机层不要再用 12px 方角 */
+  #view-now .ntr {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+  }
+  #view-now .ntr .ico { width: 24px; height: 24px; }
+  #view-now #ntr-mode { width: 56px; height: 56px; }
+  #view-now #ntr-mode .ico { width: 20px; height: 20px; }
+  #view-now .ntr--play { width: 66px; height: 66px; }
+  #view-now .ntr--play .ico { width: 32px; height: 32px; }
+
+  /* 底部 dock（桌面播放页那条方形封面 + 进度带）在手机上会和贴底的控制键打架；
+     进度由 #phone-progress 负责，这里只把 dock 藏掉。 */
+  #view-now .dock { display: none; }
+
+  /* ---------------- 歌词面板：覆盖层，默认收起 ---------------- */
+  /* 无论桌面 app.js 有没有加 .is-lyrics-open，手机宽度下都收着；
+     只有 .phone-lyr-open（phone.js 自己的类）才展开。 */
+  body.is-now #view-now .now__lyrics {
+    display: none;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: none;
+    transition: none;
+    height: auto;
+  }
+  body.is-now #view-now.phone-lyr-open .now__lyrics {
+    display: flex;
+    flex-direction: column;
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    top: calc(env(safe-area-inset-top) + 84px);
+    bottom: calc(env(safe-area-inset-bottom) + 92px);
+    z-index: 20;
+    height: auto;
+    min-height: 0;
+    padding: 10px 4px 6px;
+    border-radius: 22px;
+    border: 1px solid oklch(100% 0 0 / 0.14);
+    background:
+      linear-gradient(180deg, oklch(100% 0 0 / 0.06), transparent 26%),
+      linear-gradient(165deg, oklch(15% 0.012 272 / 0.94), oklch(10% 0.01 270 / 0.97));
+    box-shadow:
+      inset 0 1px 0 oklch(100% 0 0 / 0.16),
+      0 24px 60px oklch(0% 0 0 / 0.45);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  /* 歌词面板顶部关闭条（phone.js 插入，面板第一个流式子元素）：
+     40px 高的透明按钮 + 中间一根 56×4 的抓手，下滑 / 点它都能收面板 */
+  #phone-lyr-close {
+    display: flex;
+    width: 100%;
+    height: 40px;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #phone-lyr-close > i {
+    width: 56px;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.26);
+  }
+
+  /* 桌面进播放页给封面列和歌词面板挂了 nowRise（animation-fill: both）。
+     安卓 WebView 会把这类进场动画冻在起始帧，导致歌词面板一直 opacity:0；
+     手机上直接关掉进场动画，状态由类名即时切换。 */
+  body.is-now #view-now .now__art > *,
+  body.is-now #view-now .now__lyrics {
+    animation: none !important;
+  }
+
+  /* 展开时封面 / 歌名 / 细条 / 进度直接收掉（不做长过渡，安卓 WebView 过渡会冻住） */
+  #view-now.phone-lyr-open .disc,
+  #view-now.phone-lyr-open .now__meta,
+  #view-now.phone-lyr-open .peek,
+  #view-now.phone-lyr-open #phone-progress {
+    /* !important：进播放页时桌面的 nowRise 进场动画带 fill:both，
+       动画的 opacity 会压过普通声明，这里必须用 important 才真能收掉 */
+    opacity: 0 !important;
+    pointer-events: none;
+  }
+
+  /* 歌词列表自己滚，窗口高度撑满面板 */
+  body.is-now #view-now.phone-lyr-open #lyrics {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    padding: 6px 10px 18vh;
+    overflow-y: auto;
+    -webkit-mask-image: linear-gradient(transparent 0%, #000 10%, #000 82%, transparent 96%);
+    mask-image: linear-gradient(transparent 0%, #000 10%, #000 82%, transparent 96%);
+  }
+
+  /* 歌词行沿用桌面 .ly 的视觉与高亮；只把字号收到手机尺度，
+     并去掉 will-change / 缩短过渡 —— 几十层模糊 + 长过渡会让安卓 WebView 冻住高亮 */
+  body.is-now #view-now #lyrics .ly {
+    font-size: clamp(18px, 5.4vw, 26px);
+    line-height: 1.32;
+    padding: 10px 0;
+    letter-spacing: -0.018em;
+    will-change: auto;
+    transition: color 160ms linear, filter 160ms linear;
+  }
+  body.is-now #view-now #lyrics .ly.is-active {
+    font-weight: 600;
+    letter-spacing: -0.022em;
+  }
+  body.is-now #view-now #lyrics .ly__main {
+    transform: scale(0.94);
+    transition: transform 160ms var(--ease-apple);
+  }
+  body.is-now #view-now #lyrics .ly.is-active .ly__main { transform: scale(1); }
+  body.is-now #view-now #lyrics .ly__tr {
+    font-size: 12px;
+    margin-top: 3px;
+    transition: color 160ms linear;
+  }
+
+  /* 控制键始终在覆盖层下面、不被盖住：覆盖层 bottom 已按
+     safe-bottom + 92px（66px 播放键 + 16px 底距 + 10px 间隙）收住，
+     这里只保证传输排自己也压在歌词之上 */
+  #view-now .now__transport { position: relative; z-index: 21; }
+
+  /* ---------------- 首页竖屏（铺色态） ---------------- */
+  /* 海报压到 300 高，剩下的高度全给平台面板：
+     app.css 的 577 : 423 是桌面比例，390×844 下会把面板挤得太矮 */
+  #view-hall.is-plat-mode .hall-hero {
+    /* 用视口高度算，矮屏（如 360×640）也压得下，不会把面板挤到溢出 */
+    flex: 0 0 clamp(220px, 35vh, 300px);
+    height: auto;
+    max-height: 300px;
+  }
+  #view-hall.is-plat-mode .hall-rail,
+  #view-hall.is-plat-mode .hall-plat {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* 平台长条重新分空间：左右内边距 / 间隔收一档、图标 28px，
+     左侧 crumb 列能拿到约 73px，「每日推荐精选」不再被裁成「每日…」 */
+  #view-hall .hall-plat__bar { padding: 0 8px; gap: 8px; }
+  #view-hall .pstrip__icons { gap: 5px; }
+  #view-hall .pstrip__i { width: 28px; height: 28px; }
+}

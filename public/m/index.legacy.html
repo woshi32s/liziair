@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<!-- 真机视口：按真实 CSS 像素排版，不做 1280 缩放；viewport-fit=cover 给刘海屏让位 -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#f7f7fa">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>LIZI</title>
+<!-- 字体同桌面：异步加载，连不上 Google Fonts 时用系统字体兜底，绝不阻塞首屏 -->
+<link rel="stylesheet" href="./fonts.css">
+<link rel="stylesheet" href="../tokens.css">
+<!-- 桌面同款液态玻璃引擎（只引用，不复制）：先于 m.css，让 m.css 的顶栏覆盖能生效 -->
+<link rel="stylesheet" href="../assets/liquid-glass.css">
+<link rel="stylesheet" href="./m.css">
+<link rel="stylesheet" href="./nav.css">
+<link rel="stylesheet" href="./ring.css">
+<link rel="stylesheet" href="./pages.css">
+</head>
+<body class="m-body">
+
+<!-- 图标：只留大厅用得到的几个，内联避免额外请求 -->
+<svg class="m-defs" aria-hidden="true" focusable="false">
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M5.5 9 12 15.5 18.5 9"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.2v13.6L19 12z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="7.2" y="5" width="3.6" height="14" rx="1.2"/><rect x="13.2" y="5" width="3.6" height="14" rx="1.2"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5.5 8.5 12 15 18.5"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 18.2V5.4l9-2v12.2"/><circle cx="6.6" cy="18.4" r="2.6" fill="currentColor"/><circle cx="15.6" cy="15.8" r="2.6" fill="currentColor"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.9-3.3 3.5-5 7-5s6.1 1.7 7 5"/></symbol>
+  <!-- 主播放界面用：上一首 / 下一首 / 播放模式（照桌面符号） -->
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M8 11.33 18.22 4.52A.9.9 0 0 1 19 5.43v13.14a.9.9 0 0 1-1.38.77L8 12.67V19a1 1 0 0 1-2 0V5a1 1 0 0 1 2 0z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M16 12.67 5.78 19.48A.9.9 0 0 1 5 18.57V5.43a.9.9 0 0 1 1.38-.77L16 11.33V5a1 1 0 0 1 2 0v14a1 1 0 0 1-2 0z"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M4 5h16v2H4zM4 11h16v2H4zM4 17h10v2H4z"/></symbol>
+  <symbol id="i-order" viewBox="0 0 24 24"><path d="M8 20v1.93a.5.5 0 0 1-.82.38l-4.12-3.43a.5.5 0 0 1 .32-.88H18a2 2 0 0 0 2-2V8h2v8a4 4 0 0 1-4 4H8zM16 4V2.07a.5.5 0 0 1 .82-.39l4.12 3.44a.5.5 0 0 1-.32.88H6a2 2 0 0 0-2 2v8H2V8a4 4 0 0 1 4-4h10z"/></symbol>
+  <symbol id="i-single" viewBox="0 0 24 24"><path d="M8 20v1.93a.5.5 0 0 1-.82.38l-4.12-3.43a.5.5 0 0 1 .32-.88H18a2 2 0 0 0 2-2V8h2v8a4 4 0 0 1-4 4H8zM16 2.07a.5.5 0 0 1 .82-.39l4.12 3.44a.5.5 0 0 1-.32.88H6a2 2 0 0 0-2 2v8H2V8a4 4 0 0 1 4-4h10V2.07zM11 8h2v8h-2v-6H9V9z"/></symbol>
+  <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M18 17.88V16l5 3-5 3v-2.09a7.5 7.5 0 0 1-6.997-5.365L11 14.54l-.003.005A7.5 7.5 0 0 1 2.725 20H2v-2h.725a5.5 5.5 0 0 0 4.434-4.243L9.912 12l-2.753-2.757A5.5 5.5 0 0 0 2.725 6H2V4h.725A7.5 7.5 0 0 1 10.997 9.455L11 9.46l.003-.005A7.5 7.5 0 0 1 18 4.09V2l5 3-5 3V6.117a5.5 5.5 0 0 0-4.159 4.126L12.088 12l1.753 2.757A5.5 5.5 0 0 0 18 17.883z"/></symbol>
+</svg>
+
+<!-- 背景：封面取色的三团光斑（radial-gradient，不用 filter: blur） -->
+<div class="m-bg" id="m-bg" aria-hidden="true">
+  <span class="m-bg__blob m-bg__a"></span>
+  <span class="m-bg__blob m-bg__b"></span>
+  <span class="m-bg__blob m-bg__c"></span>
+</div>
+
+<main class="hall" id="hall">
+
+  <!-- ============================ 顶栏 ============================ -->
+  <!-- 顶栏是桌面同款「折射条」：lg-surface 只借折射滤镜，外观由 m.css 的 .topbar 全部抹平 -->
+  <header class="topbar lg-surface" data-liquid-glass='{"autoScale":true,"scaleRef":64,"border":0}'>
+    <button class="topbtn" id="btn-settings" type="button" aria-label="设置">
+      <svg class="ico" aria-hidden="true"><use href="#i-settings"/></svg>
+    </button>
+    <button class="brand" id="btn-me" type="button" aria-label="LIZI Air · 我的主页">
+      <svg class="brand__mark" viewBox="328 329 368 366" fill="currentColor" aria-hidden="true">
+        <polygon points="328.94,329.76 396.71,329.76 396.71,569.57 458.02,519.41 458.02,545.48 328.94,649.91"/>
+        <polygon points="328.94,672.81 396.71,617.97 396.71,630.67 554.47,630.67 587.80,694.32 328.94,694.32"/>
+        <polygon points="627.86,329.76 695.15,329.76 695.15,372.74 627.86,428.80"/>
+        <polygon points="490.18,566.83 695.15,395.57 695.15,694.32 627.86,694.32 627.86,479.80 490.18,595.37"/>
+      </svg>
+      <!-- 桌面同款 SVG 字标（不是用字体拼出来的 LIZI），和 public/index.html 116–128 行一致 -->
+      <span class="brand__word" aria-hidden="true">
+        <svg viewBox="0 0 224 100" fill="currentColor">
+          <polygon points="0,0 19,0 19,81 47,81 66,100 0,100"/>
+          <rect x="84" width="19" height="100"/>
+          <rect x="121" width="66" height="18"/>
+          <polygon points="169,18 187,18 139,82 121,82"/>
+          <rect x="121" y="82" width="66" height="18"/>
+          <rect x="205" width="19" height="100"/>
+        </svg>
+      </span>
+      <span class="brand__air" aria-hidden="true">Air</span>
+    </button>
+    <button class="topbtn" id="btn-search" type="button" aria-label="搜索">
+      <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+    </button>
+  </header>
+
+  <!-- ============================ 上半天：1:1 封面 ============================ -->
+  <div class="stage">
+    <div class="cover is-empty" id="cover">
+      <img class="cover__img" id="cover-img-a" alt="" decoding="async">
+      <img class="cover__img" id="cover-img-b" alt="" decoding="async">
+      <!-- 半调网点切换：WebGL2 可用时由 coverfx.js 接管，否则退回上面两张图的交叉淡入 -->
+      <canvas class="cover__fx" id="cover-fx" aria-hidden="true"></canvas>
+      <span class="cover__ph" aria-hidden="true">
+        <svg viewBox="328 329 368 366" fill="currentColor">
+          <polygon points="328.94,329.76 396.71,329.76 396.71,569.57 458.02,519.41 458.02,545.48 328.94,649.91"/>
+          <polygon points="328.94,672.81 396.71,617.97 396.71,630.67 554.47,630.67 587.80,694.32 328.94,694.32"/>
+          <polygon points="627.86,329.76 695.15,329.76 695.15,372.74 627.86,428.80"/>
+          <polygon points="490.18,566.83 695.15,395.57 695.15,694.32 627.86,694.32 627.86,479.80 490.18,595.37"/>
+        </svg>
+      </span>
+      <span class="cover__scrim" aria-hidden="true"></span>
+      <div class="cover__meta">
+        <span class="cover__tag" id="cover-tag">为你推荐</span>
+        <h1 class="cover__title" id="cover-title">从下面挑一首</h1>
+        <p class="cover__sub" id="cover-sub">上滑展开环形浏览 · 点卡片播放</p>
+      </div>
+      <button class="cover__play" id="cover-play" type="button" aria-label="播放">
+        <svg class="ico ico--solid ico--when-play" aria-hidden="true"><use href="#i-play"/></svg>
+        <svg class="ico ico--solid ico--when-pause" aria-hidden="true"><use href="#i-pause"/></svg>
+      </button>
+      <span class="cover__demo" id="cover-demo" hidden>演示音轨</span>
+    </div>
+  </div>
+
+  <!-- ================= 平台（上）· 推荐来源（下）：极简导航 ================= -->
+  <!-- 两行位置固定，选中项只加深墨色并浮出一道短墨线；见 nav.js -->
+  <div class="navstage" id="navstage">
+    <div class="navrows" id="nav-rows">
+      <nav class="navrow navrow--plat" id="plat-row" role="tablist" aria-label="平台"></nav>
+      <nav class="navrow navrow--src" id="src-row" role="tablist" aria-label="推荐来源"></nav>
+      <nav class="navrow navrow--tools" aria-label="更多入口">
+        <button class="tnode" id="tool-forms" type="button">音乐形态</button>
+      </nav>
+    </div>
+  </div>
+
+  <!-- ============================ 下半天：平面跑马带 ============================ -->
+  <section class="ringsec">
+    <div class="ringview" id="ringview">
+      <div class="mstrip" id="mstrip">
+        <div class="mtrack" id="mtrack"></div>
+      </div>
+      <div class="ringmsg" id="ring-msg" hidden></div>
+    </div>
+    <div class="ringfoot">
+      <button class="ringfoot__back" id="ring-back" type="button" hidden>
+        <svg class="ico ico--s" aria-hidden="true"><use href="#i-back"/></svg>
+        <span id="ring-back-label">返回</span>
+      </button>
+    </div>
+  </section>
+
+</main>
+
+<!-- 播放进度：贴底 2px，不占布局 -->
+<div class="pbar" id="pbar" hidden aria-hidden="true"><i id="pbar-fill"></i></div>
+
+<!-- ============================ 搜索 ============================ -->
+<section class="sheet sheet--search" id="sheet-search" hidden aria-label="搜索">
+  <header class="sheet__top">
+    <button class="sheet__close" id="search-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <label class="searchbox">
+      <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="search-input" type="search" enterkeyhint="search" autocomplete="off"
+             autocapitalize="off" spellcheck="false" placeholder="搜索歌曲、歌手或专辑">
+    </label>
+  </header>
+  <div class="searchbar">
+    <div class="searchsrc" id="search-src" role="tablist" aria-label="搜索平台"></div>
+    <span class="searchhint" id="search-hint"></span>
+  </div>
+  <div class="sheet__body searchbody" id="search-body">
+    <p class="sheet__hint">搜到的歌点一下就播</p>
+  </div>
+</section>
+
+<!-- ============================ 歌手 / 专辑（复用桌面 pages 模块） ============================ -->
+<section class="sheet sheet--artist" id="sheet-artist" hidden aria-label="歌手">
+  <header class="sheet__top">
+    <button class="sheet__close" id="artist-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="sheet__title">歌手</h2>
+  </header>
+  <div class="artistbody" id="artist-body"></div>
+</section>
+
+<section class="sheet sheet--album" id="sheet-album" hidden aria-label="专辑">
+  <header class="sheet__top">
+    <button class="sheet__close" id="album-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="sheet__title">专辑</h2>
+  </header>
+  <div class="artistbody" id="album-body"></div>
+</section>
+
+<!-- ============================ 我的 ============================ -->
+<section class="sheet sheet--me" id="sheet-me" hidden aria-label="我的主页">
+  <header class="sheet__top">
+    <button class="sheet__close" id="me-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="sheet__title">我的</h2>
+  </header>
+  <div class="mebody" id="me-body">
+    <p class="sheet__hint">正在读取账号…</p>
+  </div>
+</section>
+
+<!-- ============================ 设置 ============================ -->
+<section class="sheet sheet--set" id="sheet-settings" hidden aria-label="设置">
+  <header class="sheet__top">
+    <button class="sheet__close" id="set-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="sheet__title">设置</h2>
+  </header>
+  <div class="sheet__body setbody">
+
+    <section class="setgroup">
+      <h3 class="setgroup__h">平台账号</h3>
+      <p class="setgroup__note">和桌面端共用登录状态；登录或退出在桌面端完成，这里会自动同步。</p>
+      <div class="setcard setaccts" id="set-accounts">
+        <p class="setgroup__note setaccts__loading">正在确认登录状态…</p>
+      </div>
+    </section>
+
+    <section class="setgroup">
+      <h3 class="setgroup__h">外观</h3>
+      <div class="setcard">
+        <div class="setrow">
+          <div class="setrow__text">
+            <b>降低动效</b>
+            <span>关掉环的惯性和背景流动</span>
+          </div>
+          <button class="switch" id="set-motion" type="button" role="switch" aria-checked="false" aria-label="降低动效"><i></i></button>
+        </div>
+        <div class="setrow">
+          <div class="setrow__text">
+            <b>低功耗背景</b>
+            <span>只留纯色底，不画取色光斑</span>
+          </div>
+          <button class="switch" id="set-power" type="button" role="switch" aria-checked="false" aria-label="低功耗背景"><i></i></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="setgroup">
+      <h3 class="setgroup__h">关于</h3>
+      <div class="setcard">
+        <button class="setline" id="set-update" type="button">
+          <span>检查更新</span>
+          <em id="set-ver">1.0.3</em>
+        </button>
+      </div>
+      <p class="sheet__foot">LIZI · 手机大厅<br>桌面端与安卓壳的行为不受这个页面影响</p>
+    </section>
+
+  </div>
+</section>
+
+<!-- ============================ 音乐形态 ============================ -->
+<section class="sheet sheet--forms" id="sheet-forms" hidden aria-label="音乐形态">
+  <header class="sheet__top">
+    <button class="sheet__close" id="forms-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="sheet__title">音乐形态</h2>
+  </header>
+  <div class="sheet__body formsbody">
+    <div class="formsgrid" id="forms-grid"></div>
+  </div>
+</section>
+
+<!-- ============================ 横屏形态 ============================ -->
+<section class="stageview" id="stage-view" hidden aria-label="形态">
+  <!-- 舞台始终是横屏画布：竖屏时整层转 90°，iframe 不重载、点击坐标跟着转 -->
+  <div class="stageview__canvas" id="stage-canvas">
+    <iframe id="stage-frame" title="形态" allow="autoplay; fullscreen; encrypted-media"></iframe>
+  </div>
+  <div class="stageview__hud">
+    <button class="stageview__back" id="stage-back" type="button">
+      <svg class="ico ico--s" aria-hidden="true"><use href="#i-back"/></svg>
+      <span>返回</span>
+    </button>
+    <span class="stageview__name" id="stage-name"></span>
+    <span class="stageview__spacer" aria-hidden="true"></span>
+  </div>
+</section>
+
+<!-- ============================ 工具箱 ============================ -->
+<section class="sheet sheet--tools" id="sheet-tools" hidden aria-label="工具箱">
+  <header class="sheet__top">
+    <button class="sheet__close" id="tools-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="sheet__title">工具箱</h2>
+  </header>
+  <div class="sheet__body">
+    <p class="setgroup__note">跨平台搬运歌单，或者换一种听法。</p>
+    <div class="toolcards">
+      <button class="toolcard" type="button" data-tool="migrate">
+        <span class="toolcard__ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="8.5" width="7.5" height="8" rx="1.5"/><path d="M7 4.5h12.5"/><path d="m17.5 2 2.5 2.5-2.5 2.5"/><path d="M17 19.5H4.5"/><path d="m6.5 17-2.5 2.5 2.5 2.5"/></svg>
+        </span>
+        <span class="toolcard__n">歌单搬运</span>
+        <span class="toolcard__c">跨平台迁移</span>
+        <span class="toolcard__go" aria-hidden="true">→</span>
+      </button>
+      <button class="toolcard" type="button" data-tool="spatial">
+        <span class="toolcard__ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><ellipse cx="12" cy="12" rx="3.2" ry="7.5"/><path d="M4.5 12h15"/><path d="M6.2 7.8h11.6"/><path d="M6.2 16.2h11.6"/></svg>
+        </span>
+        <span class="toolcard__n">空间音频</span>
+        <span class="toolcard__c">360° 声场</span>
+        <span class="toolcard__go" aria-hidden="true">→</span>
+      </button>
+    </div>
+    <p class="menote">这两个工具在桌面端完整可用，手机上先留入口。</p>
+  </div>
+</section>
+
+<!-- ============================ 我的专辑 ============================ -->
+<section class="sheet sheet--albums" id="sheet-albums" hidden aria-label="我的专辑">
+  <header class="sheet__top">
+    <button class="sheet__close" id="albums-close" type="button" aria-label="返回">
+      <svg class="ico" aria-hidden="true"><use href="#i-back"/></svg>
+    </button>
+    <h2 class="sheet__title">我的专辑</h2>
+  </header>
+  <div class="sheet__body">
+    <div class="albumsgrid" id="albums-grid"></div>
+  </div>
+</section>
+
+<!-- ============================ 主播放界面 ============================ -->
+<section class="nowsheet" id="sheet-now" hidden aria-label="正在播放">
+  <div class="nowsheet__bg" aria-hidden="true">
+    <i class="nowsheet__photo" id="now-photo"></i>
+  </div>
+  <header class="nowsheet__top">
+    <button class="nowsheet__btn" id="now-close" type="button" aria-label="收起">
+      <svg class="ico" aria-hidden="true"><use href="#i-chevron"/></svg>
+    </button>
+    <span class="nowsheet__kicker">正在播放</span>
+    <button class="nowsheet__form" id="now-form" type="button">形态</button>
+  </header>
+  <div class="nowsheet__main">
+    <div class="nowart" id="now-art-wrap">
+      <img class="nowart__img" id="now-art" alt="" decoding="async">
+      <span class="nowart__ph" id="now-art-ph" aria-hidden="true">
+        <svg class="ico ico--solid" viewBox="0 0 24 24"><use href="#i-note"/></svg>
+      </span>
+      <span class="nowart__cue" aria-hidden="true">
+        <svg class="ico ico--solid nowart__cue-play"><use href="#i-play"/></svg>
+        <svg class="ico ico--solid nowart__cue-pause"><use href="#i-pause"/></svg>
+      </span>
+    </div>
+    <!-- 封面和歌名之间唯一的元素：一条很细的透明抓手，点它展开歌词。
+         按钮本身 96×44 是纯透明热区，视觉只有中间 76×4 的细条。 -->
+    <button class="nowgrip" id="now-grip" type="button"
+            aria-label="展开歌词" aria-controls="now-lyrics" aria-expanded="false">
+      <i aria-hidden="true"></i>
+    </button>
+    <div class="nowinfo">
+      <h1 class="nowinfo__t" id="now-title">未播放</h1>
+    </div>
+    <div class="nowseek" id="now-seek">
+      <span class="nowseek__t" id="now-cur">0:00</span>
+      <div class="nowseek__bar" id="now-bar" role="slider" aria-label="播放进度"
+           aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+        <i id="now-fill"></i><b id="now-knob"></b>
+      </div>
+      <span class="nowseek__t" id="now-dur">0:00</span>
+    </div>
+    <div class="nowctl">
+      <button class="nowctl__side" id="now-mode" type="button" aria-label="播放模式">
+        <svg class="ico ico--solid" aria-hidden="true"><use href="#i-order"/></svg>
+      </button>
+      <div class="nowctl__main">
+        <button class="nowctl__b" id="now-prev" type="button" aria-label="上一首">
+          <svg class="ico ico--solid" aria-hidden="true"><use href="#i-prev"/></svg>
+        </button>
+        <button class="nowctl__play" id="now-play" type="button" aria-label="播放">
+          <!-- 和桌面 ntr-play 同一个「三角裂成两道」的变形：d 属性做补间 -->
+          <svg class="ico pn-svg" viewBox="0 0 24 24" aria-hidden="true">
+            <path class="pn pn-l" d="M8 4.6L13.6 8.2L13.6 15.8L8 19.4Z"/>
+            <path class="pn pn-r" d="M14.4 8.3L20 12L20 12L14.4 15.7Z"/>
+          </svg>
+        </button>
+        <button class="nowctl__b" id="now-next" type="button" aria-label="下一首">
+          <svg class="ico ico--solid" aria-hidden="true"><use href="#i-next"/></svg>
+        </button>
+      </div>
+      <span class="nowctl__side" aria-hidden="true"></span>
+    </div>
+    <!-- 歌词：默认收起，点细条后从顶栏下沿盖到控制键上方。
+         背景是近不透明的深色渐变，不用整屏 backdrop-filter。 -->
+    <div class="nowlyr" id="now-lyrics">
+      <div class="nowlyr__scroll" id="now-lyrics-scroll">
+        <p class="nowlyr__hint">播放歌曲后显示歌词</p>
+      </div>
+      <button class="nowgrip nowgrip--bot" id="now-grip-bot" type="button"
+              aria-label="收起歌词" aria-controls="now-lyrics">
+        <i aria-hidden="true"></i>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 更新弹窗 ============================ -->
+<div class="modal" id="sheet-update" hidden aria-label="发现新版本">
+  <div class="modal__card">
+    <p class="modal__kicker">发现新版本</p>
+    <h2 class="modal__ver" id="upd-ver">1.0.4</h2>
+    <p class="modal__note" id="upd-note">有更新可用。可以从下面任一入口下载。</p>
+    <div class="modal__links">
+      <button class="modal__link" type="button" data-link="quark"><span>夸克网盘</span><svg class="ico ico--s" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+      <button class="modal__link" type="button" data-link="baidu"><span>百度网盘</span><svg class="ico ico--s" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+      <button class="modal__link" type="button" data-link="gh"><span>GitHub Releases</span><svg class="ico ico--s" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+    </div>
+    <button class="modal__close" id="upd-close" type="button">稍后</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<!-- 横屏引导：只对触屏生效，电脑上缩窄窗口不拦 -->
+<div class="rot" id="rot" aria-hidden="true">
+  <span class="rot__phone"><i></i></span>
+  <p>请竖屏使用</p>
+</div>
+
+<!-- 只复用桌面的数据层与播放引擎，不引 app.js / app.css（那两套绑死桌面 DOM） -->
+<script src="../api.js"></script>
+<script src="../beat.js"></script>
+<script src="../audio/glide.js" defer></script>
+<script src="../player.js"></script>
+<script src="./coverfx.js"></script>
+<script src="./nav.js"></script>
+<script src="./ring.js"></script>
+<!-- 账号模型和桌面「我的」共用一套：只读 check/detail，不碰登录逻辑 -->
+<script src="../hall/accounts.js"></script>
+<!-- 桌面同款液态玻璃引擎：给 .topbar 的 data-liquid-glass 注入折射滤镜（失败时退回 CSS blur） -->
+<script src="../assets/liquid-glass.js"></script>
+<script src="./m.js"></script>
+</body>
+</html>

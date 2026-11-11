@@ -1,0 +1,170 @@
+/* ==========================================================================
+   LIZI · 手机大厅 · 极简导航
+   --------------------------------------------------------------------------
+   三行固定：平台（只留图标，整行居中）/ 来源 / 更多入口（后两行左对齐）。
+   平台是各家 App 图标本身的品牌底色；选中只加一道墨色细环，不加文字。
+   ========================================================================== */
+
+.navstage {
+  position: relative;
+  flex: none;
+  width: 100%;
+  height: 100px;
+  margin-top: 0;
+}
+
+.navrows {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 4px 16px 0;
+}
+
+.navrow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  height: 32px;
+  padding: 0;
+}
+/* 平台行：整行居中，手指可以沿着一行滑过去触发 Dock 放大。
+   touch-action:none 保证横滑时浏览器不会用 pointercancel 抢走手势。
+   双类名保证窄屏媒体查询里的 .navrow{gap:4px} 不会改掉 Dock 的 6px 基准。 */
+.navrow.navrow--plat {
+  gap: 6px;
+  justify-content: center;
+  touch-action: none;
+}
+.navrow--src { height: 28px; gap: 10px; }
+.navrow--tools { height: 26px; gap: 18px; margin-top: 2px; }
+
+/* ---- 平台：30px 图标块，无文字 ---- */
+.gnode {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 4px;
+  border-radius: 7px;
+  color: var(--ink-3);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: color var(--dur-fast, .16s) var(--ease-out, ease),
+              background-color var(--dur-fast, .16s) var(--ease-out, ease),
+              box-shadow var(--dur-fast, .16s) var(--ease-out, ease);
+  -webkit-tap-highlight-color: transparent;
+}
+/* 视觉 28，热区 44（inset 只向下扩，避免压到上一行） */
+.gnode::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  top: -6px;
+  bottom: -8px;
+}
+.gnode:active { background: color-mix(in oklab, var(--ink) 5%, transparent); }
+
+.gnode--tile {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 8px;
+  background: var(--tile-bg, #8a8a8a);
+  color: var(--tile-ink, #fff);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .05);
+}
+.gnode--tile::before { inset: -7px; }
+.gnode--tile:active { background: var(--tile-bg, #8a8a8a); filter: brightness(.94); }
+.gnode--tile.is-on {
+  box-shadow:
+    0 0 0 2px var(--paper-2),
+    0 0 0 3.5px var(--ink);
+}
+
+.gnode__logo {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border-radius: 3px;
+  opacity: .5;
+  transition: opacity var(--dur-fast, .16s) var(--ease-out, ease);
+}
+.gnode--tile .gnode__logo {
+  width: 19px;
+  height: 19px;
+  border-radius: 4px;
+  opacity: 1;
+}
+/* 没有 logo 的平台图标：只留一个小墨点，不破坏排版 */
+.gnode__dot {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: .5;
+}
+.gnode--tile .gnode__dot { width: 7px; height: 7px; opacity: .9; }
+
+.gnode__label { display: block; }
+
+/* 来源行：文字 + 短墨线（原样保留） */
+.gnode.is-on { color: var(--ink); }
+.gnode.is-on .gnode__logo { opacity: 1; }
+.gnode--tile .gnode__mark { display: none; }
+
+.gnode__mark {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0;
+  transform: translate(-50%, 3px) scaleX(.5);
+  transform-origin: 50% 50%;
+  transition: opacity .22s var(--ease-out, ease),
+              transform .26s var(--ease-out, ease);
+  pointer-events: none;
+}
+.gnode.is-on .gnode__mark {
+  opacity: .9;
+  transform: translate(-50%, 0) scaleX(1);
+}
+
+/* ---- 更多入口：纯文字，不做选中态 ---- */
+.tnode {
+  position: relative;
+  height: 26px;
+  padding: 0;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+.tnode::before {
+  content: '';
+  position: absolute;
+  inset: -8px -6px;
+}
+.tnode:active { color: var(--ink); }
+
+@media (max-width: 340px) {
+  .navrows { padding-left: 12px; padding-right: 12px; }
+  .navrow { gap: 4px; }
+  .navrow--src { gap: 7px; }
+  .navrow--tools { gap: 13px; }
+  .gnode { font-size: 11.5px; }
+  .tnode { font-size: 11px; }
+}
