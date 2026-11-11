@@ -1,7 +1,7 @@
 {
   "name": "lyric-glass-player",
   "productName": "LIZI",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "粒子播放器",
   "author": "LIZI",
   "license": "MIT",
@@ -39,8 +39,9 @@
       "!public/site/download/**",
       "!public/m/**",
       "server.mjs",
+      "wallpaper-api.mjs",
       "package.json",
-      "build/icon.png"
+      "build/**"
     ],
     "extraResources": [
       {
