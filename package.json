@@ -53,7 +53,14 @@
           "!**/.log.1",
           "!**/.port",
           "!**/.cache/**",
-          "!**/node_modules/.bin/**"
+          "!**/node_modules/.bin/**",
+          "!**/.auth-*",
+          "!**/.auth-state/**",
+          "!**/.session.json",
+          "!**/.netease-device.json",
+          "!**/.client.json",
+          "!**/cookie*.txt",
+          "!**/*.cookie"
         ]
       }
     ],
@@ -69,6 +76,7 @@
       "icon": "build/icon.ico"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "artifactName": "LIZI-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
