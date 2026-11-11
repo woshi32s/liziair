@@ -251,6 +251,32 @@ var hasInit = false;
 var duration = 0;
 var songMeta = { name: '', artist: '' };
 
+/* ---------- 4c. 画质档位 ----------
+   高档数值必须与改造前完全一致；低/中只降分辨率、步数与采样次数。
+   CFG 在本函数之后才赋值，启动时 resize2D 先跑，所以读档一律带 autoQuality 兜底。 */
+var QCFG = {
+  low:  { march: 0.60, steps: 56, pr: 1.0, rain: 60,  bloom: 4, textGlow: 4, shadow: 0, puffs: 28 },
+  mid:  { march: 0.80, steps: 70, pr: 1.5, rain: 110, bloom: 6, textGlow: 6, shadow: 1, puffs: 40 },
+  high: { march: 1.00, steps: 84, pr: 2.0, rain: 150, bloom: 8, textGlow: 8, shadow: 1, puffs: 54 }
+};
+function autoQuality() {
+  try {
+    var ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return 'low';
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return 'low';
+  } catch (e) {}
+  return 'high';
+}
+function qualityLevel() {
+  var q = (CFG && CFG.quality) ? CFG.quality : autoQuality();
+  return QCFG[q] ? q : 'high';
+}
+function qualityCfg() { return QCFG[qualityLevel()]; }
+function qualityPR() {
+  var dpr = window.devicePixelRatio || 1;
+  return Math.min(qualityCfg().pr, dpr);
+}
+
 function resize2D() {
   var iw = window.innerWidth || 1440;
   var ih = window.innerHeight || 900;
@@ -276,7 +302,7 @@ function resize2D() {
   if (!isFinite(W) || W <= 0) W = 1440;
   if (!isFinite(H) || H <= 0) H = 900;
   if (m) { m.mirrorOx = ox; m.mirrorOy = oy; }
-  DPR = Math.min(2, window.devicePixelRatio || 1);
+  DPR = qualityPR();
   boltCanvas.width = Math.round(W * DPR);
   boltCanvas.height = Math.round(H * DPR);
   boltCanvas.style.width = W + 'px';
@@ -473,35 +499,40 @@ function initText3D() {
 
 function resizeText3D() {
   if (!TXT.ready || !gfx.renderer) return;
-  var pr = Math.min(2, window.devicePixelRatio || 1);
-  var rw = Math.max(2, Math.round(W * pr));
-  var rh = Math.max(2, Math.round(H * pr));
-  if (TXT.rt && TXT.rtW === rw && TXT.rtH === rh) return;
-  if (TXT.rt) { try { TXT.rt.dispose(); } catch (e) {} }
-  if (TXT.depthTex) { try { TXT.depthTex.dispose(); } catch (e) {} }
-  var dt = new THREE.DepthTexture(rw, rh);
-  dt.minFilter = THREE.NearestFilter;
-  dt.magFilter = THREE.NearestFilter;
-  dt.type = THREE.UnsignedIntType;
-  TXT.depthTex = dt;
-  TXT.rt = new THREE.WebGLRenderTarget(rw, rh, {
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    format: THREE.RGBAFormat,
-    type: THREE.HalfFloatType,
-    depthBuffer: true,
-    stencilBuffer: false,
-    generateMipmaps: false,
-    depthTexture: dt
-  });
-  TXT.rt.texture.generateMipmaps = false;
-  TXT.rtW = rw; TXT.rtH = rh;
-  if (gfx.compMat) {
-    gfx.compMat.uniforms.uText.value = TXT.rt.texture;
-    gfx.compMat.uniforms.uTextDepth.value = TXT.depthTex;
-    gfx.compMat.uniforms.uTextNear.value = TXT.cam.near;
-    gfx.compMat.uniforms.uTextFar.value = TXT.cam.far;
-  }
+  try {
+    var pr = qualityPR();
+    var rw = Math.max(2, Math.round(W * pr));
+    var rh = Math.max(2, Math.round(H * pr));
+    if (TXT.rt && TXT.rtW === rw && TXT.rtH === rh) return;
+    var dt = new THREE.DepthTexture(rw, rh);
+    dt.minFilter = THREE.NearestFilter;
+    dt.magFilter = THREE.NearestFilter;
+    dt.type = THREE.UnsignedIntType;
+    /* 先建新 RT，成功后再释放旧的：创建失败时旧尺寸继续用，不会黑屏。 */
+    var nextRt = new THREE.WebGLRenderTarget(rw, rh, {
+      minFilter: THREE.LinearFilter,
+      magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
+      type: THREE.HalfFloatType,
+      depthBuffer: true,
+      stencilBuffer: false,
+      generateMipmaps: false,
+      depthTexture: dt
+    });
+    nextRt.texture.generateMipmaps = false;
+    var oldRt = TXT.rt, oldDt = TXT.depthTex;
+    TXT.depthTex = dt;
+    TXT.rt = nextRt;
+    TXT.rtW = rw; TXT.rtH = rh;
+    if (gfx.compMat) {
+      gfx.compMat.uniforms.uText.value = nextRt.texture;
+      gfx.compMat.uniforms.uTextDepth.value = dt;
+      gfx.compMat.uniforms.uTextNear.value = TXT.cam.near;
+      gfx.compMat.uniforms.uTextFar.value = TXT.cam.far;
+    }
+    if (oldRt) { try { oldRt.dispose(); } catch (e) {} }
+    if (oldDt) { try { oldDt.dispose(); } catch (e) {} }
+  } catch (e) { reportErr(e); }
 }
 
 /* 由句序号派生的确定性伪随机 [0,1)：同一句在电脑和手机上得到同一个值。 */
@@ -848,19 +879,21 @@ function showEmpty(on) {
 /* ---------- 5c. 形态设置 ----------
    宿主读 window.__stagePanel，变化时发 {type:'setting',payload:{key,value}}。
    值还会在 ready 后被整体重推一次，所以这里不需要自己存 localStorage。 */
-var CFG = { showLyrics: true, track: true, camSpeed: 1.0, textSize: 'm', flashPower: 1.0, dive: true, shake: true };
+var CFG = { showLyrics: true, track: true, camSpeed: 2.2, textSize: 'm', flashPower: 0.2, dive: false, shake: true, quality: autoQuality() };
 window.__stagePanel = {
   title: '雷暴云砧',
   hint: '镜头会自动转向当前这句词；歌词是纯白的实体字。',
   items: [
     { key: 'showLyrics', label: '显示歌词', type: 'switch', def: true },
     { key: 'track', label: '镜头追踪歌词', type: 'switch', def: true },
-    { key: 'camSpeed', label: '前进速度', type: 'range', min: 0.4, max: 2.2, step: 0.1, def: 1 },
-    { key: 'dive', label: '换句俯冲', type: 'switch', def: true },
+    { key: 'camSpeed', label: '前进速度', type: 'range', min: 0.4, max: 3.0, step: 0.1, def: 2.2 },
+    { key: 'dive', label: '换句俯冲', type: 'switch', def: false },
     { key: 'shake', label: '震动', type: 'switch', def: true },
     { key: 'textSize', label: '字号', type: 'segment', def: 'm',
       options: [{ v: 's', t: '小' }, { v: 'm', t: '中' }, { v: 'l', t: '大' }] },
-    { key: 'flashPower', label: '闪电强度', type: 'range', min: 0, max: 1.5, step: 0.1, def: 1 }
+    { key: 'flashPower', label: '闪电强度', type: 'range', min: 0, max: 1.5, step: 0.1, def: 0.2 },
+    { key: 'quality', label: '画质', type: 'segment', def: autoQuality(),
+      options: [{ v: 'low', t: '低' }, { v: 'mid', t: '中' }, { v: 'high', t: '高' }] }
   ]
 };
 function textScale() {
@@ -880,10 +913,34 @@ function applySetting(key, value) {
     if (!CFG.shake) { shake = 0; shakeX = 0; shakeY = 0; }
   } else if (key === 'camSpeed') {
     var v = Number(value);
-    CFG.camSpeed = clamp(isFinite(v) ? v : 1, 0.4, 2.2);
+    CFG.camSpeed = clamp(isFinite(v) ? v : 2.2, 0.4, 3.0);
   } else if (key === 'flashPower') {
     var f = Number(value);
-    CFG.flashPower = clamp(isFinite(f) ? f : 1, 0, 1.5);
+    CFG.flashPower = clamp(isFinite(f) ? f : 0.2, 0, 1.5);
+  } else if (key === 'quality') {
+    var oldQ = CFG.quality;
+    CFG.quality = (value === 'low' || value === 'mid' || value === 'high') ? value : autoQuality();
+    if (CFG.quality !== oldQ) {
+      rainDrops = null;   // 下一帧 ensureRain 按新档重建
+      if (gfx.fallback) { try { buildFallbackPuffs(); } catch (e) {} }
+      /* 只重分配 RT / 改像素比，不重建 renderer、不重排文字、不动相机。 */
+      if (gfx.ok) {
+        try { resize2D(); } catch (e) { reportErr(e); }
+        try { resizeGL(); } catch (e) { reportErr(e); }
+        try { resizeText3D(); } catch (e) { reportErr(e); }
+        var qc = qualityCfg();
+        try {
+          if (gfx.marchMat) {
+            gfx.marchMat.uniforms.uSteps.value = qc.steps;
+            gfx.marchMat.uniforms.uShadow.value = qc.shadow;
+          }
+          if (gfx.compMat) {
+            gfx.compMat.uniforms.uBloomN.value = qc.bloom;
+            gfx.compMat.uniforms.uTextN.value = qc.textGlow;
+          }
+        } catch (e) { reportErr(e); }
+      }
+    }
   } else if (key === 'textSize') {
     CFG.textSize = (value === 's' || value === 'l') ? value : 'm';
     if (TXT.ready && curIdx >= 0 && S.lines[curIdx]) {
@@ -1121,7 +1178,7 @@ var rainDrops = null;
 function ensureRain() {
   if (rainDrops) return;
   rainDrops = [];
-  var n = RM ? 55 : 150;
+  var n = RM ? 55 : qualityCfg().rain;
   for (var i = 0; i < n; i++) {
     rainDrops.push({
       x: Math.random(), y: Math.random(), z: Math.random(),
@@ -1305,12 +1362,10 @@ function updateFX(dt) {
 
 /* ---------- 12. 降级：2D 风暴背景 ---------- */
 var fbPuffs = [];
-function initFallback() {
-  gfx.fallback = true;
-  gfx.ok = false;
-  try { glCanvas.style.display = 'none'; } catch (e) {}
+function buildFallbackPuffs() {
   fbPuffs = [];
-  for (var i = 0; i < 54; i++) {
+  var n = qualityCfg().puffs;
+  for (var i = 0; i < n; i++) {
     fbPuffs.push({
       x: Math.random(), y: Math.random() * 0.85,
       r: 0.1 + Math.random() * 0.3,
@@ -1319,6 +1374,12 @@ function initFallback() {
       ph: Math.random() * 6.28
     });
   }
+}
+function initFallback() {
+  gfx.fallback = true;
+  gfx.ok = false;
+  try { glCanvas.style.display = 'none'; } catch (e) {}
+  buildFallbackPuffs();
 }
 function drawFallback(dt) {
   var ctx = bctx;
@@ -1511,6 +1572,8 @@ uniform float uChamberX;
 uniform float uChamberY;
 uniform float uChamberW;
 uniform float uTextGlow;
+uniform float uSteps;    /* 低/中档提前退出，高档 84 = 原样走满 */
+uniform float uShadow;   /* 0 = 关云自阴影（低档），1 = 开 */
 
 out highp vec4 outColor;
 
@@ -1593,6 +1656,7 @@ vec3 marchRay(vec3 ro, vec3 rd, out float hitDist){
   vec3 sunCol = mix(vec3(0.96, 0.96, 1.0), vec3(0.34, 0.50, 0.92), 0.62);
 
   for (int i = 0; i < STEPS; i++){
+    if (float(i) >= uSteps) break;
     float dist = 0.7 + (float(i) + jitter) * STEP_LEN;
     vec3 p = ro + rd * dist;
     float d = cloudDensity(p);
@@ -1601,7 +1665,7 @@ vec3 marchRay(vec3 ro, vec3 rd, out float hitDist){
       float hgt = clamp((p.y + 8.0) * 0.032, 0.0, 1.0);
 
       float sh = 1.0;
-      if (d > 0.035){
+      if (uShadow > 0.5 && d > 0.035){
         float sd = fbm3((p + SUN_DIR * 5.5) * 0.050);
         sh = exp(-max(0.0, sd - 0.44) * 7.5);
       }
@@ -1686,6 +1750,8 @@ uniform float uTextNear;
 uniform float uTextFar;
 uniform float uTextGlow;
 uniform float uArAlpha;   /* 1.0 = 正常；AR 实景叠加时 < 1，让摄像头画面透出 */
+uniform float uBloomN;    /* 云泛光迭代数，高档 8 */
+uniform float uTextN;     /* 文字辉光迭代数，高档 8 */
 
 out highp vec4 outColor;
 
@@ -1712,12 +1778,13 @@ void main(){
 
   vec3 bl = vec3(0.0);
   for (int i = 0; i < 8; i++){
+    if (float(i) >= uBloomN) break;
     float a = float(i) * 0.785398;
     vec2 o = vec2(cos(a), sin(a)) * 0.0062;
     bl += texture(uTex, uv + o).rgb;
     bl += texture(uTex, uv + o * 2.6).rgb * 0.55;
   }
-  bl /= 12.0;
+  bl /= (uBloomN * 1.5);   /* 高档 8*1.5=12，与原来完全一致；低档同亮度减半采样 */
   col += max(bl - 0.32, 0.0) * 0.34 + bl * 0.05;
 
   col += vec3(0.97, 0.98, 1.0) * uFlash * 0.13 * (1.0 - r2 * 0.55);
@@ -1727,6 +1794,7 @@ void main(){
   vec4 tx = texture(uText, uv);
   float tg = 0.0;
   for (int i = 0; i < 8; i++){
+    if (float(i) >= uTextN) break;
     float a = float(i) * 0.785398;
     vec2 o = vec2(cos(a), sin(a));
     tg += texture(uText, uv + o * 0.0030).a;
@@ -1734,7 +1802,7 @@ void main(){
     tg += texture(uText, uv + o * 0.0140).a * 0.14;
     tg += texture(uText, uv + o * 0.0240).a * 0.06;
   }
-  tg /= 12.0;
+  tg /= (uTextN * 1.5);    /* 高档 8*1.5=12，与原来完全一致 */
   // 字周围的云先压暗，任何闪电亮度下字都有暗底衬着
   float backing = clamp(tg * 1.75, 0.0, 1.0);
   col *= 1.0 - 0.50 * backing;
@@ -1788,7 +1856,7 @@ function initThree() {
     throw new Error('WebGL2 unavailable');
   }
   renderer.setClearColor(0x05060b, 1);
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setPixelRatio(qualityPR());
   renderer.setSize(W, H, true);
   gfx.renderer = renderer;
 
@@ -1829,7 +1897,9 @@ function initThree() {
       uChamberX: { value: 0 },
       uChamberY: { value: 0 },
       uChamberW: { value: 0 },
-      uTextGlow: { value: 0 }
+      uTextGlow: { value: 0 },
+      uSteps: { value: qualityCfg().steps },
+      uShadow: { value: qualityCfg().shadow }
     },
     vertexShader: MARCH_VS,
     fragmentShader: MARCH_FS,
@@ -1851,7 +1921,9 @@ function initThree() {
       uTextNear: { value: 0.1 },
       uTextFar: { value: 300 },
       uTextGlow: { value: 0 },
-      uArAlpha: { value: 1.0 }
+      uArAlpha: { value: 1.0 },
+      uBloomN: { value: qualityCfg().bloom },
+      uTextN: { value: qualityCfg().textGlow }
     },
     vertexShader: MARCH_VS,
     fragmentShader: COMP_FS,
@@ -1881,9 +1953,9 @@ function resizeGL() {
   if (!gfx.renderer || !gfx.rt) return;
   try {
     var r = gfx.renderer;
-    r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    r.setPixelRatio(qualityPR());
     r.setSize(W, H, true);
-    var scale = Math.min(1, 1200 / Math.max(1, Math.max(W, H)));
+    var scale = Math.min(1, 1200 / Math.max(1, Math.max(W, H))) * qualityCfg().march;
     var rw = Math.max(240, Math.round(W * scale));
     var rh = Math.max(150, Math.round(H * scale));
     gfx.rtW = rw;
@@ -1979,11 +2051,16 @@ function renderGL(dt) {
   u.uChamberY.value = TXT.chamberY;
   u.uChamberW.value = TXT.chamberW;
   u.uTextGlow.value = TXT.cur ? (0.30 + live.level * 0.5 + beatLevel * 0.55) : 0.0;
+  var qc = qualityCfg();
+  u.uSteps.value = qc.steps;
+  u.uShadow.value = qc.shadow;
 
   var cu = gfx.compMat.uniforms;
   cu.uTime.value = t;
   cu.uFlash.value = clamp(flashScreen + flashA * 0.22 + beatLevel * 0.05, 0, 1.3);
   cu.uGlow.value = 0.35 + live.level * 0.8 + beatLevel * 0.6;
+  cu.uBloomN.value = qc.bloom;
+  cu.uTextN.value = qc.textGlow;
   cu.uTextGlow.value = u.uTextGlow.value;
 
   // 3D 歌词：和 raymarch 完全相同的透视与旋转；文字在世界里，镜头动字不动

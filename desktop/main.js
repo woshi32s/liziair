@@ -47,6 +47,21 @@ const GITHUB_REPO = 'liziair';
 const RELEASES_URL = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
 
 let win = null;
+let serverPort = 0;
+
+/* 开发者版启动参数 --edition=dev|release。只影响页面 URL 的 ?edition=，
+   app.js 会把它当成形态版本写进 localStorage（dev = 形态长廊列全部）。 */
+function editionFromArgv(argv) {
+  const hit = (argv || []).find((a) => typeof a === 'string' && a.startsWith('--edition='));
+  const v = hit ? hit.slice('--edition='.length) : '';
+  return (v === 'dev' || v === 'release') ? v : '';
+}
+function pageUrl(port, edition, previewUpd) {
+  const qs = [];
+  if (previewUpd) qs.push(`upd=${encodeURIComponent(previewUpd)}`);
+  if (edition) qs.push(`edition=${edition}`);
+  return `http://127.0.0.1:${port}/${qs.length ? `?${qs.join('&')}` : ''}`;
+}
 let tray = null;
 let serverChild = null;
 let quitting = false;
@@ -222,7 +237,9 @@ function createWindow(port) {
      只为在桌面壳里看样式（app.js 里按 preview 分支直接亮出来）。
      不带这个环境变量时 URL 和原来完全一样。 */
   const previewUpd = String(process.env.LIZI_UPDATE_PREVIEW || '').trim();
-  win.loadURL(`http://127.0.0.1:${port}/${previewUpd ? `?upd=${encodeURIComponent(previewUpd)}` : ''}`);
+  /* 不带 --edition 时按发行版加载（显式带 ?edition=release，
+     避免开发者版写进 localStorage 后，普通启动也继续列全部形态）。 */
+  win.loadURL(pageUrl(port, editionFromArgv(process.argv) || 'release', previewUpd));
 
   win.once('ready-to-show', () => { win.show(); rememberNormalBounds(); });
 
@@ -632,11 +649,18 @@ ipcMain.handle('app:version', () => app.getVersion());
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
+  app.on('second-instance', (_e, commandLine) => {
+    if (!win) return;
+    win.show(); win.focus();
+    /* 已经有一个窗口在跑时，再从开发者版快捷方式点一次：
+       把窗口切到对应形态版本，而不是只把它抬到前面。 */
+    const edition = editionFromArgv(commandLine);
+    if (edition && serverPort) win.loadURL(pageUrl(serverPort, edition));
+  });
 
   app.whenReady().then(async () => {
-    const port = await ensureServer();
-    createWindow(port);
+    serverPort = await ensureServer();
+    createWindow(serverPort);
     createTray();
     bindMediaKeys();
     initAutoUpdate();

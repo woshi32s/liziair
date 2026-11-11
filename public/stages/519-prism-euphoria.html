@@ -259,6 +259,8 @@ try {
 
 var LZ = {
   accent: [150, 165, 255],
+  coverPalette: false,
+  coverColors: null,
   palette: [[150, 220, 255], [180, 150, 255], [255, 246, 230], [30, 46, 92]],
   W: 1440, H: 900, DPR: 1,
   curIdx: -2,
@@ -307,7 +309,8 @@ window.__stagePanel = {
   items: [
     /* 默认开：没装 WE（Android/iOS）时接口 501/失败，加载会静默跳过、不改观感；
        有壁纸时整块背景直接换成当前壁纸（视频/图片），中间的棱镜/文字层保持不动。 */
-    { key: "wallBkg", label: "本机壁纸背景", type: "switch", def: true }
+    { key: "wallBkg", label: "本机壁纸背景", type: "switch", def: true },
+    { key: "coverPalette", label: "封面取色背景", type: "switch", def: false }
   ]
 };
 
@@ -389,21 +392,140 @@ function rgb2hue(r, g, b) {
   return (h + 360) % 360;
 }
 
+/* rgb → 色相/饱和度/亮度（0..1），封面取色用 */
+function rgb2hsl(r, g, b){
+  r /= 255; g /= 255; b /= 255;
+  var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+  var l = (mx + mn) / 2, h = 0, s = 0;
+  if (mx !== mn){
+    var d = mx - mn;
+    s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn);
+    if (mx === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (mx === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h: (h + 360) % 360, s: s, l: l };
+}
+
+/* ---------- 封面取色：5 档亮度色阶（供封面取色背景使用） ---------- */
+function coverSrc(u) {
+  if (!u) return '';
+  u = String(u);
+  if (u.charAt(0) === '/') return u;
+  if (/^https?:\/\//i.test(u)) {
+    if (u.indexOf(location.origin) === 0) return u;
+    return '/api/img?url=' + encodeURIComponent(u.indexOf('?') >= 0 ? u : u + '?param=640y640');
+  }
+  return '';
+}
+
+function extractCoverStops(img) {
+  if (!img) return null;
+  var w = 48, h = 48;
+  var c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  var g = null;
+  try { g = c.getContext('2d', { willReadFrequently: true }); } catch (e) { g = null; }
+  if (!g) return null;
+  try { g.drawImage(img, 0, 0, w, h); } catch (e) { return null; }
+  var data;
+  try { data = g.getImageData(0, 0, w, h).data; } catch (e) { return null; }
+  var px = [];
+  for (var i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 16) continue;
+    var r = data[i], gg = data[i + 1], bb = data[i + 2];
+    px.push([r, gg, bb, 0.2126 * r + 0.7152 * gg + 0.0722 * bb]);
+  }
+  if (!px.length) return null;
+  px.sort(function (a, b) { return a[3] - b[3]; });
+  var out = [];
+  for (var k = 0; k < 5; k++) {
+    var start = Math.floor(px.length * k / 5);
+    var end = Math.floor(px.length * (k + 1) / 5);
+    if (end <= start) end = Math.min(px.length, start + 1);
+    var sr = 0, sg = 0, sb = 0, n = 0;
+    for (var j = start; j < end; j++) {
+      sr += px[j][0]; sg += px[j][1]; sb += px[j][2]; n++;
+    }
+    var col = n ? [sr / n, sg / n, sb / n] : [128, 128, 128];
+    if (k === 0) col = [col[0] * .5, col[1] * .5, col[2] * .5];                 // mix 黑 .5
+    if (k === 4) col = [col[0] * .75 + 63.75, col[1] * .75 + 63.75, col[2] * .75 + 63.75]; // mix 白 .25
+    out.push([Math.round(col[0]), Math.round(col[1]), Math.round(col[2])]);
+  }
+  return out;
+}
+
+function loadCoverPalette(u) {
+  var src = coverSrc(u);
+  if (!src) return;
+  var img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = function () {
+    var stops = null;
+    try { stops = extractCoverStops(img); } catch (e) { stops = null; }
+    if (!stops || stops.length < 5) return;
+    LZ.coverColors = stops;
+    if (LZ.coverPalette) buildPalette(LZ.accent);
+  };
+  img.onerror = function () {};
+  img.src = src;
+}
+
 function buildPalette(accent) {
   var a = (Array.isArray(accent) && accent.length >= 3) ? accent : [150, 165, 255];
   var r = clamp(Math.round(num(a[0], 150)), 0, 255);
   var g = clamp(Math.round(num(a[1], 165)), 0, 255);
   var b = clamp(Math.round(num(a[2], 255)), 0, 255);
   if (r + g + b < 14) { r = 150; g = 165; b = 255; }
-  var hue = rgb2hue(r, g, b);
-  var shift = clamp((hue - 225) * 0.16, -26, 26);
   LZ.accent = [r, g, b];
-  LZ.palette = [
-    hsl2rgb(187 + shift, 0.72, 0.63),   // 冰川青
-    hsl2rgb(272 + shift * 0.8, 0.62, 0.60), // 幻彩紫
-    hsl2rgb(42 + shift * 0.3, 0.30, 0.92),  // 珍珠白
-    hsl2rgb(224 + shift * 0.5, 0.66, 0.10)  // 深空蓝
-  ];
+  var chsl = rgb2hsl(r, g, b);
+  if (!LZ.coverPalette) {
+    var hue = rgb2hue(r, g, b);
+    var shift = clamp((hue - 225) * 0.16, -26, 26);
+    LZ.palette = [
+      hsl2rgb(187 + shift, 0.72, 0.63),   // 冰川青
+      hsl2rgb(272 + shift * 0.8, 0.62, 0.60), // 幻彩紫
+      hsl2rgb(42 + shift * 0.3, 0.30, 0.92),  // 珍珠白
+      hsl2rgb(224 + shift * 0.5, 0.66, 0.10)  // 深空蓝
+    ];
+  } else if (LZ.coverColors && LZ.coverColors.length >= 5) {
+    /* 封面五档亮度色阶 → 背景四色；灰度封面保持银灰/石墨，绝不回退签名蓝紫 */
+    var pickCover = function (stop, lmin, lmax) {
+      var c = LZ.coverColors[stop];
+      var cs = rgb2hsl(c[0], c[1], c[2]);
+      var sat = clamp(cs.s * 1.2 + .03, 0, .9);
+      /* s≈0 时色相无意义，用 220 给 ±.03 的极轻冷调，避免偏暖 */
+      var chue = cs.s < .02 ? 220 : cs.h;
+      return hsl2rgb(chue, sat, clamp(cs.l, lmin, lmax));
+    };
+    LZ.palette = [
+      pickCover(3, .32, .75),   // 亮中（uC1）
+      pickCover(2, .26, .68),   // 中（uC2）
+      pickCover(4, .80, .97),   // 高光（uC3）
+      pickCover(0, .04, .26)    // 深（uC4）
+    ];
+  } else if (chsl.s >= .08) {
+    /* 封面图还没到：先按 accent 色相生成，取到封面后再覆盖 */
+    var hue = chsl.h;
+    var s0 = clamp(chsl.s, .45, .85);
+    var l0 = clamp(chsl.l, .34, .62);
+    LZ.palette = [
+      hsl2rgb(hue, s0, l0),                          // 封面主色
+      hsl2rgb(hue + 34, s0 * .88, clamp(l0 * .96, .3, .6)),  // 邻近色
+      hsl2rgb(hue + 6, .24, .93),                    // 珍珠白（带主色相）
+      hsl2rgb(hue - 26, Math.min(.7, s0 * .8), .11)  // 深空
+    ];
+  } else {
+    /* 无色相 accent：用明度做中性色板，绝不回退签名蓝紫 */
+    var nl = clamp(chsl.l, .18, .78);
+    LZ.palette = [
+      hsl2rgb(220, .02, clamp(nl + .18, .30, .78)),
+      hsl2rgb(220, .03, clamp(nl - .12, .15, .55)),
+      hsl2rgb(220, .015, .94),
+      hsl2rgb(222, .05, .07)
+    ];
+  }
   if (LZ.bgUniforms) {
     LZ.bgUniforms.uC1.value.setRGB(LZ.palette[0][0] / 255, LZ.palette[0][1] / 255, LZ.palette[0][2] / 255);
     LZ.bgUniforms.uC2.value.setRGB(LZ.palette[1][0] / 255, LZ.palette[1][1] / 255, LZ.palette[1][2] / 255);
@@ -675,6 +797,13 @@ function loadWallpaper(force) {
 
 /* 宿主只发 key/value，持久化在宿主那边；这里只把值落到运行状态 */
 function applySetting(key, value) {
+  if (key === "coverPalette") {
+    var cp = !!value;
+    if (LZ.coverPalette === cp) return;
+    LZ.coverPalette = cp;
+    buildPalette(LZ.accent);
+    return;
+  }
   if (key === "wallBkg") {
     var on = !!value;
     if (LZ.wall.on === on) { applyWallUniforms(); return; }
@@ -1039,7 +1168,9 @@ function drawFx(dt, time) {
 function onInit(p) {
   var song = (p && p.song) ? p.song : null;
   updateMeta(song);
+  LZ.coverColors = null;          // 切歌先丢掉上一首的封面色，避免新封面失败时沿用旧色板
   buildPalette(p ? p.accent : null);
+  loadCoverPalette(song && song.cover);
 
   var raw = (p && Array.isArray(p.lines)) ? p.lines : [];
   var lines = [];
