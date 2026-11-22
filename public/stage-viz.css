@@ -1,0 +1,113 @@
+/* 形态页鼓点波形条（2026-11-17）—— 外观只在样式表里，行为和绘制在 stage-viz.js。
+ *
+ * 位置在左上角，但必须落在「返回」按钮那一行下方：按钮高度吃
+ * #view-stage 的 --stage-btn-scale（见 app.css「形态页顶栏按钮大小」），
+ * 所以上边距用 max() 跟着倍数走，按钮调大也不会被压住；左边距和 .stagebar
+ * 的 padding-inline 一致。
+ *
+ * 尺寸 248×64，窄屏 186×54。整条 pointer-events:none，不挡形态交互。
+ * 上半区为鼓点波形，下半区为只读遥测行（BPM / 小节拍号 / 段落）。
+ * 鼓点的闪一下 + 弹一下只动 opacity / transform：形态页可能同时在跑重
+ * WebGL，这里绝不加背景模糊、模糊滤镜或背景色动画。
+ */
+#stage-viz.sviz {
+  position: absolute;
+  top: max(72px, calc(56px * var(--stage-btn-scale, 1) + 16px));
+  left: clamp(16px, 4vw, 40px);
+  z-index: 1;                       /* iframe 之上、.stagebar(z-index:2) 之下 */
+  width: 248px;
+  height: 64px;
+  box-sizing: border-box;
+  border-radius: 12px;
+  background: rgba(10, 11, 16, .62);
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .30);
+  display: none;
+  overflow: hidden;
+  pointer-events: none;
+  --sviz-wave: rgba(255, 255, 255, .72);
+}
+
+#stage-viz.sviz.is-on { display: block; }
+
+/* 波形容器：占上半区 40px；鼓点来时整层 scaleY 轻微弹一下（JS 用 WAAPI 动 transform） */
+#stage-viz .sviz__wave {
+  position: absolute;
+  top: 0; right: 0; left: 0;
+  height: 40px;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+#stage-viz .sviz__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* 遥测读数行：占下半区 24px，等宽紧凑，纯文字零模糊 */
+#stage-viz .sviz__meta {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 24px;
+  padding: 0 9px;
+  box-sizing: border-box;
+  border-top: 1px solid rgba(255, 255, 255, .10);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font: 500 10.5px/1 ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, .82);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+#stage-viz .sviz__bpm {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, .90);
+}
+
+#stage-viz .sviz__pos {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, .76);
+}
+
+/* 闪光层：独立绝对定位的一层，只做 opacity 过渡，不碰下面的波形。
+   渐变本身是静态的，动的是 opacity —— 不会触发背景重绘。 */
+#stage-viz .sviz__flash {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  border-radius: inherit;
+  background: radial-gradient(120% 150% at 50% 50%,
+              rgba(255, 255, 255, .55) 0%,
+              rgba(255, 255, 255, .16) 55%,
+              rgba(255, 255, 255, 0) 100%);
+  opacity: 0;
+  will-change: opacity;
+  pointer-events: none;
+}
+
+@media (max-width: 520px) {
+  #stage-viz.sviz {
+    width: 186px;
+    height: 54px;
+    border-radius: 10px;
+  }
+  #stage-viz .sviz__wave {
+    height: 34px;
+  }
+  #stage-viz .sviz__meta {
+    height: 20px;
+    padding: 0 7px;
+    font-size: 9.5px;
+  }
+}

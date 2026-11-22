@@ -1,0 +1,261 @@
+/* ==========================================================================
+   形态检测台（2026-11-17）
+   --------------------------------------------------------------------------
+   只在开发时打开 /dev/stage-lab.html。视觉语言跟 AI 工坊同一套：
+   12,12,17 深底、白色文字、白 46% 次要色、8–12px 方框、不用渐变、
+   不用 backdrop-filter、动画只碰 opacity / transform。
+   ========================================================================== */
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body.lab {
+  --lab-bg: #0c0c11;
+  --lab-panel: rgba(12, 12, 17, 0.98);
+  --lab-border: rgba(255, 255, 255, 0.12);
+  --lab-line: rgba(255, 255, 255, 0.08);
+  --lab-ink: #f4f5f8;
+  --lab-muted: rgba(255, 255, 255, 0.78);
+  --lab-faint: rgba(255, 255, 255, 0.46);
+  --lab-hover: rgba(255, 255, 255, 0.08);
+  --lab-on: rgba(255, 255, 255, 0.14);
+  --lab-solid: #ffffff;
+  --lab-solid-ink: #111216;
+  --lab-good: #7ee2a8;
+  --lab-warn: #f4c96b;
+  --lab-bad: #ff9b9b;
+
+  margin: 0;
+  min-height: 100%;
+  background: var(--lab-bg);
+  color: var(--lab-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ------------------------------------------------------------------ 顶栏 */
+.lab__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--lab-line);
+}
+.lab__titles h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0.01em; }
+.lab__titles p { margin: 3px 0 0; font-size: 11.5px; color: var(--lab-faint); }
+.lab__headacts { display: flex; align-items: center; gap: 8px; }
+.lab__badge {
+  padding: 4px 10px;
+  border: 1px solid var(--lab-border);
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--lab-muted);
+}
+.lab__badge.is-pass { color: var(--lab-good); border-color: rgba(126, 226, 168, 0.4); }
+.lab__badge.is-warn { color: var(--lab-warn); border-color: rgba(244, 201, 107, 0.4); }
+.lab__badge.is-fail { color: var(--lab-bad); border-color: rgba(255, 155, 155, 0.4); }
+.lab__badge[hidden] { display: none; }
+
+/* ------------------------------------------------------------------ 按钮 */
+.lab__btn, .lab__mini {
+  appearance: none;
+  border: 1px solid var(--lab-border);
+  border-radius: 8px;
+  background: var(--lab-hover);
+  color: var(--lab-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: transform 140ms cubic-bezier(0.2, 0.9, 0.25, 1), background 140ms linear;
+}
+.lab__btn { padding: 7px 12px; font-size: 12px; text-decoration: none; }
+.lab__mini { padding: 4px 9px; font-size: 11px; color: var(--lab-muted); }
+.lab__btn:hover, .lab__mini:hover { background: var(--lab-on); transform: translateY(-1px); }
+.lab__btn:active, .lab__mini:active { transform: scale(0.97); }
+.lab__btn--primary { background: var(--lab-solid); border-color: var(--lab-solid); color: var(--lab-solid-ink); }
+.lab__btn--primary:hover { background: var(--lab-solid); }
+.lab__btn--ghost { background: transparent; }
+.lab__mini.is-on { background: var(--lab-on); color: var(--lab-ink); }
+
+/* ------------------------------------------------------------------ 布局 */
+.lab__grid {
+  display: grid;
+  grid-template-columns: minmax(340px, 0.85fr) minmax(0, 1.65fr);
+  gap: 12px;
+  padding: 12px;
+  align-items: stretch;
+  min-height: calc(100vh - 66px);
+}
+.lab__left, .lab__right {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--lab-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 10px;
+  gap: 8px;
+}
+.lab__toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.lab__code {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 260px;
+  resize: none;
+  padding: 12px 13px;
+  border: 1px solid var(--lab-line);
+  border-radius: 10px;
+  background: rgba(4, 5, 8, 0.45);
+  color: #dfe3ea;
+  font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  outline: none;
+}
+.lab__code:focus, .lab__code.is-drop { border-color: rgba(255, 255, 255, 0.55); }
+.lab__code.is-drop { background: rgba(255, 255, 255, 0.06); }
+.lab__linemsg { min-height: 17px; font-size: 12px; line-height: 1.5; color: var(--lab-faint); }
+.lab__linemsg[data-tone="ok"] { color: var(--lab-good); }
+.lab__linemsg[data-tone="bad"] { color: var(--lab-bad); }
+.lab__statsline { font-size: 11px; color: var(--lab-faint); }
+
+/* ------------------------------------------------------------------ 视口 */
+.lab__stagebar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.lab__views { display: flex; gap: 6px; flex-wrap: wrap; }
+.lab__live { font-size: 11.5px; color: var(--lab-faint); }
+.lab__live.is-ready { color: var(--lab-good); }
+.lab__live.is-bad { color: var(--lab-bad); }
+
+.lab__stagewrap {
+  flex: 1 1 auto;
+  min-height: 320px;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border: 1px solid var(--lab-line);
+  border-radius: 10px;
+  background:
+    repeating-conic-gradient(rgba(255, 255, 255, 0.03) 0% 25%, transparent 0% 50%) 0 0 / 24px 24px,
+    rgba(4, 5, 8, 0.42);
+}
+.lab__viewport { position: relative; flex: none; background: #000; }
+.lab__viewport[data-view="desktop"] { width: 960px; height: 540px; }
+.lab__viewport[data-view="phone"] { width: 405px; height: 720px; }
+.lab__viewport[data-view="square"] { width: 620px; height: 620px; }
+.lab__viewport iframe { display: block; width: 100%; height: 100%; border: 0; background: #000; }
+.lab__viewport:empty::after {
+  content: "运行后，形态会出现在这里";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.3);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------------ 控制 */
+.lab__controls { display: flex; flex-direction: column; gap: 7px; font-size: 11.5px; color: var(--lab-faint); }
+.lab__crow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lab__range { flex: 1 1 160px; min-width: 100px; accent-color: #fff; }
+.lab__time { font-variant-numeric: tabular-nums; color: var(--lab-muted); white-space: nowrap; }
+.lab__num, .lab__slide, .lab__chk, .lab__field { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.lab__num input {
+  width: 64px;
+  padding: 3px 6px;
+  border: 1px solid var(--lab-border);
+  border-radius: 6px;
+  background: rgba(4, 5, 8, 0.45);
+  color: var(--lab-ink);
+  font: inherit;
+}
+.lab__slide input { width: 72px; accent-color: #fff; }
+.lab__chk input { accent-color: #fff; }
+.lab__crow--lyric { align-items: flex-start; }
+.lab__field--grow { flex: 1 1 320px; flex-direction: column; align-items: stretch; white-space: normal; }
+.lab__field input[type="text"] {
+  width: 140px;
+  padding: 5px 8px;
+  border: 1px solid var(--lab-border);
+  border-radius: 6px;
+  background: rgba(4, 5, 8, 0.45);
+  color: var(--lab-ink);
+  font: inherit;
+}
+.lab__field textarea {
+  width: 100%;
+  height: 92px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--lab-line);
+  border-radius: 8px;
+  background: rgba(4, 5, 8, 0.45);
+  color: #dfe3ea;
+  font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  outline: none;
+}
+.lab__field textarea:focus { border-color: rgba(255, 255, 255, 0.34); }
+
+/* ------------------------------------------------------------------ 监测 */
+.lab__monitor { border-top: 1px solid var(--lab-line); padding-top: 8px; display: flex; flex-direction: column; gap: 7px; }
+.lab__mrow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--lab-faint); }
+.lab__mrow b { color: var(--lab-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.lab__errs { border: 1px solid rgba(255, 110, 110, 0.35); border-radius: 8px; padding: 8px 10px; background: rgba(255, 80, 80, 0.06); }
+.lab__errs[hidden], .lab__log[hidden] { display: none; }
+.lab__errs ul { margin: 0 0 7px; padding-left: 18px; max-height: 150px; overflow: auto; }
+.lab__errs li { font-size: 11.5px; line-height: 1.55; color: #ffc9c9; white-space: pre-wrap; word-break: break-word; }
+.lab__log ol { margin: 0; padding-left: 20px; max-height: 150px; overflow: auto; }
+.lab__log li { font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--lab-faint); white-space: pre-wrap; word-break: break-word; }
+
+/* ------------------------------------------------------------------ 批量 */
+.lab__batch {
+  margin: 0 12px 12px;
+  border: 1px solid var(--lab-line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.015);
+  padding: 10px;
+}
+.lab__batch[hidden] { display: none; }
+.lab__batchhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+.lab__batchhead b { font-size: 13px; }
+.lab__batchhead span { color: var(--lab-faint); }
+.lab__batchacts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.lab__tablewrap { margin-top: 8px; overflow: auto; max-height: 46vh; }
+.lab__table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.lab__table th, .lab__table td { padding: 6px 8px; border-bottom: 1px solid var(--lab-line); text-align: left; vertical-align: top; }
+.lab__table th { position: sticky; top: 0; background: #0c0c11; color: var(--lab-faint); font-weight: 500; white-space: nowrap; }
+.lab__table td { color: var(--lab-muted); }
+.lab__table td.is-good { color: var(--lab-good); }
+.lab__table td.is-warn { color: var(--lab-warn); }
+.lab__table td.is-bad { color: var(--lab-bad); }
+.lab__table td.err { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab__table tr.is-running td { background: rgba(255, 255, 255, 0.04); }
+
+/* ------------------------------------------------------------ badge 模式 */
+body.lab.is-badge .lab__left,
+body.lab.is-badge .lab__controls,
+body.lab.is-badge .lab__monitor,
+body.lab.is-badge .lab__batch { display: none; }
+body.lab.is-badge .lab__grid { grid-template-columns: 1fr; min-height: calc(100vh - 58px); }
+body.lab.is-badge .lab__head { padding: 8px 12px; }
+body.lab.is-badge .lab__titles p { display: none; }
+body.lab.is-badge .lab__stagewrap { border: 0; background: #000; }
+body.lab.is-badge .lab__stagebar { justify-content: center; }
+body.lab.is-badge .lab__views { display: none; }
+/* 截图模式：外壳不做任何动画（iframe 里的形态照常动，不归这里管） */
+body.lab.is-badge,
+body.lab.is-badge * { transition: none !important; animation: none !important; }
+
+@media (max-width: 1100px) {
+  .lab__grid { grid-template-columns: 1fr; min-height: 0; }
+  .lab__code { min-height: 200px; }
+  .lab__viewport[data-view="desktop"] { width: 100%; max-width: 960px; height: auto; aspect-ratio: 16 / 9; }
+  .lab__viewport[data-view="phone"] { width: min(405px, 100%); height: auto; aspect-ratio: 9 / 16; }
+  .lab__viewport[data-view="square"] { width: min(620px, 100%); height: auto; aspect-ratio: 1 / 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lab__btn, .lab__mini { transition: none; }
+}

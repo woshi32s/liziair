@@ -1,0 +1,805 @@
+/* ==========================================================================
+   AI 自定义工坊（2026-11-16 全屏改版 / 2026-11-17 视觉对齐形态选择器）
+   --------------------------------------------------------------------------
+   2026-11-17 这一轮只换皮：
+   1) 配色归零：底色统一到 12,12,17，文字白 + 白 46% 次要色，取色全部走
+      .studio 上的 --st-* 变量（和 app.css .smenu、snow-queue.css 同一套值）。
+   2) 不要渐变：整份文件不出现任何渐变函数，封面色卡改成三块纯色条。
+   3) 不要圆形：胶囊 / 圆形按钮 / 圆形序号全部改成 8–12px 圆角方框。
+   4) 动效照抄 .smenu：入场 opacity 180ms + transform 220ms
+      cubic-bezier(.2,.9,.25,1)；hover 只抬 transform；颜色直接切、不做过渡。
+   5) 动画只碰 transform / opacity，不用 backdrop-filter（大厅 WebGL 流色 +
+      22px 背景模糊会卡死，项目已查明）。
+
+   仍然独立于 app.css：颜色一律 rgba / 十六进制字面量，不用 oklch / color-mix
+   —— 这个页面最可能被老内核的手机打开（用户就是在手机上录形态）。
+   ========================================================================== */
+
+body.studio-open { overflow: hidden; }
+
+.studio {
+  /* 和 .smenu / .snowq__pop 对齐的那组取值 */
+  --st-bg: #0c0c11;
+  --st-panel: rgba(12, 12, 17, 0.98);
+  --st-border: rgba(255, 255, 255, 0.12);
+  --st-line: rgba(255, 255, 255, 0.08);
+  --st-ink: #f4f5f8;
+  --st-muted: rgba(255, 255, 255, 0.78);
+  --st-faint: rgba(255, 255, 255, 0.46);
+  --st-hover: rgba(255, 255, 255, 0.08);
+  --st-on: rgba(255, 255, 255, 0.14);
+  --st-ring: rgba(255, 255, 255, 0.65);
+  --st-solid: #ffffff;
+  --st-solid-ink: #111216;
+  --st-ease: cubic-bezier(0.2, 0.9, 0.25, 1);
+
+  position: fixed;
+  top: 0; right: 0; bottom: 0; left: 0;
+  /* 1500：桌面 app.css 最高 980，手机 m/pages.css 的 .stageview 是 1400
+     —— 工坊是整页视图，必须压过手机舞台页，否则从手机工具箱打开会被盖住。
+     2026-11-16 从 1000 提高。 */
+  z-index: 1500;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: var(--st-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  /* 2026-11-17：不再是蓝紫氛围光，和形态下拉一样一块纯深底 */
+  background: var(--st-bg);
+  opacity: 0;
+  transform: translateY(8px) scale(0.994);
+  transform-origin: center 42%;
+  transition: opacity 180ms ease-out,
+              transform 220ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.studio[hidden] { display: none; }
+.studio.is-in { opacity: 1; transform: none; }
+.studio.is-closing { pointer-events: none; }
+
+/* ---------------------------------------------------------------- 顶栏 */
+.studio__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 68px;
+  padding: 0 28px;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--st-line);
+  background: var(--st-bg);
+}
+.studio__back {
+  flex: none;
+  width: 40px; height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--st-border);
+  /* 2026-11-17：圆形 → 10px 方框，和 .snowq__x / .dstages__add 同一档 */
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.045);
+  color: inherit;
+  cursor: pointer;
+  /* 颜色直接切，只过渡 transform / opacity */
+  transition: transform 150ms var(--st-ease), opacity 150ms var(--st-ease);
+}
+.studio__back:hover { transform: translateX(-2px); background: var(--st-on); }
+.studio__back:active { transform: scale(0.94); }
+.studio__back svg {
+  width: 19px; height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.studio__titles { min-width: 0; }
+.studio__h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+.studio__sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--st-faint);
+}
+.studio__esc {
+  margin-left: auto;
+  flex: none;
+  padding: 6px 10px;
+  border: 1px solid var(--st-line);
+  /* 2026-11-17：胶囊 → 8px 方框 */
+  border-radius: 8px;
+  font: 500 10.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.32);
+}
+
+/* ---------------------------------------------------------------- 三栏 */
+.studio__grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(330px, 396px) minmax(0, 1fr) minmax(296px, 352px);
+  gap: 26px;
+  padding: 26px 28px 28px;
+  box-sizing: border-box;
+}
+
+/* ------------------------------------------------ 左栏：01 / 02 制作 */
+.studio__compose {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+.studio__step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  /* 2026-11-17：16 → 12，方框一点 */
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--st-line);
+}
+.studio__step--grow { flex: 1 1 auto; min-height: 0; }
+
+.studio__stephead { display: flex; align-items: flex-start; gap: 12px; }
+.studio__idx {
+  flex: none;
+  width: 30px; height: 30px;
+  display: grid;
+  place-items: center;
+  /* 2026-11-17：圆形 → 8px 方框；蓝底 → 黑白 */
+  border-radius: 8px;
+  font: 600 11.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--st-ink);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--st-border);
+}
+.studio__steptext { min-width: 0; }
+.studio__steptext h3 { margin: 1px 0 0; font-size: 14.5px; font-weight: 600; }
+.studio__steptext p {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.58;
+  color: var(--st-faint);
+}
+
+/* ---------------------------------------------------------------- 按钮 */
+.studio__btn {
+  align-self: flex-start;
+  padding: 9px 16px;
+  border: 1px solid var(--st-line);
+  /* 2026-11-17：胶囊 → 10px 方框 */
+  border-radius: 10px;
+  background: var(--st-hover);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 140ms var(--st-ease), opacity 140ms var(--st-ease);
+}
+.studio__btn:hover { transform: translateY(-1px); background: var(--st-on); }
+.studio__btn:active { transform: scale(0.97); }
+.studio__btn--ghost {
+  border: 1px solid var(--st-border);
+  background: rgba(255, 255, 255, 0.05);
+}
+/* 主按钮 = 一块实心白，黑字；不再用蓝渐变和彩色投影（2026-11-17） */
+.studio__btn--primary {
+  border-color: transparent;
+  background: var(--st-solid);
+  color: var(--st-solid-ink);
+  font-weight: 600;
+}
+.studio__btn--primary:hover { background: var(--st-solid); }
+.studio__btn[disabled] { opacity: 0.38; cursor: default; transform: none; }
+
+.studio__mini {
+  padding: 5px 11px;
+  border: 1px solid var(--st-border);
+  /* 2026-11-17：胶囊 → 8px 方框 */
+  border-radius: 8px;
+  background: var(--st-hover);
+  color: inherit;
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 140ms var(--st-ease), opacity 140ms var(--st-ease);
+}
+.studio__mini:hover { transform: translateY(-1px); background: var(--st-on); }
+.studio__mini:active { transform: scale(0.94); }
+
+/* -------------------------------------------------- 代码框 / 名字输入 */
+.studio__code {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 220px;
+  box-sizing: border-box;
+  padding: 14px 15px;
+  border: 1px solid var(--st-line);
+  /* 2026-11-17：13 → 10，和输入框同档 */
+  border-radius: 10px;
+  background: rgba(4, 5, 8, 0.45);
+  color: #dfe3ea;
+  font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: none;
+  outline: none;
+}
+.studio__code:focus { border-color: rgba(255, 255, 255, 0.34); }
+
+.studio__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.studio__row .studio__btn { align-self: auto; flex: none; }
+/* 导入 / 导出 / 独立检测：和主操作行同一套按钮，只是位置靠上（2026-11-17） */
+.studio__row--io { margin-top: -2px; }
+.studio__row--io .studio__btn { font-size: 11.5px; padding: 5px 10px; color: var(--st-muted); }
+/* 拖 .html 进来时编辑器高亮；只动边框和底色，不加过渡、不用模糊 */
+.studio__code.is-drop {
+  border-color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.06);
+}
+.studio__input {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 9px 13px;
+  box-sizing: border-box;
+  border: 1px solid var(--st-border);
+  /* 2026-11-17：胶囊 → 10px 方框 */
+  border-radius: 10px;
+  background: rgba(4, 5, 8, 0.45);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.studio__input:focus { border-color: rgba(255, 255, 255, 0.34); }
+
+.studio__msg {
+  margin: 0;
+  min-height: 18px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--st-faint);
+}
+.studio__msg[data-tone="bad"] { color: #ff9b9b; }
+.studio__msg[data-tone="ok"] { color: #7ee2a8; }
+
+/* --------------------------------------------------- 中栏：预览台 */
+.studio__stage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+}
+.studio__pbar {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 38px;
+}
+.studio__pinfo {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.studio__pk {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 6px;
+  /* 2026-11-17：蓝底蓝字 → 白 8% 底 + 白 78% 字 */
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--st-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+}
+.studio__pt {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 600;
+}
+.studio__ps {
+  font-size: 11.5px;
+  color: var(--st-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.studio__pacts { flex: none; display: flex; gap: 8px; }
+
+.studio__screen {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 260px;
+  /* 2026-11-17：18 → 12，阴影换成 .smenu 那组内高光 + 远投影 */
+  border-radius: 12px;
+  overflow: hidden;
+  background: #08080c;
+  border: 1px solid var(--st-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 26px 64px rgba(0, 0, 0, 0.55);
+}
+.studio__frame {
+  display: block;
+  width: 100%; height: 100%;
+  border: 0;
+  background: #08080c;
+}
+
+.studio__ph {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 24px;
+  text-align: center;
+  /* 2026-11-17：去掉径向光，直接露出预览台的深底 */
+  background: transparent;
+}
+.studio__ph-ico {
+  width: 54px; height: 54px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 4px;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  /* 2026-11-17：圆形 → 12px 方框 */
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.35);
+}
+.studio__ph-ico svg { width: 22px; height: 22px; }
+.studio__ph-t { margin: 0; font-size: 13.5px; color: rgba(255, 255, 255, 0.62); }
+.studio__ph-s { margin: 0; font-size: 12px; line-height: 1.6; color: rgba(255, 255, 255, 0.34); }
+
+.studio__err {
+  flex: none;
+  padding: 12px 14px;
+  /* 状态色只留细边框 / 淡底 / 文字，不做大面积红块（2026-11-17） */
+  border-radius: 10px;
+  background: rgba(255, 90, 90, 0.06);
+  border: 1px solid rgba(255, 90, 90, 0.32);
+}
+.studio__err[hidden] { display: none; }
+.studio__err-t {
+  margin: 0 0 8px;
+  font: 11.5px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #ffb3b3;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 96px;
+  overflow: auto;
+}
+
+/* ------------------------------------------------ 右栏：我的形态库 */
+.studio__lib {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  min-height: 0;
+}
+.studio__libhead {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.studio__libtitle {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+.studio__libcount {
+  padding: 4px 8px;
+  /* 2026-11-17：胶囊 → 6px 方框；蓝字 → 白 78% */
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--st-muted);
+  font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.studio__libhint { margin: 0; font-size: 11.5px; color: var(--st-faint); }
+.studio__libsearch { position: relative; display: flex; align-items: center; }
+.studio__libsearch svg {
+  position: absolute;
+  left: 11px;
+  width: 14px; height: 14px;
+  color: rgba(255, 255, 255, 0.52);
+  pointer-events: none;
+}
+/* 2026-11-17：对齐 .dstages__search —— 32px 高 / 8px 圆角 / 白 6% 底 */
+.studio__libsearch input {
+  width: 100%;
+  height: 32px;
+  box-sizing: border-box;
+  padding: 0 12px 0 32px;
+  border: 1px solid var(--st-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--st-ink);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.studio__libsearch input:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.09);
+}
+.studio__libsearch[hidden] { display: none; }
+
+.studio__libgrid {
+  flex: 1 1 auto;
+  min-height: 0;
+  list-style: none;
+  margin: 0;
+  padding: 2px 2px 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.studio__libgrid[hidden] { display: none; }
+.studio__libnohit {
+  margin: 0;
+  padding: 12px 4px;
+  font-size: 12px;
+  color: var(--st-faint);
+}
+.studio__libnohit[hidden] { display: none; }
+
+/* 卡片：封面用代码里的配色生成（不是截图，原因见 studio.js 的 paintOf）。
+   2026-11-17：封面不再铺一轮彩色渐变，改成深底 + 底部三块纯色条；
+   颜色只出现在那 5px 的色条里，卡片本身保持黑白。 */
+.lib__card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--st-line);
+  transition: transform 160ms var(--st-ease), opacity 160ms var(--st-ease);
+  /* 出现时错峰淡入：200ms + 最多 180ms 延迟 = 380ms，不超过 400ms */
+  animation: libCardIn 200ms var(--st-ease) backwards;
+}
+.lib__card:nth-child(1) { animation-delay: 0ms; }
+.lib__card:nth-child(2) { animation-delay: 30ms; }
+.lib__card:nth-child(3) { animation-delay: 60ms; }
+.lib__card:nth-child(4) { animation-delay: 90ms; }
+.lib__card:nth-child(5) { animation-delay: 120ms; }
+.lib__card:nth-child(6) { animation-delay: 150ms; }
+.lib__card:nth-child(n+7) { animation-delay: 180ms; }
+@keyframes libCardIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.lib__card:hover { transform: translateY(-2px); }
+.lib__card[hidden] { display: none; }
+/* 选中 / 新保存都用细环，选中走纯白，新保存走一点绿（状态色只碰边框） */
+.lib__card.is-sel { box-shadow: 0 0 0 2px var(--st-solid), 0 12px 30px rgba(0, 0, 0, 0.35); }
+.lib__card.is-new { box-shadow: 0 0 0 2px rgba(126, 226, 168, 0.75); }
+
+.lib__open {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms var(--st-ease);
+}
+.lib__open:active { transform: scale(0.995); }
+.lib__poster {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 96px;      /* 老内核不认 aspect-ratio 时也能撑出一块封面 */
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  /* 2026-11-17：纯深底，不再由 JS 写渐变当背景 */
+  background: #101116;
+}
+.lib__glyph {
+  position: relative;
+  z-index: 1;
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.45);
+}
+/* 底部三块纯色条：对应形态代码里扫出来的前三个颜色 */
+.lib__swatches {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  z-index: 1;
+  display: flex;
+  height: 5px;
+}
+.lib__swatches i {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+}
+.lib__kind {
+  position: absolute;
+  left: 8px; top: 8px;
+  z-index: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(8, 9, 13, 0.72);
+  border: 1px solid var(--st-border);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.7);
+}
+.lib__date {
+  position: absolute;
+  right: 8px; bottom: 10px;
+  z-index: 1;
+  font: 500 9.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(255, 255, 255, 0.66);
+}
+.lib__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 9px 10px 8px;
+}
+.lib__name {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib__sub {
+  font-size: 10.5px;
+  color: var(--st-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lib__acts { display: flex; gap: 6px; padding: 0 8px 9px; }
+.lib__act {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 0;
+  border: 1px solid var(--st-line);
+  /* 2026-11-17：8 → 6，小方钮 */
+  border-radius: 6px;
+  background: var(--st-hover);
+  color: var(--st-muted);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 140ms var(--st-ease), opacity 140ms var(--st-ease);
+}
+.lib__act:hover { transform: translateY(-1px); background: var(--st-on); color: #fff; }
+.lib__act:active { transform: scale(0.94); }
+/* 「应用」= 一块实心白，黑字（原来是一块蓝色） */
+.lib__act--go {
+  border-color: transparent;
+  background: var(--st-solid);
+  color: var(--st-solid-ink);
+  font-weight: 600;
+}
+.lib__act--go:hover { background: var(--st-solid); color: var(--st-solid-ink); }
+/* 删除默认只给红字 + 细边，不吃大面积红底 */
+.lib__act--del { color: rgba(255, 180, 180, 0.85); border-color: rgba(255, 120, 120, 0.22); }
+.lib__card[data-arm="1"] .lib__act--del {
+  background: rgba(210, 45, 45, 0.9);
+  border-color: rgba(255, 90, 90, 0.9);
+  color: #fff;
+}
+.lib__arm {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  z-index: 2;
+  padding: 5px 0;
+  text-align: center;
+  background: rgba(210, 45, 45, 0.92);
+  color: #fff;
+  font-size: 10.5px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 150ms var(--st-ease), transform 150ms var(--st-ease);
+  pointer-events: none;
+}
+.lib__card[data-arm="1"] .lib__arm { opacity: 1; transform: none; }
+
+/* 空库 */
+.studio__libempty {
+  flex: 1 1 auto;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 18px;
+  box-sizing: border-box;
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  /* 2026-11-17：16 → 12 */
+  border-radius: 12px;
+  color: var(--st-faint);
+}
+.studio__libempty[hidden] { display: none; }
+.studio__libempty-ico { color: rgba(255, 255, 255, 0.32); }
+.studio__libempty-ico svg { width: 26px; height: 26px; display: block; }
+.studio__libempty b { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, 0.66); }
+.studio__libempty span:last-child { font-size: 11.5px; line-height: 1.6; }
+
+/* ------------------------------------------------------------- toast */
+.studio__toast {
+  position: fixed;
+  left: 50%;
+  bottom: 30px;
+  z-index: 3;
+  max-width: min(560px, calc(100vw - 40px));
+  box-sizing: border-box;
+  padding: 10px 18px;
+  /* 2026-11-17：胶囊 → 10px 方框 */
+  border-radius: 10px;
+  background: var(--st-panel);
+  border: 1px solid var(--st-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 18px 44px rgba(0, 0, 0, 0.5);
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--st-ink);
+  text-align: center;
+  opacity: 0;
+  transform: translate(-50%, 10px);
+  transition: opacity 180ms ease-out,
+              transform 220ms cubic-bezier(0.2, 0.9, 0.25, 1);
+  pointer-events: none;
+}
+.studio__toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+.studio__toast[data-tone="bad"] { border-color: rgba(255, 110, 110, 0.4); color: #ffc9c9; }
+.studio__toast[data-tone="ok"] { border-color: rgba(126, 226, 168, 0.35); color: #c6f5d9; }
+
+/* --------------------------------------------------------- 键盘焦点 */
+.studio__back:focus-visible,
+.studio__btn:focus-visible,
+.studio__mini:focus-visible,
+.studio__input:focus-visible,
+.studio__code:focus-visible,
+.studio__libsearch input:focus-visible,
+.lib__open:focus-visible,
+.lib__act:focus-visible {
+  /* 2026-11-17：焦点圈也从品牌蓝换成单色白，和 .dstages / snow-queue 一致 */
+  outline: 2px solid var(--st-ring);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   窄屏
+   1100 以下：形态库从右栏挪到第二行（整行铺开），卡片自动多列。
+   900 以下：单列堆叠，预览台固定成 16:10，整页可滚。
+   ========================================================================== */
+@media (max-width: 1100px) {
+  .studio__grid {
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+    grid-template-rows: minmax(460px, 1fr) auto;
+    align-content: start;
+    overflow: auto;
+    padding: 20px;
+    gap: 20px;
+  }
+  .studio__compose { overflow: visible; }
+  .studio__stage { min-height: 460px; }
+  .studio__lib { grid-column: 1 / -1; }
+  .studio__libgrid {
+    flex: none;
+    grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    max-height: 340px;
+  }
+  .studio__libempty { flex: none; min-height: 140px; }
+}
+
+@media (max-width: 900px) {
+  .studio__head { height: 60px; padding: 0 16px; gap: 12px; }
+  .studio__sub { display: none; }
+  .studio__esc { display: none; }
+  .studio__grid {
+    display: block;
+    padding: 16px;
+    overflow: auto;
+  }
+  .studio__compose { display: flex; overflow: visible; padding: 0; }
+  .studio__stage { margin-top: 16px; min-height: 0; }
+  .studio__screen {
+    flex: none;
+    min-height: 220px;
+    aspect-ratio: 16 / 10;
+    max-height: 56vh;
+  }
+  .studio__lib { margin-top: 20px; }
+  .studio__libgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: none;
+    overflow: visible;
+  }
+  .studio__code { min-height: 190px; max-height: 46vh; }
+  .studio__toast { bottom: 18px; }
+}
+
+@media (max-width: 560px) {
+  .studio__head { padding: 0 12px; }
+  .studio__h2 { font-size: 15.5px; }
+  .studio__back { width: 36px; height: 36px; }
+  .studio__grid { padding: 12px; }
+  .studio__step { padding: 14px; border-radius: 10px; }
+  .studio__row .studio__btn { flex: 1 1 auto; }
+  .studio__libgrid { gap: 10px; }
+  .lib__name { font-size: 12px; }
+  .lib__acts { gap: 5px; padding: 0 7px 8px; }
+  .studio__pt { font-size: 13.5px; }
+}
+
+/* 触屏命中区：只对真正需要手指点的行/按钮加高（2026-11-17）。
+   工坊整体仍按窗口宽度断点，不混进 pointer:coarse 布局。 */
+@media (max-width: 1280px) and (pointer: coarse) {
+  .studio__mini,
+  .lib__act { min-height: 34px; }
+  .studio__btn { min-height: 40px; }
+}
+
+/* 减少动效：入场、卡片错峰、按钮轻抬全部一键关掉 */
+@media (prefers-reduced-motion: reduce) {
+  .studio,
+  .studio__back,
+  .studio__btn,
+  .studio__mini,
+  .studio__input,
+  .studio__code,
+  .studio__libsearch input,
+  .lib__card,
+  .lib__open,
+  .lib__act,
+  .lib__arm,
+  .studio__toast { transition-duration: 1ms; animation: none; }
+}
+

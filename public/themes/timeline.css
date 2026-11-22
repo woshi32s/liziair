@@ -1,0 +1,239 @@
+/* 界面主题时间轴（设置页专用）
+ * 只服务 theme.js 生成的 #ui-theme-timeline / .tm*，不重写任何主题规则。
+ * 颜色全部引用现有令牌（--ink / --ink-2 / --ink-3 / --accent / --rule），
+ * 所以它会自然跟随当前主题换色；--surface 不存在时用 --paper-2 兜底。
+ *
+ * 视觉：名称（上） / 轨道（中：1px 线 + 10 个刻度 + 自绘滑块） / 年份（下）
+ * 交互：原生 range 透明铺在轨道上，只借它的触摸、键盘与无障碍语义。
+ */
+
+.tm {
+  --tm-inset: 14px;   /* 首尾停靠点到轨道边缘的距离，等于标签半宽能吸收的量 */
+  --tm-n: 10;         /* 停靠点数量，theme.js 会再写一次 */
+  --tm-p: 0;          /* 当前比例 0–1，theme.js 在拖动时实时更新 */
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  /* 左右留出「标签半宽 - 首尾 inset」：64px 宽的标签在两端不会溢出卡片。 */
+  padding: 6px calc(32px - var(--tm-inset)) 0;
+  font-family: var(--font-body);
+  color: var(--ink);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.tm-names,
+.tm-track,
+.tm-years {
+  position: relative;
+  width: 100%;
+}
+
+.tm-names,
+.tm-track,
+.tm-years {
+  height: 44px;       /* 触控命中区高度，名称 / 年份行整行可点 */
+}
+
+/* 停靠点：theme.js 预算的 --tm-p-i（序号 / 末位）换算成与轨道一致的位置，
+   首尾各让出 --tm-inset；不依赖旧内核支持不稳的 calc() 变量除法。 */
+.tm-names .tm-stop,
+.tm-years .tm-stop {
+  position: absolute;
+  left: calc(var(--tm-inset) + var(--tm-p-i) * (100% - 2 * var(--tm-inset)));
+  width: 64px;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;   /* 命中交给整行，避免窄屏标签互相盖住时点错 */
+}
+
+.tm-names .tm-stop {
+  top: 0;
+  height: 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  padding-bottom: 5px;
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--ink-3);
+  white-space: normal;
+}
+
+.tm-names .tm-stop.is-on {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tm-full {
+  display: block;
+}
+
+.tm-short {
+  display: none;
+}
+
+.tm-track {
+  cursor: pointer;
+}
+
+.tm-line {
+  position: absolute;
+  left: var(--tm-inset);
+  right: var(--tm-inset);
+  top: calc(50% - 0.5px);
+  height: 1px;
+  background: var(--rule);
+  pointer-events: none;
+}
+
+.tm-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.tm-tick {
+  position: absolute;
+  left: calc(var(--tm-inset) + var(--tm-p-i) * (100% - 2 * var(--tm-inset)));
+  top: 50%;
+  width: 1px;
+  height: 7px;
+  margin-top: -3.5px;
+  background: var(--ink-3);
+  opacity: .55;
+  transform: translateX(-50%);
+  transition: opacity var(--dur-fast);
+}
+
+.tm-tick.is-on {
+  height: 13px;
+  margin-top: -6.5px;
+  background: var(--accent);
+  opacity: 1;
+}
+
+.tm-thumb {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--tm-inset) + var(--tm-p) * (100% - 2 * var(--tm-inset)));
+  width: 3px;
+  height: 18px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 0 0 3px var(--tm-card-bg, var(--paper-2, var(--glass-tint, transparent)));
+}
+
+/* 透明覆盖的原生 range：高度 44px；滑块宽 0，让 value 两端正好落在 inset 上。 */
+.tm-range {
+  position: absolute;
+  left: var(--tm-inset);
+  top: 0;
+  width: calc(100% - 2 * var(--tm-inset));
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0;
+  cursor: grab;
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: pan-y;
+}
+
+.tm-range:active {
+  cursor: grabbing;
+}
+
+.tm-range:focus {
+  outline: none;
+}
+
+.tm-range::-webkit-slider-runnable-track {
+  height: 44px;
+  background: transparent;
+  border: 0;
+}
+
+.tm-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 44px;
+  border: 0;
+  background: transparent;
+}
+
+.tm-range::-moz-range-track {
+  height: 44px;
+  background: transparent;
+  border: 0;
+}
+
+.tm-range::-moz-range-thumb {
+  width: 0;
+  height: 44px;
+  border: 0;
+  background: transparent;
+}
+
+/* 键盘聚焦 ring 画在自绘滑块上（原生 input 整体透明）。 */
+.tm-track:focus-within .tm-thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.tm-years .tm-stop {
+  top: 0;
+  height: 44px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  box-sizing: border-box;
+  padding-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}
+
+.tm-years .tm-stop.is-on {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 窄屏：换短名（theme.js 同时放了 .tm-full / .tm-short 两个 span），字号收紧。 */
+@media (max-width: 560px) {
+  .tm {
+    --tm-inset: 12px;
+  }
+
+  .tm-full {
+    display: none;
+  }
+
+  .tm-short {
+    display: block;
+  }
+
+  .tm-names .tm-stop {
+    font-size: 10px;
+  }
+
+  .tm-years .tm-stop {
+    padding-top: 5px;
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tm-tick {
+    transition: none;
+  }
+}

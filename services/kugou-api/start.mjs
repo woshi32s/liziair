@@ -6,7 +6,9 @@
  * 和 services/qq-api/start.mjs 同一套做法（端口优先级 / 只绑回环 / EPIPE / 盯父进程 / 失败要说原因）。
  *
  * 这个文件做五件事：
- *   1. 端口：KUGOU_API_PORT > 上次的 .port > 3211（避开 3200/3210 那两个和 Windows 保留段）
+ *   1. 端口：普通版 KUGOU_API_PORT > 上次的 .port > 3211；
+ *      概念版（KUGOU_PROFILE=lite）KUGOU_LITE_API_PORT > .port-lite > 3217
+ *      （避开 3200/3210 那两个和 Windows 保留段）
  *   2. 只绑 127.0.0.1：先给 net.Server.prototype.listen 打一次性补丁（host 缺省时补回环），
  *      再显式设 HOST=127.0.0.1（这个包读 HOST 环境变量，两条保险）
  *   3. 设备身份固定：KUGOU_API_GUID 存在 .auth-state/device.json 里。**删了就等于换一台设备**，
@@ -26,8 +28,13 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PORT_FILE = path.join(__dirname, '.port');
-const LOG_FILE = path.join(__dirname, '.log');
+/* 普通版 / 概念版是两个进程：包的 process.env.platform 在 require 时固定，
+   一个进程只能是一个版本。KUGOU_PROFILE=lite 时端口、日志、jar 全部换一套，
+   设备身份（.auth-state/device.json）仍共用 —— 同一台设备。 */
+const PROFILE = process.env.KUGOU_PROFILE === 'lite' ? 'lite' : 'normal';
+const IS_LITE = PROFILE === 'lite';
+const PORT_FILE = path.join(__dirname, IS_LITE ? '.port-lite' : '.port');
+const LOG_FILE = path.join(__dirname, IS_LITE ? '.log-lite' : '.log');
 const STATE_DIR = path.join(__dirname, '.auth-state');
 const DEVICE_FILE = path.join(STATE_DIR, 'device.json');
 
@@ -41,26 +48,27 @@ for (const stream of [process.stdout, process.stderr]) {
   try { stream.on('error', () => { /* 输出管道断了不影响服务 */ }); } catch { /* ignore */ }
 }
 function log(...parts) {
-  const line = `[kugou-api ${new Date().toISOString()}] ${parts.join(' ')}`;
+  const line = `[kugou-api${IS_LITE ? ':lite' : ''} ${new Date().toISOString()}] ${parts.join(' ')}`;
   try { console.log(line); } catch { /* ignore */ }
   try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch { /* ignore */ }
 }
 function fail(...parts) {
-  const line = `[kugou-api ${new Date().toISOString()}] FATAL ${parts.join(' ')}`;
+  const line = `[kugou-api${IS_LITE ? ':lite' : ''} ${new Date().toISOString()}] FATAL ${parts.join(' ')}`;
   try { console.error(line); } catch { /* ignore */ }
   try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch { /* ignore */ }
 }
 
 /* ---------------- 端口：和主服务同一套规矩 ---------------- */
 function preferredPort() {
-  if (process.env.KUGOU_API_PORT) return Number(process.env.KUGOU_API_PORT) || 0;
+  const envPort = IS_LITE ? process.env.KUGOU_LITE_API_PORT : process.env.KUGOU_API_PORT;
+  if (envPort) return Number(envPort) || 0;
   try {
     const prev = Number(fs.readFileSync(PORT_FILE, 'utf8').trim());
     // 读完删掉：server.mjs 靠「文件出现」判断子进程是否就绪
     fs.unlinkSync(PORT_FILE);
     if (Number.isInteger(prev) && prev > 1024 && prev < 65536) return prev;
   } catch { /* 第一次跑 */ }
-  return 3211;
+  return IS_LITE ? 3217 : 3211;
 }
 
 /* ---------------- 设备身份：GUID 要稳定 ---------------- */
@@ -107,8 +115,10 @@ process.env.KUGOU_API_GUID = deviceGuid();
 if (!process.env.KUGOU_API_DEV) {
   process.env.KUGOU_API_DEV = ('LIZI' + process.env.KUGOU_API_GUID.slice(0, 8)).toUpperCase();
 }
-// .env 里 platform 留空时包里会写 `KUGOU_API_PLATFORM=undefined`，明确给个空串更干净
-if (process.env.platform === undefined) process.env.platform = '';
+// 包在 require 时读 process.env.platform：概念版必须在这之前固定成 lite。
+// 普通版沿用原来的空串（.env 里留空时包里会写 KUGOU_API_PLATFORM=undefined）。
+if (IS_LITE) process.env.platform = 'lite';
+else if (process.env.platform === undefined) process.env.platform = '';
 
 const require = createRequire(import.meta.url);
 
@@ -249,7 +259,7 @@ function ready(server) {
   const port = addr && typeof addr === 'object' ? addr.port : wantPort;
   const host = addr && typeof addr === 'object' ? addr.address : '127.0.0.1';
   fs.writeFileSync(PORT_FILE, String(port));
-  log(`就绪 http://${host}:${port}  （只绑回环；设备 ${process.env.KUGOU_API_GUID.slice(0, 8)}…）`);
+  log(`${IS_LITE ? '概念版' : '普通版'}就绪 http://${host}:${port}  （只绑回环；设备 ${process.env.KUGOU_API_GUID.slice(0, 8)}…）`);
   // 给父进程（server.mjs）一个明确的、可抓的信号
   console.log(`KUGOU_API_READY ${port}`);
 }
@@ -266,7 +276,10 @@ process.on('unhandledRejection', (e) => {
 });
 
 /* 父进程（server.mjs）掉了就把自己也收掉，别留孤儿进程占端口。 */
-const parentPid = Number(process.env.KUGOU_PARENT_PID || 0);
+const parentPid = Number(
+  (IS_LITE ? process.env.KUGOU_LITE_PARENT_PID : process.env.KUGOU_PARENT_PID)
+  || process.env.KUGOU_PARENT_PID || 0
+);
 if (Number.isInteger(parentPid) && parentPid > 0) {
   setInterval(() => {
     try { process.kill(parentPid, 0); }
@@ -312,7 +325,7 @@ try {
       return;
     }
     fail(`监听失败（${code || 'unknown'}）: ${e && e.message}`);
-    fail('排查：netsh int ipv4 show excludedportrange protocol=tcp  看端口是否在保留段；或换 KUGOU_API_PORT');
+    fail(`排查：netsh int ipv4 show excludedportrange protocol=tcp  看端口是否在保留段；或换 ${IS_LITE ? 'KUGOU_LITE_API_PORT' : 'KUGOU_API_PORT'}`);
     process.exit(1);
   });
   if (server.listening) ready(server);

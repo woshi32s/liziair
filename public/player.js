@@ -4,9 +4,9 @@
  * 三件事值得说明：
  *  1) 队列播放 + 播放模式（顺序 / 单曲 / 随机）
  *  2) 歌词：解析 LRC（含翻译行），按时间滚动并高亮
- *  3) 降级：网易云对大量歌曲返回 url:null（VIP/无版权）。这时不报错卡住，
- *     而是生成一段「演示音轨」继续放 —— 界面、歌词、进度条全都能正常走完，
- *     并在播放条上打一个「演示音轨」角标说明这不是真歌。
+ *  3) 远端音源（网易云 / QQ / 酷狗 / 汽水 / 波点 / 酷我）拿不到直链时**不再**
+ *     生成合成演示音轨冒充这首歌：返回空地址 + 原因，界面显示明确的不可用 /
+ *     试听提示。只有本地曲目文件丢失仍保留演示音轨（文件确实不在本机了）。
  */
 const Player = (() => {
   /* ------------------------------------------------------------------ *
@@ -42,11 +42,15 @@ const Player = (() => {
     lyric: [],        // [{ t, text, tr }]
     lyricIndex: -1,
     objectUrl: null,  // 演示音轨的 blob url，切换时要 revoke
+    /* 试听片段起点（毫秒）。汽水等平台给 VIP 歌的试听是「高潮片段」，
+       audio.currentTime 从 0 起，但歌词是按整曲时间轴写的：
+       歌词定位必须加这个偏移，否则唱的和显示的不是同一句。整曲时为 0。 */
+    clipStartMs: 0,
     token: 0,         // 异步竞态令牌：快速切歌时丢弃过期回调
   };
 
   const listeners = {};
-  const on = (evt, fn) => (listeners[evt] ||= []).push(fn);
+  const on = (evt, fn) => (listeners[evt] = listeners[evt] || []).push(fn);
   const emit = (evt, data) => (listeners[evt] || []).forEach((f) => f(data));
 
   /* ------------------------------------------------------------------ *
@@ -80,6 +84,9 @@ const Player = (() => {
     delete out.audioUrl;
     delete out.playUrl;
     delete out.srcUrl;
+    /* 本地曲目的封面是 data URL：一首几十 KB，整队写进 localStorage 会爆配额。
+       恢复队列后由 hydrateLocalQueue() 从 IndexedDB 按 id 补回。 */
+    if (typeof out.cover === 'string' && /^data:/i.test(out.cover)) delete out.cover;
     return out;
   }
 
@@ -123,10 +130,32 @@ const Player = (() => {
       state.index = idx;
       state.playing = false;                 // 恢复队列 ≠ 恢复播放
       if (QUEUE_MODES.includes(data.mode)) state.mode = data.mode;
+      hydrateLocalQueue();
     } catch {
       /* 旧版本 / 数据结构变了 / 存储损坏：静默清掉，不影响启动 */
       try { localStorage.removeItem(QUEUE_KEY); } catch { /* ignore */ }
     }
+  }
+
+  /* 本地曲目的封面是 data URL（几十 KB），不进 localStorage 队列 —— 否则
+     100 首就把 5 MB 配额吃光、整个队列存不下来。恢复队列后按 id 从本地库补回。 */
+  function hydrateLocalQueue() {
+    const L = window.LIZI_LOCAL;
+    if (!L) return;
+    if (!state.queue.some((t) => t && t.source === 'local' && !t.cover)) return;
+    L.list().then((rows) => {
+      const map = new Map((rows || []).map((r) => [r.id, r]));
+      let touched = false;
+      state.queue.forEach((t) => {
+        if (!t || t.source !== 'local') return;
+        const r = map.get(t.id);
+        if (!r) return;
+        if (!t.cover && r.cover) { t.cover = r.cover; touched = true; }
+        if (!t.duration && r.duration) t.duration = r.duration;
+        if (!t.name && r.name) t.name = r.name;
+      });
+      if (touched) emit('queuechange', { queue: state.queue, index: state.index });
+    }).catch(() => { /* 本地库打不开：队列照常可用，只是封面空 */ });
   }
 
   /* 演示音轨是 blob URL，按元素分开记：过渡期间两条 deck 可能各有一个。
@@ -160,7 +189,8 @@ const Player = (() => {
 
   /* ------------------------------------------------------------------ *
    * 演示音轨：用 WebAudio 离线渲染一段和弦琶音，转成 wav blob
-   * 只在拿不到真实播放地址时使用
+   * **只给本地曲目「文件丢了」兜底**；远端音源拿不到直链一律返回空地址，
+   * 绝不用合成音频冒充远端歌曲（酷狗尤其不能）。
    * ------------------------------------------------------------------ */
   function makeDemoTrack(seconds = 40, seed = 1) {
     const sr = 22050;
@@ -777,6 +807,18 @@ const Player = (() => {
     const src = track.source || 'netease';
     const isQQ = src === 'qq';
     const isOther = !isQQ && src !== 'netease';
+
+    /* 本地音乐（自定义音源）：音频在 IndexedDB 里，urlOf() 现造 blob URL。
+       文件被删了 / 存储被清掉 → 明确空态，绝不放合成音冒充。
+       （2026-11-23：和远端音源统一，缺文件也要让用户看见「为什么没声音」。） */
+    if (src === 'local') {
+      let u = null;
+      try { u = window.LIZI_LOCAL ? await window.LIZI_LOCAL.urlOf(track.id) : null; }
+      catch { u = null; }
+      if (u) return { url: u, demo: false, reason: '', preview: false, clipStartMs: 0 };
+      return { url: '', demo: false, reason: 'local-missing', preview: false, clipStartMs: 0, empty: true };
+    }
+
     let url = null;
     let demo = false;
     let reason = '';
@@ -790,6 +832,9 @@ const Player = (() => {
         if (d.url) {
           url = API.qqAudio(d.url);
           preview = !!d.preview;
+          /* 试听也要带原因出去：界面要写清"为什么只有 30 秒"（未登录 / 无会员），
+             不能只写一句"试听片段"让用户猜。 */
+          if (preview) reason = d.reason || 'preview';
         } else {
           reason = d.reason === 'login' ? 'vip' : 'qq-unavailable';
         }
@@ -802,6 +847,9 @@ const Player = (() => {
           url = API.srcAudio(src, d.url);
           preview = !!d.preview;
           clipStartMs = d.clipStartMs || 0;
+          /* 同上：试听把边车给的原因一起带出去（酷狗/波点回 'preview'，
+             汽水不带给原因 —— 汽水的 30 秒和会员无关，界面按 source 自己说） */
+          if (preview) reason = d.reason || 'preview';
         } else {
           reason = (d && d.reason) || 'unavailable';
         }
@@ -816,11 +864,11 @@ const Player = (() => {
       }
     } catch { reason = 'network'; }
 
-    if (!url) {
-      demo = true;
-      url = makeDemoTrack(40, track.id);
-    }
-    return { url, demo, reason, preview, clipStartMs };
+    /* 远端音源没拿到地址：保持空 url + 原因，交给界面显示「需登录 / 无版权 /
+       地区限制 / 网络异常」。绝不退回 makeDemoTrack —— 那会让用户以为歌在放，
+       实际听到的是另一段合成音（酷狗试听 / VIP 场景尤其误导）。 */
+    if (!url) demo = false;
+    return { url: url || '', demo, reason, preview, clipStartMs, empty: !url };
   }
 
   /** 换歌时统一的元数据入口：trackchange + 清空歌词 + 异步拉歌词 / BPM。
@@ -835,15 +883,21 @@ const Player = (() => {
     state.lyricIndex = -1;
     emit('lyric', { lines: [], active: -1 });
 
-    // 歌词先拉，别等音频（QQ 认 songmid，其它边车认自己的 id）
-    const lyricReq = isQQ
-      ? API.qqLyric(track.mid || track.id)
-      : isOther
-        ? API.srcLyric(track)
-        : API.lyric(track.id);
+    // 歌词先拉，别等音频（QQ 认 songmid，其它边车认自己的 id；本地曲目读 IndexedDB）
+    const lyricReq = src === 'local'
+      ? (window.LIZI_LOCAL
+        ? window.LIZI_LOCAL.lyricOf(track.id).then((d) => (d && d.text
+          ? (d.format === 'yrc' ? { yrc: d.text } : { lyric: d.text })
+          : null))
+        : Promise.resolve(null))
+      : isQQ
+        ? API.qqLyric(track.mid || track.id)
+        : isOther
+          ? API.srcLyric(track)
+          : API.lyric(track.id);
     lyricReq
       .then((d) => {
-        if (token !== state.token) return;
+        if (token !== state.token || !d) return;
         const { lines, format } = parseLyrics(d);
         state.lyric = lines;
         state.lyricFormat = format;
@@ -861,10 +915,13 @@ const Player = (() => {
    * ------------------------------------------------------------------ */
   async function load(i, autoplay = true) {
     cancelGlide('load');                 // 手动切歌/重载：先把进行中的过渡收掉
+    clearWatches();                      // 上一首的 seek 看门狗不能追到新歌上
+    lastTick = 0;
     if (!state.queue.length) return;
     prepareSeq++;                        // 让还在路上的预载作废
     const token = ++state.token;
     state.index = normalizeIndex(i);
+    shuffleSync(state.index);            // 随机模式：点歌 / 换队列后把洗牌游标对上
     saveQueue();                         // 下一首 / 上一首 / 点队列行都会走到这里
     const track = state.queue[state.index];
 
@@ -889,12 +946,34 @@ const Player = (() => {
       return;
     }
 
+    /* 远端没地址：停掉上一条，清空 src，发一个 empty 的 source 事件。
+       界面据此显示「不可用 / 需登录」空态；不设 audio.src=''（会被解析成
+       页面地址再触发一次网络错误），而是 removeAttribute + load 复位。 */
+    if (!data.url) {
+      revokeDeckBlob(audio);
+      try { audio.pause(); } catch { /* 可能还没开始播 */ }
+      try { audio.removeAttribute('src'); audio.load(); } catch { /* 老浏览器 */ }
+      state.playing = false;
+      state.clipStartMs = 0;
+      emit('source', {
+        demo: false, empty: true, track,
+        reason: data.reason || 'unavailable', preview: false, clipStartMs: 0,
+      });
+      emit('playstate', false);
+      emit('time', { cur: 0, total: 0 });
+      return { demo: false, empty: true };
+    }
+
     revokeDeckBlob(audio);
+    state.clipStartMs = data.clipStartMs || 0;   // 试听片段起点（歌词偏移用）
     if (data.demo) { deckBlobs.set(audio, data.url); state.objectUrl = data.url; }
 
     audio.preload = 'metadata';
     audio.src = data.url;
-    emit('source', { demo: data.demo, track, reason: data.reason, preview: data.preview, clipStartMs: data.clipStartMs });
+    emit('source', {
+      demo: data.demo, empty: false, track,
+      reason: data.reason, preview: data.preview, clipStartMs: data.clipStartMs,
+    });
 
     if (autoplay) {
       try {
@@ -909,7 +988,129 @@ const Player = (() => {
         emit('playstate', false);
       }
     }
-    return { demo: data.demo };
+    return { demo: data.demo, empty: false };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 换链续播（2026-11-15）
+   *
+   * 症状：暂停很久以后点播放，没反应；切一首才有声音。
+   * 原因：播放键只调 audio.play()，而各平台的直链是有时效的 ——
+   *   QQ 的 vkey 会过期（见 fetchTrackUrl 里的注释），波点 / 汽水的 CDN
+   *   路径里带着签名段。暂停久了缓冲区用完，play() 要重新发请求，
+   *   拿着过期地址直接被拒，play() 抛异常、元素仍停在 paused，界面就是「按不动」。
+   *   切歌会走 load() → fetchTrackUrl() 重新解析地址，所以一切歌就好了。
+   *
+   * 这里做的事：重新解析一次地址，等 metadata 回来，**跳回原来的进度**再接着播。
+   * 拿不到真地址（空 url / demo 音）时不做任何替换 ——
+   * 宁可报「播放失败」，也不要拿一段演示音冒充这首歌。
+   * ------------------------------------------------------------------ */
+  let refreshing = 0;
+  async function refreshSource(atOverride) {
+    if (refreshing) return false;
+    const track = state.queue[state.index];
+    if (!track) return false;
+    const token = state.token;              // 期间切歌就作废
+    refreshing = Date.now();
+    clearWatches();
+    try {
+      const at = Number.isFinite(atOverride) ? Math.max(0, atOverride) : (audio.currentTime || 0);
+      const data = await fetchTrackUrl(track);
+      if (token !== state.token || !data || data.demo || !data.url) return false;
+
+      revokeDeckBlob(audio);
+      state.clipStartMs = data.clipStartMs || 0;
+      audio.preload = 'metadata';
+      lastTick = 0;                         // 新流的时间从 0 重新算
+      audio.src = data.url;
+      emit('source', { demo: false, empty: false, track, reason: data.reason, preview: data.preview, clipStartMs: data.clipStartMs });
+
+      /* src 刚设好就写 currentTime 会被忽略：等元数据或出错再定位（4 秒兜底） */
+      await new Promise((done) => {
+        let timer = 0;
+        const fin = () => {
+          audio.removeEventListener('loadedmetadata', fin);
+          audio.removeEventListener('error', fin);
+          clearTimeout(timer);
+          done();
+        };
+        audio.addEventListener('loadedmetadata', fin);
+        audio.addEventListener('error', fin);
+        timer = setTimeout(fin, 4000);
+      });
+      if (token !== state.token) return false;
+      /* 新直链可能比整曲短（试听/受限流），盲目写 currentTime 会再次
+         卡住；先按 audio.seekable 夹到真正能拖到的位置。 */
+      let target = at;
+      try {
+        const sk = audio.seekable;
+        if (sk && sk.length) {
+          const end = sk.end(sk.length - 1);
+          if (isFinite(end) && end > 0 && target > end - 0.25) target = Math.max(0, end - 0.5);
+        }
+      } catch { /* seekable 不可读 */ }
+      if (target > 0.3) { try { audio.currentTime = target; } catch { /* 无时长的流 */ } }
+
+      try {
+        await audio.play();
+        Beat.resume(); Beat.start();
+        return true;
+      } catch { return false; }
+    } catch { return false; } finally { refreshing = 0; }
+  }
+
+  /* 错误事件里自动换链的节流：同一次失败别连着重试 */
+  let lastSrcRetry = 0;
+
+  /* ------------------------------------------------------------------ *
+   * seek / 卡缓冲看门狗（2026-11-22）
+   *
+   * 酷狗概念版的直链在 Range 请求上不一定兑现 206；上游一旦挂起，
+   * <audio> 会永久停在 waiting，而且**不触发 error** —— 原来的
+   * refreshSource 只挂在 error 上，于是拖到后面就整首静止、没声音。
+   * 这里给 seeking / waiting / stalled 加超时：超时就重新取一条直链，
+   * 跳回目标位置再播。正常播放时 timeupdate 会清掉计时。
+   * ------------------------------------------------------------------ */
+  let seekWatch = 0;
+  let stallWatch = 0;
+  let lastTick = 0;
+
+  function clearWatches() {
+    if (seekWatch) { clearTimeout(seekWatch); seekWatch = 0; }
+    if (stallWatch) { clearTimeout(stallWatch); stallWatch = 0; }
+  }
+
+  function kickRefresh(at) {
+    if (refreshing) return;
+    if (Date.now() - lastSrcRetry < 5000) { emit('sourceerror', {}); return; }
+    lastSrcRetry = Date.now();
+    refreshSource(at).then((ok) => { if (!ok) emit('sourceerror', {}); });
+  }
+
+  function armSeekWatch(target) {
+    if (seekWatch) clearTimeout(seekWatch);
+    const at = Number(target) || 0;
+    seekWatch = setTimeout(() => {
+      seekWatch = 0;
+      if (refreshing) return;
+      /* 已经到位、而且缓冲也够了才不折腾；只是 currentTime 被写到了目标、
+         但数据没回来（readyState 低 / 还在 seeking）仍要换链 */
+      if (!audio.seeking && audio.readyState >= 3
+        && Math.abs((audio.currentTime || 0) - at) < 1.2) return;
+      kickRefresh(at);
+    }, 3500);
+  }
+
+  function armStallWatch() {
+    if (stallWatch || seekWatch || refreshing) return;
+    const at = audio.currentTime || 0;
+    stallWatch = setTimeout(() => {
+      stallWatch = 0;
+      if (refreshing || audio.paused) return;
+      /* readyState 回到 3 以上、或已经不在 seek，说明自己恢复了 */
+      if (audio.readyState >= 3 && !audio.seeking) return;
+      kickRefresh(at);
+    }, 6000);
   }
 
   /* ------------------------------------------------------------------ *
@@ -919,14 +1120,84 @@ const Player = (() => {
    * 预载只动 idleDeck，不改 state.index / 歌词，所以预载失败或用户切歌都不会串台。
    * ------------------------------------------------------------------ */
 
+  /* ------------------------------------------------------------------ *
+   * 随机播放：洗牌袋（shuffle bag）
+   *
+   * 原来是每首独立 Math.random()，会出现连着放同一首、或者短时间里老在那
+   * 几首之间跳。这里换成业界常规的做法（Spotify 的随机播放、俄罗斯方块的
+   * 7-bag 都是同一套思路）：
+   *   - 整个队列先洗成一个排列，按顺序放，放完一轮才重新洗；
+   *   - 一轮之内每首正好出现一次 —— 真正的「随机不重复」；
+   *   - 重新洗时把刚放完的那首避开，不会出现一轮结尾接同一首。
+   * 队列换了 / 切到随机模式时按当前曲目重建；用户手点某一首会把游标对上。
+   * ------------------------------------------------------------------ */
+  let shuffleOrder = [];     // 队列下标的一个排列
+  let shufflePos = -1;       // 当前播到排列里的第几个
+  let shuffleFor = null;     // 这份排列属于哪个 queue 数组（换队列就重建）
+  let shuffleFrom = -1;      // 上一次问「下一首」时正在放哪首
+  let shuffleTo = -1;        // 给它算出来的下一首（同一首上重复问要返回同一个）
+
+  function shuffleBuild(anchor) {
+    const n = state.queue.length;
+    shuffleOrder = [];
+    for (let i = 0; i < n; i++) shuffleOrder.push(i);
+    for (let i = n - 1; i > 0; i--) {          // Fisher–Yates
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = shuffleOrder[i]; shuffleOrder[i] = shuffleOrder[j]; shuffleOrder[j] = t;
+    }
+    if (n && anchor >= 0) {                    // 当前这首排在本轮第一个
+      const k = shuffleOrder.indexOf(anchor);
+      if (k > 0) { shuffleOrder.splice(k, 1); shuffleOrder.unshift(anchor); }
+    }
+    shufflePos = 0;
+    shuffleFor = state.queue;
+    shuffleFrom = -1;
+    shuffleTo = -1;
+  }
+
+  /** 手动选歌 / 换队列之后：把游标移到这一首上。 */
+  function shuffleSync(i) {
+    if (state.mode !== 'shuffle') return;
+    if (shuffleFor !== state.queue || !shuffleOrder.length) { shuffleBuild(i); return; }
+    const p = shuffleOrder.indexOf(i);
+    if (p >= 0) shufflePos = p;
+    else shuffleBuild(i);
+  }
+
+  /** 随机模式下的下一首；预载 peekNext 也走这里，保证预取的和真正播的是同一首。 */
+  function shufflePickNext() {
+    const n = state.queue.length;
+    if (!n) return 0;
+    if (shuffleFor !== state.queue || !shuffleOrder.length) shuffleBuild(state.index);
+    /* 预载和心跳会对同一首歌反复问「下一首是谁」：必须每次都给同一个答案，
+       否则每问一次游标就往前跳一首，真放的时候会连着跳过好几十首。 */
+    if (state.index === shuffleFrom && shuffleTo >= 0) return shuffleTo;
+    let next;
+    if (shufflePos + 1 < shuffleOrder.length) {
+      next = shuffleOrder[++shufflePos];
+    } else {
+      const last = shuffleOrder[shufflePos];
+      shuffleBuild(-1);
+      if (n > 1 && shuffleOrder[0] === last) {   // 新一轮开头避开刚放完的
+        const j = 1 + Math.floor(Math.random() * (n - 1));
+        const t = shuffleOrder[0]; shuffleOrder[0] = shuffleOrder[j]; shuffleOrder[j] = t;
+      }
+      shufflePos = 0;
+      next = shuffleOrder[0];
+    }
+    shuffleFrom = state.index;
+    shuffleTo = next;
+    return next;
+  }
+
   /** 自动播放时下一首的下标；没有下一首返回 null。
    *  auto=true 时要和 ended → next(true) 的规则完全一致：
-   *   单曲循环不交叉；顺序播放到队尾不凭空接歌；列表循环回到第一首；随机随便挑。 */
+   *   单曲循环不交叉；顺序播放到队尾不凭空接歌；列表循环回到第一首；随机按洗牌顺序走。 */
   function peekNext(auto = true) {
     const n = state.queue.length;
     if (!n) return null;
     if (auto && state.mode === 'single') return null;
-    if (state.mode === 'shuffle') return Math.floor(Math.random() * n);
+    if (state.mode === 'shuffle') return shufflePickNext();
     if (state.index >= n - 1) {
       if (auto && state.mode === 'order') return null;
       return 0;
@@ -952,6 +1223,9 @@ const Player = (() => {
       if (data.demo) URL.revokeObjectURL(data.url);
       return null;
     }
+    /* 下一首没有远端地址：不预载、不做交叉淡化，让当前曲目自然结束；
+       切过去时 load() 会显示空态。 */
+    if (!data.url) return null;
 
     revokeDeckBlob(incoming);
     incoming.preload = 'auto';           // 预取：离曲尾 fade+3s 就把数据拉起来
@@ -980,6 +1254,8 @@ const Player = (() => {
     const outgoing = audio;
     audio = incoming;
     idleDeck = outgoing;
+    clearWatches();                      // 看门狗跟着活动 deck 走，别落到出场歌上
+    lastTick = 0;
     state.index = prepared.index;
     saveQueue();                         // 交叉淡化落点也要记住当前曲目
 
@@ -996,8 +1272,9 @@ const Player = (() => {
     startTrackMeta(prepared.track, prepared.index, token);
 
     state.objectUrl = deckBlobs.get(incoming) || null;
+    state.clipStartMs = prepared.clipStartMs || 0;   // 试听片段起点（歌词偏移用）
     emit('source', {
-      demo: prepared.demo, track: prepared.track, reason: prepared.reason,
+      demo: prepared.demo, empty: false, track: prepared.track, reason: prepared.reason,
       preview: prepared.preview, clipStartMs: prepared.clipStartMs,
     });
     state.playing = !audio.paused;
@@ -1028,11 +1305,39 @@ const Player = (() => {
     });
     el.addEventListener('timeupdate', () => {
       if (el !== audio) return;
-      emit('time', { cur: el.currentTime, total: el.duration || 0 });
+      const cur = el.currentTime || 0;
+      /* 时间真的往前走了才算恢复；seek 卡住时 timeupdate 不会来 */
+      if (cur > lastTick + 0.04) {
+        lastTick = cur;
+        if (stallWatch) { clearTimeout(stallWatch); stallWatch = 0; }
+        /* seek 还没结束就别清 seek 看门狗；结束了由 seeked 清 */
+        if (!el.seeking && seekWatch) { clearTimeout(seekWatch); seekWatch = 0; }
+      }
+      emit('time', { cur, total: el.duration || 0 });
     });
     el.addEventListener('loadedmetadata', () => {
       if (el !== audio) return;
       emit('time', { cur: el.currentTime, total: el.duration || 0 });
+    });
+    el.addEventListener('seeking', () => {
+      if (el !== audio) return;
+      armSeekWatch(el.currentTime || 0);
+    });
+    el.addEventListener('seeked', () => {
+      if (el !== audio) return;
+      clearWatches();
+    });
+    el.addEventListener('playing', () => {
+      if (el !== audio) return;
+      clearWatches();
+    });
+    el.addEventListener('waiting', () => {
+      if (el !== audio) return;
+      if (!el.paused) armStallWatch();
+    });
+    el.addEventListener('stalled', () => {
+      if (el !== audio) return;
+      if (!el.paused) armStallWatch();
     });
     el.addEventListener('progress', () => {
       if (el !== audio) return;
@@ -1049,8 +1354,10 @@ const Player = (() => {
       else next(true);
     });
     el.addEventListener('error', () => {
-      if (el !== audio) return;
-      if (el.src) emit('sourceerror', {});
+      if (el !== audio || !el.src) return;
+      /* 直链过期最常见：先自动换一次地址续播，换不动才亮「播放失败」。
+         5 秒节流（和看门狗共用），避免新地址也出错时打出重试风暴。 */
+      kickRefresh(el.currentTime || 0);
     });
   }
   bindDeck(deckA);
@@ -1062,7 +1369,7 @@ const Player = (() => {
   function next(auto = false) {
     if (!state.queue.length) return;
     cancelGlide('next');
-    if (state.mode === 'shuffle') return load(Math.floor(Math.random() * state.queue.length));
+    if (state.mode === 'shuffle') return load(shufflePickNext());
     // 顺序播放：到底了就停，不自动回到第一首（用户手点下一首才回）
     if (state.index >= state.queue.length - 1) {
       if (auto && state.mode === 'order') { state.playing = false; emit('playstate', false); return; }
@@ -1075,7 +1382,13 @@ const Player = (() => {
     if (!state.queue.length) return;
     cancelGlide('prev');
     if (audio.currentTime > 3) { audio.currentTime = 0; return; }   // 先回到本曲开头，符合直觉
-    if (state.mode === 'shuffle') return load(Math.floor(Math.random() * state.queue.length));
+    if (state.mode === 'shuffle') {
+      /* 随机模式按洗牌顺序往回退：退回本轮上一首，而不是再随机抽一首
+         （随机抽会跳回后面已经放过的歌，听起来像「上一首」坏了）。 */
+      if (shuffleFor !== state.queue || !shuffleOrder.length) shuffleBuild(state.index);
+      if (shufflePos > 0) return load(shuffleOrder[shufflePos - 1]);
+      return;                          // 一轮开头：停在本曲，不越界
+    }
     // 列表循环/顺序：第一首再往前 = 最后一首
     return load((state.index - 1 + state.queue.length) % state.queue.length);
   }
@@ -1110,14 +1423,33 @@ const Player = (() => {
     toggle() {
       cancelGlide('toggle');
       if (!audio.src) { if (state.queue.length) load(Math.max(0, state.index)); return; }
-      if (audio.paused) { Beat.resume(); audio.play(); } else audio.pause();
+      if (!audio.paused) { audio.pause(); return; }
+      Beat.resume();
+      /* play() 失败基本都是直链过期（见 refreshSource 上面那段）：换一次地址再续播，
+         而不是把异常吞掉、让播放键看起来像坏了。 */
+      audio.play().catch(() => { refreshSource(); });
     },
 
     seek(sec) {
       if (!isFinite(sec)) return;
       cancelGlide('seek');
-      audio.currentTime = Math.max(0, sec);
+      const target = Math.max(0, sec);
+      try { audio.currentTime = target; } catch { /* 无时长的流 */ }
+      armSeekWatch(target);  // 上游不兑现 Range 时 3.5 秒后换链重试
       Beat.reset();          // 跳转后节拍相位要重新对齐
+    },
+
+    /* 整曲时间 → 片段内时间（2026-11-15）。
+       汽水 VIP 歌只给 30 秒、而且从高潮起播：audio.currentTime 从片段开头算 0，
+       歌词时间轴却是整曲的。点歌词这类「拿到的是整曲时间」的入口走这里，
+       进度条那种按 audio.duration 算比例的仍然用 seek()（那是片段内时间）。 */
+    seekSongTime(sec) {
+      if (!isFinite(sec)) return;
+      cancelGlide('seek');
+      const target = Math.max(0, sec - (state.clipStartMs || 0) / 1000);
+      try { audio.currentTime = target; } catch { /* 无时长的流 */ }
+      armSeekWatch(target);
+      Beat.reset();
     },
     setVolume(v) {
       const vol = Math.max(0, Math.min(1, v));
@@ -1126,11 +1458,12 @@ const Player = (() => {
     },
     get volume() { return audio.volume; },
 
-    setMode(m) { cancelGlide('mode'); state.mode = m; saveQueue(); emit('mode', m); },
+    setMode(m) { cancelGlide('mode'); state.mode = m; if (m === 'shuffle') shuffleBuild(state.index); saveQueue(); emit('mode', m); },
     cycleMode() {
       cancelGlide('mode');
       const order = ['order', 'loop', 'single', 'shuffle'];
       state.mode = order[(order.indexOf(state.mode) + 1) % order.length];
+      if (state.mode === 'shuffle') shuffleBuild(state.index);   // 进随机就按当前曲目洗一轮
       saveQueue();
       emit('mode', state.mode);
       return state.mode;
@@ -1142,6 +1475,8 @@ const Player = (() => {
      *  避免两套单位混用（混用会导致中文/日文歌永远停在第一行）。 */
     lyricAt(t) {
       const lines = state.lyric;
+      /* 试听片段：音频从片段起点开始播，歌词时间轴是整曲的，先补回偏移 */
+      t += (state.clipStartMs || 0) / 1000;
       let lo = 0, hi = lines.length - 1, found = -1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
@@ -1171,3 +1506,7 @@ const Player = (() => {
     },
   };
 })();
+
+/* pages/local.js 等 ESM 模块拿不到 app.js 里的顶层 const，必须显式挂一次；
+   app.js / m.js 里仍用同一份 Player，不会出现第二个播放器实例。 */
+try { window.Player = Player; } catch (e) { /* 老环境没有 window */ }

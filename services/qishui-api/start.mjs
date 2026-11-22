@@ -81,6 +81,23 @@ try {
 }
 const { createQishuiApi, createQishuiDeviceId, isQishuiDeviceId } = lib;
 
+/* ---------------- 账号级取流（会员曲目） ----------------
+   0.2.2 的 createQishuiApi 只暴露 request(op)，而 catalog.track() 永远用**公共客户端令牌**
+   问 `/media/mget/`。实测：`player_type=2`（受版权保护那批）在公共令牌下上游根本不下发
+   `player_info.full`，只给 `preview`；于是会员账号也只剩 30 秒试听。账号级读取必须带
+   ticket-guard 签名（`platform(path, body, true)`）。
+   包没有导出 platform/resolveAudio，所以这里直接引同一个包里钉死的 0.2.2 实现；
+   包升级时同步检查 src/client.cjs / src/playback.cjs 是否还在。 */
+const LIB_SRC = path.join(__dirname, 'node_modules', 'qishui-music-api', 'src');
+let createQishuiClient, resolveQishuiAudio;
+try {
+  createQishuiClient = require(path.join(LIB_SRC, 'client.cjs')).createClient;
+  resolveQishuiAudio = require(path.join(LIB_SRC, 'playback.cjs')).resolveAudio;
+} catch (e) {
+  fail('加载 qishui-music-api 内部实现失败:', (e && e.stack) || e);
+  process.exit(1);
+}
+
 function loadDeviceId() {
   try {
     const raw = JSON.parse(fs.readFileSync(DEVICE_FILE, 'utf8'));
@@ -126,21 +143,112 @@ const sessions = {
   },
 };
 
+/* 只拦 open.douyin.com/oauth/get_qrcode/：把上游 77×77/ECC M 的 PNG
+   按同一条深链重画成 57×57/ECC L、8px 模块的清晰 PNG；失败原样放行。
+   二维码万一出问题，设 QISHUI_QR_SIMPLIFY=0 即可退回上游原图，不用改代码。 */
+const fetchImpl = process.env.QISHUI_QR_SIMPLIFY === '0'
+  ? globalThis.fetch
+  : wrapQrFetch(globalThis.fetch, { log: (m) => log('qr:', m) });
+
 const api = createQishuiApi({
   deviceId,
   sessions,
-  // 只拦 open.douyin.com/oauth/get_qrcode/：把上游 77×77/ECC M 的 PNG
-  // 按同一条深链重画成 57×57/ECC L、8px 模块的清晰 PNG；失败原样放行。
-  // 二维码万一出问题，设 QISHUI_QR_SIMPLIFY=0 即可退回上游原图，不用改代码。
-  fetch: process.env.QISHUI_QR_SIMPLIFY === '0'
-    ? globalThis.fetch
-    : wrapQrFetch(globalThis.fetch, { log: (m) => log('qr:', m) }),
+  fetch: fetchImpl,
+  log: (m) => log('lib:', m),
+  warn: (m) => log('lib warn:', m),
+});
+
+/* 和 api 共用同一份 sessions / fetch；只用来走 ticket-guard 的账号级 /media/mget/。
+   不会另建登录态、也不写盘 —— 写盘仍由上面 sessions.set 负责。 */
+const accountClient = createQishuiClient({
+  sessions,
+  fetch: fetchImpl,
   log: (m) => log('lib:', m),
   warn: (m) => log('lib warn:', m),
 });
 
 /* ---------------- 业务调用 ---------------- */
 const call = (op, params = {}) => api.request(op, params);
+
+/* ---------------- 会员曲目：账号级取流 ----------------
+   公共令牌下 `/media/mget/` 对 `player_type=2`（受版权保护）只给 preview，
+   会员账号也一样 —— 这就是「有会员仍只有 30 秒」的根因。这里对已登录且
+   `isVip` 的账号优先用 ticket-guard 再问一次 `/media/mget/`，拿到含 full 的
+   track_entity；任何一步失败都返回 null，调用方回退原来的公共令牌路径，
+   普通播放不会因为会员接口失败而挂掉。
+
+   为什么只在 isVip 时走：非会员本来就应当只拿 30 秒试听，不额外发一次
+   注定被上游拒的账号请求。会员态由 `/me/info` 的 `is_vip` 写入会话；
+   会员刚开通、会话里还是旧值的情况，下一次 /status 续期会刷新。 */
+const accountMedia = { revision: -1, usable: null };
+
+function mediaTrack(data, id) {
+  const list = Array.isArray(data && data.media_list) ? data.media_list : [];
+  const media = list.find((item) => String(
+    item.media_id || (item.track_entity && item.track_entity.base_info && item.track_entity.base_info.id) || '',
+  ) === id);
+  return media && media.track_entity ? media.track_entity : null;
+}
+
+async function accountTrack(id) {
+  if (!current) return null;
+  if (!(current.user && current.user.isVip)) return null;
+  if (accountMedia.revision !== revision) {
+    accountMedia.revision = revision;
+    accountMedia.usable = null;
+  }
+  if (accountMedia.usable === false) return null;
+
+  const body = { media_list: [{ id, type: 'track' }], card_context: {} };
+  try {
+    const data = await accountClient.platform('/media/mget/', body, true);
+    const track = mediaTrack(data, id);
+    if (!track) throw Object.assign(new Error('账号级 /media/mget/ 没有返回这首 track'), { code: 'invalid-response' });
+    accountMedia.usable = true;
+    return track;
+  } catch (e) {
+    const code = (e && e.code) || 'unknown';
+    log('audio: 账号级取轨失败（' + code + '），回退公共令牌');
+    /* ticket 失效/过期时先补一次续期再试（和手机桥那套的 accountTrack 一致：
+       只重试一次，不循环；续期失败就回退）。这里只在会员路径里做，
+       非会员根本不会走到。 */
+    if (code === 'auth-required' && current) {
+      try {
+        const st = await call('login_status');
+        if (st && st.ok && current) {
+          const data = await accountClient.platform('/media/mget/', body, true);
+          const track = mediaTrack(data, id);
+          if (track) {
+            accountMedia.revision = revision;
+            accountMedia.usable = true;
+            log('audio: 续期后账号级取轨成功');
+            return track;
+          }
+        }
+      } catch (renewError) {
+        log('audio: 续期重试失败（' + ((renewError && (renewError.code || renewError.message)) || 'unknown') + '）');
+      }
+    }
+    /* 明确鉴权失败才把账号路径判死到下一次 revision；网络抖动下次仍可再试 */
+    if (code === 'auth-required') accountMedia.usable = false;
+    return null;
+  }
+}
+
+async function accountAudio(id, quality) {
+  const track = await accountTrack(id);
+  if (!track) return null;
+  try {
+    const data = await resolveQishuiAudio(accountClient, track, quality);
+    if (data && data.url) {
+      if (!data.preview) log('audio: 账号级取流拿到整曲（quality=' + data.quality + '）');
+      return data;
+    }
+  } catch (e) {
+    log('audio: 账号级解析失败（' + ((e && (e.code || e.message)) || 'unknown') + '），回退公共令牌');
+  }
+  return null;
+}
 
 /** 库的错误 → 我们这套的 code。前端只看 code/error 两个字段。 */
 function failBody(error) {
@@ -298,7 +406,11 @@ async function handle(req, res, url) {
     const id = q.get('id') || '';
     if (!id) return json(res, 400, { code: 400, error: 'id required' });
     const quality = ['standard', 'high', 'lossless', 'hires'].includes(q.get('quality')) ? q.get('quality') : 'standard';
-    const r = await call('audio', { id, quality });
+    /* 会员：先走账号级 /media/mget/（ticket-guard），拿到 full 才算整曲；
+       没会员 / 账号接口失败：原样走下面的 call('audio') 公共令牌路径（试听照旧）。
+       两条路径的返回形状完全一致，前端不用改。 */
+    const account = await accountAudio(id, quality);
+    const r = account ? { ok: true, data: account } : await call('audio', { id, quality });
     if (!r.ok) return json(res, 200, { code: 200, url: '', reason: r.error.code, error: r.error.message });
     return json(res, 200, {
       code: 200,
@@ -363,6 +475,20 @@ async function handle(req, res, url) {
       total: r.data.total || 0,
       whole: !!r.data.whole,
     });
+  }
+
+  /* 红心：GET/POST /like_song?id=&liked= （POST 也可以走 JSON body）。
+     库的 like_song 只收数字 id + boolean；这里先校验，错误比库里的通用文案可读。 */
+  if (p === '/like_song' || p === '/like-song') {
+    const body = await readJson(req);
+    const id = String(body.id ?? q.get('id') ?? '').trim();
+    if (!id) return json(res, 400, { code: 400, error: 'id required' });
+    if (!/^\d{1,30}$/.test(id)) return json(res, 400, { code: 400, error: '汽水曲目 id 必须是数字' });
+    const raw = body.liked ?? q.get('liked');
+    const liked = !(raw === false || raw === 'false' || raw === 0 || raw === '0');
+    const r = await call('like_song', { id, liked });
+    if (!r.ok) return json(res, failBody(r.error).code, failBody(r.error));
+    return json(res, 200, { code: 200, liked });
   }
 
   if (p === '/playlist/detail') {

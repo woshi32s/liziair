@@ -44,6 +44,32 @@ const EqEngine = (() => {
     { id: 'hires', label: 'Hi-Res', br: '24bit/96k', vip: true },
   ];
 
+  /* 各平台的档位。参数名和可选值跟 server.mjs 一一对应（后端只透传/白名单）：
+     - 网易云 `level`：standard / higher / exhigh / lossless / hires
+     - QQ / 酷狗 / 酷我 `quality`：128 / 320 / flac（酷狗白名单外的值会被降成 128）
+     - 汽水 / 波点 `quality`：standard / high / lossless / hires（字符串，不是数字）
+     `vip: true` 只表示「需要对应平台账号权限」，不保证有会员就一定拿得到；
+     汽水的 30 秒取流限制与档位无关（会员也一样）。 */
+  const TIERS_MP3 = [
+    { id: '128', label: '标准', br: '128 kbps' },
+    { id: '320', label: '高品', br: '320 kbps' },
+    { id: 'flac', label: '无损', br: 'FLAC', vip: true },
+  ];
+  const TIERS_STRING = [
+    { id: 'standard', label: '标准', br: 'standard' },
+    { id: 'high', label: '高品', br: 'high' },
+    { id: 'lossless', label: '无损', br: 'lossless', vip: true },
+    { id: 'hires', label: 'Hi-Res', br: 'hires', vip: true },
+  ];
+  const PLATFORM_QUALITIES = {
+    netease: { label: '网易云', tiers: QUALITIES },
+    qq: { label: 'QQ 音乐', tiers: TIERS_MP3 },
+    kugou: { label: '酷狗', tiers: TIERS_MP3 },
+    qishui: { label: '汽水', tiers: TIERS_STRING },
+    bodian: { label: '波点', tiers: TIERS_STRING },
+    kuwo: { label: '酷我', tiers: TIERS_MP3 },
+  };
+
   /* ------------------------------------------------------------------ *
    * 10 套预设
    *
@@ -73,7 +99,16 @@ const EqEngine = (() => {
     version: VERSION,
     on: true,
     mode: 'simple',                  // simple | advanced
-    quality: 'exhigh',
+    quality: 'exhigh',               // 网易云档位（window.LIZI_QUALITY 同步的就是它）
+    /* 其它平台各自的档位：播放时 api.js 按曲目 source 取对应值。
+       网易云刻意不放进这里 —— 它继续用上面的 state.quality，避免老逻辑分叉。 */
+    qualityBySource: {
+      qq: '128',
+      kugou: '128',
+      qishui: 'standard',
+      bodian: 'standard',
+      kuwo: '320',
+    },
     simple: {
       preset: 'flat',
       gains: BANDS.map(() => 0),
@@ -96,7 +131,7 @@ const EqEngine = (() => {
   let inited = false;
 
   const listeners = {};
-  const on = (evt, fn) => (listeners[evt] ||= []).push(fn);
+  const on = (evt, fn) => (listeners[evt] = listeners[evt] || []).push(fn);
   const emit = (evt, data) => {
     (listeners[evt] || []).forEach((fn) => { try { fn(data); } catch (e) { console.warn('[eq]', e); } });
   };
@@ -117,6 +152,17 @@ const EqEngine = (() => {
       state.on = typeof s.on === 'boolean' ? s.on : def.on;
       state.mode = s.mode === 'advanced' ? 'advanced' : 'simple';
       state.quality = QUALITIES.some((q) => q.id === s.quality) ? s.quality : def.quality;
+      /* 分平台档位：老 localStorage 没有这个字段 → 保持 defaults() 的默认值；
+         有字段就逐平台校验，某个值不在该平台 tiers 里只回落该平台的默认，
+         不影响其它平台，也不影响上面 state.quality 的老逻辑。 */
+      if (s.qualityBySource && typeof s.qualityBySource === 'object') {
+        for (const src of Object.keys(def.qualityBySource)) {
+          const v = s.qualityBySource[src];
+          if (typeof v === 'string' && PLATFORM_QUALITIES[src].tiers.some((t) => t.id === v)) {
+            state.qualityBySource[src] = v;
+          }
+        }
+      }
 
       if (s.simple && Array.isArray(s.simple.gains) && s.simple.gains.length === 7) {
         state.simple.gains = s.simple.gains.map((v) => clamp(Number(v) || 0, -12, 12));
@@ -379,7 +425,39 @@ const EqEngine = (() => {
        player.js 里那一行 `API.songUrl(track.id)` 自动就带上当前音质。 */
     window.LIZI_QUALITY = id;
     save();
-    emit('quality', id);
+    emit('quality', { source: 'netease', id });
+  }
+
+  /* ------------------------------------------------------------------ *
+   * 分平台音质
+   *
+   * 网易云继续用 state.quality；其它平台各存各的，播放时由 api.js 按
+   * 曲目 source 取。这里只做「查 / 改」，不碰音频图，也不重载当前曲。
+   * ------------------------------------------------------------------ */
+  function qualityFor(src) {
+    if (!src || src === 'netease') return state.quality;
+    const p = PLATFORM_QUALITIES[src];
+    if (!p) return null;
+    return state.qualityBySource[src] || p.tiers[0].id;
+  }
+
+  function qualityTiers(src) {
+    const p = PLATFORM_QUALITIES[src || 'netease'];
+    return p ? p.tiers : null;
+  }
+
+  function platformLabel(src) {
+    const p = PLATFORM_QUALITIES[src || 'netease'];
+    return p ? p.label : null;
+  }
+
+  function setQualityFor(src, id) {
+    if (!src || src === 'netease') { setQuality(id); return; }
+    const p = PLATFORM_QUALITIES[src];
+    if (!p || !p.tiers.some((t) => t.id === id)) return;
+    state.qualityBySource[src] = id;
+    save();
+    emit('quality', { source: src, id });
   }
 
   /** 上游真实返回值。UI 必须如实显示，不许把"请求了无损"当成"拿到了无损"。 */
@@ -464,10 +542,11 @@ const EqEngine = (() => {
   }
 
   return {
-    VERSION, KEY, BANDS, TYPES, TYPE_LABEL, QUALITIES, PRESETS, SIMPLE_Q,
+    VERSION, KEY, BANDS, TYPES, TYPE_LABEL, QUALITIES, PLATFORM_QUALITIES, PRESETS, SIMPLE_Q,
     on, init, snapshot, responseDb, liveFilters,
     setEnabled, setMode, setBandGain, setPreset, resetSimple, resetAdvanced,
     setWidth, setHaas, setNode, cycleType, toggleAB, setQuality, setActual,
+    qualityFor, qualityTiers, platformLabel, setQualityFor,
     get state() { return state; },
     get actual() { return actual; },
     get quality() { return state.quality; },
@@ -480,5 +559,10 @@ const EqEngine = (() => {
 })();
 
 /* 立刻初始化：持久化的音质/均衡必须在**第一次 Player.load() 之前**生效，
-   所以不能等用户打开面板才初始化。 */
-if (typeof window !== 'undefined') EqEngine.init();
+   所以不能等用户打开面板才初始化。
+   `window.EqEngine` 是给 api.js 用的：顶层 `const` 只进全局词法环境、不会
+   自动变成 window 属性（kick.js 里踩过同一个坑），所以这里显式挂一份。 */
+if (typeof window !== 'undefined') {
+  window.EqEngine = EqEngine;
+  EqEngine.init();
+}

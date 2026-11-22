@@ -6,15 +6,15 @@
  * 根节点 append 到另一个宿主里 —— 滑杆位置、画布状态、选中节点全都不丢，
  * 不存在"两份界面互相打架"。
  *
- * 高级模式照 FabFilter Pro-Q 4 的交互做：
+ * 高级模式按专业图形 EQ 的交互做：
  *   拖节点 = 频率 + 增益 / 滚轮或 Shift+拖 = Q / 双击 = 旁通
  *   右键 = 切类型（Bell / Low Shelf / High Shelf / Low Pass / High Pass / Notch）
  *   方向键 = 微调（1 Hz / 0.1 dB，按住 Shift ×10）
  * 曲线一律用 `getFrequencyResponse()` 取真响应来画（见 eq-engine.js），
  * 不自己另写一套传递函数 —— 否则会"看着对、听着不对"。
  *
- * 造型沿用项目语言：纯白、1px hairline 网格、墨色曲线、只有选中节点用网易云红。
- * 没有阴影、没有圆角卡片、没有发光。
+ * 造型：近黑面板、1px hairline 网格、右侧 dB 刻度、琥珀曲线。
+ * 没有阴影、没有渐变、没有发光，圆角最大 4px。
  */
 const EqUI = (() => {
   const CSS_HREF = (document.currentScript && document.currentScript.src)
@@ -38,6 +38,9 @@ const EqUI = (() => {
 
   let root = null, sheet = null, sheetOpen = false;
   let mode = 'simple';
+  /* 音质区当前在编辑哪个平台的档位。只在 mount() 时按当前曲目重置；
+     面板开着时用户切了 tab 就保持，不因换歌自动跳。 */
+  let activePlatform = 'netease';
   let selected = 3;                  // 高级模式选中的节点（默认 1kHz 那段）
   let hovered = -1;
   let drag = null;
@@ -53,7 +56,7 @@ const EqUI = (() => {
     box.innerHTML = `
       <header class="eqx__head">
         <h2 class="eqx__title">音效</h2>
-        <p class="eqx__sub">7 段均衡器 · 10 套预设 · 高级曲线（照 FabFilter Pro-Q 4 的交互做，不嵌插件）</p>
+        <p class="eqx__sub">7 段均衡器 · 10 套预设 · 高级曲线编辑器（深色专业界面）</p>
       </header>
 
       <section class="eqx__sec" aria-labelledby="eq-h-quality">
@@ -61,7 +64,71 @@ const EqUI = (() => {
           <h3 class="eqx__h" id="eq-h-quality">音质</h3>
           <span class="eqx__actual" id="eq-actual">—</span>
         </div>
+        <div class="eqx__plat-tabs" id="eq-plat" role="group" aria-label="平台"></div>
         <div class="eqx__chips" id="eq-quality" role="group" aria-label="音质"></div>
+        <p class="eqx__plathint" id="eq-plathint"></p>
+
+        <div class="eqx__plat">
+          <div class="eqx__plat-h">
+            <span class="eqx__plat-t">平台支持</span>
+            <span class="eqx__plat-lg">各平台档位名不同，按平台分别设置</span>
+          </div>
+          <div class="eqx__ptable-wrap">
+            <table class="eqx__ptable" aria-label="各平台支持的音质档位">
+              <thead>
+                <tr>
+                  <th scope="col">平台</th>
+                  <th scope="col">可选档位</th>
+                  <th scope="col">说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">网易云</th>
+                  <td class="eqx__tiers">标准 128 · 较高 192 · 极高 320 · 无损 FLAC · Hi-Res 24/96</td>
+                  <td class="eqx__pdesc">无损 / Hi-Res 需会员</td>
+                </tr>
+                <tr>
+                  <th scope="row">QQ 音乐</th>
+                  <td class="eqx__tiers">标准 128 · HQ 320 · SQ 无损</td>
+                  <td class="eqx__pdesc">实际档位由 QQ 账号/会员决定</td>
+                </tr>
+                <tr>
+                  <th scope="row">酷狗</th>
+                  <td class="eqx__tiers">128 · 320 · FLAC</td>
+                  <td class="eqx__pdesc">FLAC 看账号权限</td>
+                </tr>
+                <tr>
+                  <th scope="row">汽水</th>
+                  <td class="eqx__tiers">standard · high · lossless · hires</td>
+                  <td class="eqx__pdesc">会员也只有 30 秒（取流限制，与档位无关）</td>
+                </tr>
+                <tr>
+                  <th scope="row">波点</th>
+                  <td class="eqx__tiers">standard · high · lossless · hires</td>
+                  <td class="eqx__pdesc">视账号权限</td>
+                </tr>
+                <tr>
+                  <th scope="row">酷我</th>
+                  <td class="eqx__tiers">128 · 320 · FLAC</td>
+                  <td class="eqx__pdesc">回退 web 通道时只有 mp3</td>
+                </tr>
+                <tr>
+                  <th scope="row">本地文件</th>
+                  <td class="eqx__tiers">跟随文件本身</td>
+                  <td class="eqx__pdesc">没有平台档位</td>
+                </tr>
+                <tr>
+                  <th scope="row">Spotify</th>
+                  <td class="eqx__tiers">—</td>
+                  <td class="eqx__pdesc">无音频直链，不参与音质档位</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="eqx__plat-foot">每个平台的档位独立保存，播放该平台曲目时生效。</p>
+        </div>
+
         <div class="eqx__row eqx__row--end">
           <p class="eqx__note" id="eq-qnote"></p>
           <button class="eqx__btn" id="eq-reload" type="button">用当前音质重载当前曲</button>
@@ -74,9 +141,16 @@ const EqUI = (() => {
           <button class="eqx__sw" id="eq-on" type="button" role="switch" aria-checked="true" aria-label="均衡器总开关"><i></i></button>
           <span class="eqx__state" id="eq-on-txt">开</span>
           <div class="eqx__ctl">
-            <label class="eqx__sel"><span>预设</span>
-              <select id="eq-preset"></select>
-            </label>
+            <div class="eqx__sel"><span>预设</span>
+              <!-- 自绘下拉（2026-11-21）：安卓系统选择器太简陋，和这张调音台不搭 -->
+              <div class="eqx__pick" id="eq-preset">
+                <button class="eqx__pickbtn" id="eq-preset-btn" type="button"
+                        aria-haspopup="listbox" aria-expanded="false">
+                  <span id="eq-preset-lab">平直</span><i aria-hidden="true"></i>
+                </button>
+                <div class="eqx__picklist" id="eq-preset-list" role="listbox" hidden></div>
+              </div>
+            </div>
             <button class="eqx__btn" id="eq-reset" type="button">重置</button>
             <button class="eqx__btn eqx__btn--mode" id="eq-mode" type="button" aria-pressed="false">高级</button>
           </div>
@@ -112,34 +186,8 @@ const EqUI = (() => {
             <canvas id="eq-canvas" tabindex="0" aria-label="均衡曲线编辑器：拖动节点改频率与增益，滚轮改 Q，双击旁通，右键切类型"></canvas>
           </div>
           <p class="eq-adv__hint">拖节点 = 频率 / 增益 · 滚轮或 Shift+拖 = Q · 双击 = 旁通 · 右键 = 切类型 · 方向键微调</p>
-          <p class="eq-adv__hint eq-adv__hint--dim">交互照 FabFilter Pro-Q 4 做，但不加载 VST3：AudioWorklet 里没有 require / module，
-            插件 SDK 也不允许，真正在跑的是那 7 个 BiquadFilterNode。</p>
-        </div>
-      </section>
-
-      <section class="eqx__sec" aria-labelledby="eq-h-glide">
-        <div class="eqx__row">
-          <h3 class="eqx__h" id="eq-h-glide">自动过渡</h3>
-          <button class="eqx__sw" id="glide-on" type="button" role="switch" aria-checked="false" aria-label="自动过渡总开关"><i></i></button>
-          <span class="eqx__state" id="glide-on-txt">关</span>
-          <div class="eqx__ctl">
-            <label class="eqw">
-              <span class="eqw__lab">时长</span>
-              <input class="eqw__input" id="glide-len" type="range" min="4" max="12" step="0.5" value="6">
-              <span class="eqw__val" id="glide-len-val">6.0 s</span>
-            </label>
-            <label class="eqx__sel"><span>曲线</span>
-              <select id="glide-curve">
-                <option value="equal">等功率</option>
-                <option value="linear">线性</option>
-                <option value="smooth">S 曲线</option>
-              </select>
-            </label>
-          </div>
-        </div>
-        <div class="eqx__row eqx__row--end">
-          <p class="eqx__note" id="glide-note">默认关闭。两条真实音轨在曲尾前重叠：出场淡出、进场淡入，曲线按 cos²+sin² 归一。顺序播放到队尾不会凭空接歌；单曲循环跳过交叉淡化。</p>
-          <span class="eqx__glide-state" id="glide-state">空闲</span>
+          <p class="eq-adv__hint eq-adv__hint--dim">曲线取自真实滤波器响应：7 个 BiquadFilterNode 串在播放链上，
+            不是另画的公式；不加载 VST3，AudioWorklet 里也没有 require / module。</p>
         </div>
       </section>
 
@@ -163,20 +211,20 @@ const EqUI = (() => {
         <span class="eqband__hz">${fmtHz(f)}</span>
       </div>`).join('');
 
-    /* 预设下拉 */
-    const sel = $('#eq-preset', box);
-    sel.innerHTML = EqEngine.PRESETS.map((p) => `<option value="${p.id}">${p.name}</option>`).join('')
-      + '<option value="custom">自定义</option>';
+    /* 预设下拉（自绘，见上）：选项用按钮铺开，值仍然是 preset id */
+    const presetList = $('#eq-preset-list', box);
+    presetList.innerHTML = EqEngine.PRESETS.map((p) =>
+      `<button type="button" role="option" aria-selected="false" data-id="${p.id}">${p.name}</button>`
+    ).join('') + '<button type="button" role="option" aria-selected="false" data-id="custom">自定义</button>';
 
-    /* 音质格子 */
-    $('#eq-quality', box).innerHTML = EqEngine.QUALITIES.map((q) => `
-      <button type="button" data-q="${q.id}" aria-pressed="false">
-        <b>${q.label}</b><em>${q.br}</em>${q.vip ? '<u>需会员</u>' : ''}
-      </button>`).join('');
+    /* 平台 tab（顺序即 PLATFORM_QUALITIES 的定义顺序） */
+    $('#eq-plat', box).innerHTML = Object.keys(EqEngine.PLATFORM_QUALITIES).map((src) => `
+      <button type="button" data-plat="${src}" aria-pressed="false">${EqEngine.platformLabel(src)}</button>`).join('');
 
     /* 构建完**先不挂**：整页和半页都靠 mount(host) 挂进去，
        否则面板会在打开之前就出现在文档流末尾。 */
     root = box;
+    renderChips();
     wire();
     syncAll();
     resizeCanvas();
@@ -193,12 +241,35 @@ const EqUI = (() => {
       syncAll();
     });
 
-    /* --- 预设 --- */
-    $('#eq-preset', root).addEventListener('change', (e) => {
-      const v = e.target.value;
+    /* --- 预设（自绘下拉） --- */
+    const presetBtn = $('#eq-preset-btn', root);
+    const presetListEl = $('#eq-preset-list', root);
+    const presetWrap = $('#eq-preset', root);
+    function closePreset() {
+      presetListEl.hidden = true;
+      presetWrap.classList.remove('is-open');
+      presetBtn.setAttribute('aria-expanded', 'false');
+    }
+    presetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = presetListEl.hidden;
+      presetListEl.hidden = !open;
+      presetWrap.classList.toggle('is-open', open);
+      presetBtn.setAttribute('aria-expanded', String(open));
+    });
+    presetListEl.addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-id]');
+      if (!b) return;
+      const v = b.dataset.id;
+      closePreset();
       if (v === 'custom') return;
       EqEngine.setPreset(v);
       syncAll();
+    });
+    document.addEventListener('click', (e) => {
+      if (presetListEl.hidden) return;
+      if (e.target.closest && e.target.closest('#eq-preset')) return;
+      closePreset();
     });
     $('#eq-reset', root).addEventListener('click', () => {
       EqEngine.resetSimple();
@@ -263,13 +334,21 @@ const EqUI = (() => {
       curveDirty = true;
     });
 
+    /* --- 平台 tab：只切面板在看哪个平台的档位，不重载当前曲 --- */
+    $('#eq-plat', root).addEventListener('click', (e) => {
+      const b = e.target.closest('[data-plat]');
+      if (!b || b.dataset.plat === activePlatform) return;
+      activePlatform = b.dataset.plat;
+      renderChips();                 // 各平台档位名不同，chips 整排重画
+      syncQuality();
+    });
+
     /* --- 音质 --- */
     $('#eq-quality', root).addEventListener('click', (e) => {
       const b = e.target.closest('[data-q]');
       if (!b) return;
-      EqEngine.setQuality(b.dataset.q);
-      syncQuality();
-      refreshActual();               // 立刻用真实返回校验一遍（不看广告看疗效）
+      EqEngine.setQualityFor(activePlatform, b.dataset.q);
+      syncQuality();                 // 只更新文案；要听新档位用右边的「重载当前曲」
     });
     $('#eq-reload', root).addEventListener('click', async () => {
       const tr = currentTrack();
@@ -331,36 +410,6 @@ const EqUI = (() => {
     $('#eq-ab', root).addEventListener('click', () => {
       EqEngine.toggleAB(); curveDirty = true; syncAdv();
     });
-
-    /* --- 自动过渡 ---
-       引擎是 audio/glide.js（defer，在 app.js 之后执行）。这里用 window.Glide，
-       避免脚本顺序不同时踩到顶层 const 的 TDZ。 */
-    const glide = () => (typeof window !== 'undefined' ? window.Glide : null);
-
-    $('#glide-on', root).addEventListener('click', () => {
-      const g = glide();
-      if (!g) return;
-      g.setEnabled(!g.config.enabled);
-      syncGlide();
-    });
-    $('#glide-len', root).addEventListener('input', (e) => {
-      const g = glide();
-      if (!g) return;
-      g.setDuration(Number(e.target.value));
-      syncGlide();
-    });
-    $('#glide-curve', root).addEventListener('change', (e) => {
-      const g = glide();
-      if (!g) return;
-      g.setCurve(e.target.value);
-      syncGlide();
-    });
-
-    const g0 = glide();
-    if (g0 && g0.on) {
-      g0.on('change', () => { if (root) syncGlide(); });
-      g0.on('status', () => { if (root) syncGlide(); });
-    }
 
     /* --- 换歌：刷新"实际音质" --- */
     if (typeof Player !== 'undefined' && Player.on) {
@@ -445,7 +494,21 @@ const EqUI = (() => {
     $('#eq-mode', root).setAttribute('aria-pressed', String(mode === 'advanced'));
     $('#eq-simple', root).hidden = mode !== 'simple';
     $('#eq-adv', root).hidden = mode !== 'advanced';
-    $('#eq-preset', root).value = s.preset;
+    /* 预设下拉：标签写当前预设，列表里高亮选中项（改过滑杆后引擎会把
+       preset 记成 'custom'，这时标签显示「自定义」）。 */
+    const presetLab = $('#eq-preset-lab', root);
+    if (presetLab) {
+      const p = EqEngine.PRESETS.find((x) => x.id === s.preset);
+      presetLab.textContent = p ? p.name : '自定义';
+    }
+    const presetListSync = $('#eq-preset-list', root);
+    if (presetListSync) {
+      presetListSync.querySelectorAll('button[data-id]').forEach((b) => {
+        const on = b.dataset.id === s.preset;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+    }
     /* 高级模式下预设下拉是死的（预设只写 7 段增益，不碰频率/类型/Q），
        留着它只会让人以为切了有反应 —— 直接收起来。 */
     const psel = root.querySelector('.eqx__sel');
@@ -453,7 +516,6 @@ const EqUI = (() => {
     syncBands();
     syncSimpleMeta();
     syncQuality();
-    syncGlide();
     syncAdv();
     if (mode === 'advanced') { resizeCanvas(); curveDirty = true; }
   }
@@ -490,56 +552,53 @@ const EqUI = (() => {
     haas.textContent = s.simple.haas ? `Haas ${s.simple.haas} ms` : '';
   }
 
+  /* 每个平台的档位名/权限规则都不一样，说明文案跟着 tab 换 */
+  const QUALITY_NOTES = {
+    netease: '无损 / Hi-Res 需网易云会员。未登录时上游不会报错，只会「静默降级」：'
+      + '实测请求 lossless 返回 exhigh 320kbps，右上角显示实际拿到的档位。',
+    qq: '无损（SQ）需 QQ 会员，实际档位由 QQ 账号决定。',
+    kugou: 'FLAC 看账号权限，没权限上游会回 320/128。',
+    qishui: '无损 / Hi-Res 需会员；会员取流也只有 30 秒（与档位无关）。',
+    bodian: '无损 / Hi-Res 视账号权限。',
+    kuwo: 'FLAC 看账号权限，回退 web 通道时只有 mp3。',
+  };
+
+  /* 音质 chips 按当前 tab 的平台重画；点击仍由 #eq-quality 上的委托处理 */
+  function renderChips() {
+    if (!root) return;
+    const tiers = EqEngine.qualityTiers(activePlatform) || [];
+    $('#eq-quality', root).innerHTML = tiers.map((q) => `
+      <button type="button" data-q="${q.id}" aria-pressed="false">
+        <b>${q.label}</b><em>${q.br}</em>${q.vip ? '<u>需会员</u>' : ''}
+      </button>`).join('');
+  }
+
+  function syncPlatHint() {
+    if (!root) return;
+    const el = $('#eq-plathint', root);
+    if (!el) return;
+    const plat = EqEngine.platformLabel(activePlatform) || activePlatform;
+    const tr = currentTrack();
+    const curSrc = tr ? (tr.source || 'netease') : null;
+    el.textContent = `正在设置「${plat}」的档位 · `
+      + (curSrc === activePlatform ? '当前生效' : `播放${plat}曲目时生效`);
+  }
+
   function syncQuality() {
-    const q = EqEngine.state.quality;
+    if (!root) return;
+    const q = EqEngine.qualityFor(activePlatform);
     root.querySelectorAll('#eq-quality [data-q]').forEach((b) => {
       const on = b.dataset.q === q;
       b.classList.toggle('is-on', on);
       b.setAttribute('aria-pressed', String(on));
     });
-    $('#eq-qnote', root).textContent =
-      '无损 / Hi-Res 要网易云会员。未登录时上游不会报错，只会「静默降级」：'
-      + '实测请求 lossless 返回的是 exhigh 320kbps，所以右上角显示的是实际拿到的档位。';
-  }
-
-  /* 自动过渡：整页和半页共用同一个 root，所以两边天然同步（挂载到哪个宿主就显示哪份） */
-  function syncGlide() {
-    if (!root) return;
-    const on = $('#glide-on', root);
-    const onTxt = $('#glide-on-txt', root);
-    const len = $('#glide-len', root);
-    const lenVal = $('#glide-len-val', root);
-    const curve = $('#glide-curve', root);
-    const stateEl = $('#glide-state', root);
-    const note = $('#glide-note', root);
-    if (!on || !onTxt || !len || !lenVal || !curve || !stateEl || !note) return;
-
-    const g = (typeof window !== 'undefined') ? window.Glide : null;
-    if (!g) {
-      on.disabled = true;
-      len.disabled = true;
-      curve.disabled = true;
-      on.setAttribute('aria-checked', 'false');
-      onTxt.textContent = '不可用';
-      stateEl.textContent = '引擎未加载';
-      note.textContent = 'audio/glide.js 未加载，自动过渡不可用；播放器回退为普通切歌。';
-      return;
-    }
-
-    const s = g.snapshot();
-    on.disabled = !s.supported;
-    len.disabled = !s.supported;
-    curve.disabled = !s.supported;
-    on.setAttribute('aria-checked', String(s.supported && s.enabled));
-    onTxt.textContent = !s.supported ? '不可用' : (s.enabled ? '开' : '关');
-    len.value = String(s.duration);
-    lenVal.textContent = s.duration.toFixed(1) + ' s';
-    curve.value = s.curve;
-    root.classList.toggle('is-glide-off', !s.supported || !s.enabled);
-    stateEl.textContent = s.supported ? s.status : '不可用';
-    note.textContent = s.supported
-      ? `默认关闭。两条真实音轨在曲尾前重叠：出场淡出、进场淡入（cos²+sin² 等功率）。离曲尾 ${s.duration + 3} 秒预载下一首；顺序到队尾不接歌，单曲循环跳过交叉。设置存于 localStorage['lizi.audio.glide']。`
-      : `不可用：${s.reason}。播放器回退为普通切歌，不会伪造过渡动效。`;
+    root.querySelectorAll('#eq-plat [data-plat]').forEach((b) => {
+      const on = b.dataset.plat === activePlatform;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-pressed', String(on));
+    });
+    $('#eq-qnote', root).textContent = QUALITY_NOTES[activePlatform] || '';
+    syncPlatHint();
   }
 
   function syncAdv(light = false) {
@@ -569,12 +628,36 @@ const EqUI = (() => {
     if (!root) return;
     const tr = currentTrack();
     const box = $('#eq-actual', root);
+    const seq = ++actualSeq;             // 换歌/换来源都作废上一次还没回来的查询
+    syncPlatHint();                      // tab 不因换歌跳，但「当前生效」这句要跟着换
     if (!tr) { box.textContent = '未播放'; return; }
-    if (tr.source === 'qq') {
-      box.textContent = 'QQ 音乐曲目 · 音质由 QQ 侧决定（本面板只管均衡器）';
+    const src = tr.source || 'netease';
+
+    /* 按**曲目自己的源**说话，不按 tab。非网易云曲目绝不拿它的 id 去查
+       网易云 songUrl —— 那是另一个平台的 id，查回来不是这首歌。 */
+    if (src === 'qq') {
+      const q = EqEngine.qualityFor('qq');
+      const tier = (EqEngine.qualityTiers('qq') || []).find((t) => t.id === q);
+      box.textContent = `QQ 音乐 · 当前请求 ${tier ? tier.br : q} · 实际档位由 QQ 账号/会员决定`;
       return;
     }
-    const seq = ++actualSeq;
+    if (src === 'local') {
+      box.textContent = '本地文件 · 音质跟随文件本身（没有平台档位）';
+      return;
+    }
+    if (src === 'spotify') {
+      box.textContent = 'Spotify · 无音频直链，不参与音质档位';
+      return;
+    }
+    if (src !== 'netease') {
+      const tiers = EqEngine.qualityTiers(src);
+      if (!tiers) { box.textContent = '该来源没有音质档位'; return; }
+      const q = EqEngine.qualityFor(src);
+      const tier = tiers.find((t) => t.id === q);
+      box.textContent = `${EqEngine.platformLabel(src)} · 当前请求 ${tier ? tier.br : q}`;
+      return;
+    }
+
     box.textContent = '查询中…';
     /* 网易云偶尔会给一个空 data（冷连接超时/限流），一次失败不代表"拿不到"，
        重试一次再下结论 —— 否则界面会误报"没有地址"。 */
@@ -619,7 +702,10 @@ const EqUI = (() => {
     const cv = root && $('#eq-canvas', root);
     const dpr = cv ? (cv.width / Math.max(1, cv.clientWidth)) : 1;
     const w = cv ? cv.clientWidth : 1, h = cv ? cv.clientHeight : 1;
-    const pad = { l: 40, r: 16, t: 14, b: 24 };
+    /* 右侧留出 dB 刻度（±24，每 6 dB 一条），左侧只留一点呼吸位。
+       所有绘制和命中测试都走同一套 xOf / yOf，改 pad 不会让节点错位。
+       纵向范围保持 ±24：拖动上限不能被界面收窄。 */
+    const pad = { l: 14, r: 38, t: 14, b: 24 };
     return {
       w, h, dpr,
       l: pad.l, t: pad.t,
@@ -655,21 +741,21 @@ const EqUI = (() => {
     off.height = Math.round(g.h * g.dpr);
     const c = off.getContext('2d');
     c.setTransform(g.dpr, 0, 0, g.dpr, 0, 0);
-    c.fillStyle = '#fff';
+    c.fillStyle = '#151517';
     c.fillRect(0, 0, g.w, g.h);
 
     /* 频率网格：1 / 2 / 5 系列（20 50 100 200 500 1k 2k 5k 10k 20k），
        每个十倍程里只有这三条线，读起来是"标尺"，不是"格子布"。 */
     const majors = [20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000];
-    c.font = '9.5px ui-monospace, monospace';
+    c.font = '9.5px "Geist Mono", ui-monospace, monospace';
     c.textBaseline = 'top';
     for (const f of majors) {
       const x = Math.round(xOf(f, g)) + 0.5;
-      c.strokeStyle = f === 1000 ? 'rgba(23,23,26,.16)' : 'rgba(23,23,26,.075)';
+      c.strokeStyle = f === 1000 ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.055)';
       c.lineWidth = 1;
       c.beginPath(); c.moveTo(x, g.t); c.lineTo(x, g.t + g.plotH); c.stroke();
       /* 首尾两个标签不能按中心对齐，否则会被画布边缘裁掉半个字 */
-      c.fillStyle = 'rgba(23,23,26,.42)';
+      c.fillStyle = 'rgba(255,255,255,.42)';
       if (f === 20) { c.textAlign = 'left'; c.fillText(fmtHz(f), g.l, g.t + g.plotH + 6); }
       else if (f === 20000) { c.textAlign = 'right'; c.fillText(fmtHz(f), g.l + g.plotW, g.t + g.plotH + 6); }
       else { c.textAlign = 'center'; c.fillText(fmtHz(f), x, g.t + g.plotH + 6); }
@@ -677,29 +763,40 @@ const EqUI = (() => {
     /* 更细的 3/4/6/8 辅助线：只画不标 */
     for (const f of [30, 40, 60, 80, 300, 400, 600, 800, 3000, 4000, 6000, 8000]) {
       const x = Math.round(xOf(f, g)) + 0.5;
-      c.strokeStyle = 'rgba(23,23,26,.035)';
+      c.strokeStyle = 'rgba(255,255,255,.028)';
       c.beginPath(); c.moveTo(x, g.t); c.lineTo(x, g.t + g.plotH); c.stroke();
     }
 
-    /* dB 网格 */
-    c.textAlign = 'right'; c.textBaseline = 'middle';
+    /* dB 网格：刻度在右侧，±24，每 6 dB 一条；0 和 ±24 稍亮 */
+    c.textAlign = 'left'; c.textBaseline = 'middle';
     for (const d of [-24, -18, -12, -6, 0, 6, 12, 18, 24]) {
       const y = Math.round(yOf(d, g)) + 0.5;
-      c.strokeStyle = d === 0 ? 'rgba(23,23,26,.20)' : 'rgba(23,23,26,.075)';
+      const strong = d === 0 || d === -24 || d === 24;
+      c.strokeStyle = strong ? 'rgba(255,255,255,.16)' : 'rgba(255,255,255,.055)';
       c.beginPath(); c.moveTo(g.l, y); c.lineTo(g.l + g.plotW, y); c.stroke();
-      if (d % 12 === 0) {
-        c.fillStyle = 'rgba(23,23,26,.42)';
-        c.fillText(d > 0 ? '+' + d : String(d), g.l - 6, y);
-      }
+      c.fillStyle = 'rgba(255,255,255,.42)';
+      c.fillText(d > 0 ? '+' + d : String(d).replace('-', '−'), g.l + g.plotW + 8, y);
     }
-    /* 单位：贴在绘图区上/下沿的两端，避开刻度文字 */
-    c.fillStyle = 'rgba(23,23,26,.30)';
-    c.textAlign = 'right'; c.textBaseline = 'top';
-    c.fillText('dB', g.l + g.plotW, g.t + 1);
-    c.textAlign = 'right'; c.textBaseline = 'bottom';
-    c.fillText('Hz', g.l - 6, g.t + g.plotH);
     gridCanvas = off; gridKey = key;
     ctx.drawImage(off, 0, 0, g.w, g.h);
+  }
+
+  /* 画布角标：左上 EQ、右上 ±24 dB。放在数据之后画，避免被曲线压住。 */
+  function drawBadges(ctx, g) {
+    ctx.font = '9.5px "Geist Mono", ui-monospace, monospace';
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255,255,255,.34)';
+    ctx.fillText('EQ', g.l + 8, g.t + 6);
+
+    const txt = '±24 dB';
+    const tw = ctx.measureText(txt).width;
+    const rx = g.l + g.plotW - 6;
+    ctx.fillStyle = 'rgba(21,21,23,.86)';
+    ctx.fillRect(rx - tw - 6, g.t + 3, tw + 6, 14);
+    ctx.fillStyle = 'rgba(255,255,255,.42)';
+    ctx.textAlign = 'right';
+    ctx.fillText(txt, rx, g.t + 6);
   }
 
   function drawSpectrum(ctx, g) {
@@ -722,7 +819,7 @@ const EqUI = (() => {
     }
     ctx.lineTo(g.l + g.plotW, g.t + g.plotH);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(23,23,26,.055)';
+    ctx.fillStyle = 'rgba(255,255,255,.045)';
     ctx.fill();
   }
 
@@ -738,10 +835,12 @@ const EqUI = (() => {
       const x = g.l + i, y = yOf(db[i], g);
       i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
     }
-    ctx.strokeStyle = EqEngine.state.on ? '#17171a' : 'rgba(23,23,26,.28)';
-    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = EqEngine.state.on ? '#f0a63c' : 'rgba(255,255,255,.24)';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
+    ctx.lineCap = 'butt';
   }
 
   function drawNodes(ctx, g) {
@@ -754,9 +853,9 @@ const EqUI = (() => {
       const x = xOf(n.freq, g), y = yOf(n.bypass ? 0 : n.gain, g);
       ctx.beginPath();
       ctx.arc(x, y, i === hovered ? 5 : 4, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = '#1b1b1f';
       ctx.fill();
-      ctx.strokeStyle = n.bypass ? 'rgba(23,23,26,.30)' : '#17171a';
+      ctx.strokeStyle = n.bypass ? 'rgba(255,255,255,.26)' : 'rgba(240,166,60,.85)';
       ctx.lineWidth = 1.3;
       ctx.stroke();
     });
@@ -765,32 +864,26 @@ const EqUI = (() => {
       const x = xOf(n.freq, g), y = yOf(n.bypass ? 0 : n.gain, g);
       ctx.beginPath();
       ctx.arc(x, y, 5.5, 0, Math.PI * 2);
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = n.bypass ? '#1b1b1f' : '#f0a63c';
       ctx.fill();
-      ctx.strokeStyle = n.bypass ? 'rgba(23,23,26,.35)' : 'oklch(62% .22 12)';
+      ctx.strokeStyle = n.bypass ? 'rgba(255,255,255,.34)' : '#f0a63c';
       ctx.lineWidth = 2;
       ctx.stroke();
-      if (!n.bypass) {
-        ctx.beginPath();
-        ctx.arc(x, y, 1.8, 0, Math.PI * 2);
-        ctx.fillStyle = 'oklch(62% .22 12)';
-        ctx.fill();
-      }
       /* 节点旁读数：只有选中的那个显示，否则 7 个标签会糊成一片 */
       const label = `${fmtHz(n.freq)}  ${fmtDb(n.bypass ? 0 : n.gain)}dB  Q${n.q.toFixed(2)}`;
-      ctx.font = '10.5px ui-monospace, monospace';
+      ctx.font = '10px "Geist Mono", ui-monospace, monospace';
       const tw = ctx.measureText(label).width;
       let bx = x + 10, by = y - 24;
       if (bx + tw + 8 > g.l + g.plotW) bx = x - tw - 18;
       if (by < g.t + 2) by = y + 12;
       bx = clamp(bx, g.l, g.l + g.plotW - tw - 8);
       by = clamp(by, g.t + 1, g.t + g.plotH - 18);
-      ctx.fillStyle = 'rgba(255,255,255,.92)';
+      ctx.fillStyle = 'rgba(20,20,22,.94)';
       ctx.fillRect(bx - 3, by - 2, tw + 6, 15);
-      ctx.strokeStyle = 'rgba(23,23,26,.10)';
+      ctx.strokeStyle = 'rgba(255,255,255,.14)';
       ctx.lineWidth = 1;
       ctx.strokeRect(bx - 2.5, by - 1.5, tw + 5, 14);
-      ctx.fillStyle = n.bypass ? 'rgba(23,23,26,.40)' : '#17171a';
+      ctx.fillStyle = n.bypass ? 'rgba(255,255,255,.38)' : '#dcdce0';
       ctx.textAlign = 'left'; ctx.textBaseline = 'top';
       ctx.fillText(label, bx, by);
       labelBox = { x: bx - 3, y: by - 2, w: tw + 6, h: 15 };
@@ -809,6 +902,7 @@ const EqUI = (() => {
     drawSpectrum(ctx, g);
     drawCurve(ctx, g);
     drawNodes(ctx, g);
+    drawBadges(ctx, g);
   }
 
   function loop() {
@@ -823,7 +917,14 @@ const EqUI = (() => {
    * 宿主：整页 / 半页覆盖
    * ================================================================== */
   function mount(target) {
+    /* 每次打开面板都默认选中当前曲目的平台（网易云的 source 可能是
+       undefined 或 'netease'，都当网易云；没有曲目 / 源不在表里也选网易云）。
+       面板开着时用户手动切的 tab 由 wire() 保持 —— trackchange 不会走这里。 */
+    const tr = currentTrack();
+    const src = tr ? (tr.source || 'netease') : 'netease';
+    activePlatform = EqEngine.qualityTiers(src) ? src : 'netease';
     if (!root) build();
+    renderChips();
     if (target && root.parentElement !== target) target.appendChild(root);
     resizeCanvas();
     curveDirty = true;

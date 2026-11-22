@@ -72,12 +72,69 @@ const API = (() => {
     return res.ok ? body : { code: res.status, ok: false, ...body };
   }
 
+  /* 服务端默认发「形态大图」，但各平台的尺寸开关不一样：只有网易云认 `?param=WxH`，
+     QQ / 汽水 / 酷狗 / 酷我的尺寸写死在 URL 本身（?param= 会被忽略）。所以这里按
+     调用方要的尺寸改 URL，列表和播放器小图才不会把 800~1000px 的大图整张拖下来。
+     - QQ   y.gtimg.cn/music/photo_new/T002R<w>x<h>M000<mid>.jpg
+            实测可用档 150/300/500/800/1200（R1200 实际出 1000×1000；R1000/R1600 是 404）
+     - 汽水  p*.douyinpic.com/…~tplv-…-resize:480:480.image（任意尺寸，实测 120~2000）
+     - 酷狗  imge.kugou.com/stdmusic/<w>/…、/soft/collection/<w>/…（实测 240~1200）
+     - 酷我  img*.kuwo.cn/star/albumcover/<w>/…（实测 120/300/500/800） */
+  const QQ_SIZES = [150, 300, 500, 800, 1200];
+  const KG_SIZES = [240, 400, 480, 500, 800];
+  const KW_SIZES = [120, 300, 500, 800];
+  /* 取最接近的一档（等距取小，列表宁可省流量） */
+  const nearSize = (sizes, want) => sizes.reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a));
+
+  const sizedCover = (u, size) => {
+    /* QQ：T002R300x300M000… → T002R<档>x<档>M000…（?param= 对 gtimg 无效） */
+    if (/y\.gtimg\.cn\/music\/photo_new\/T002R\d+x\d+M000/.test(u)) {
+      const s = nearSize(QQ_SIZES, size);
+      return u.replace(/T002R\d+x\d+M000/, `T002R${s}x${s}M000`);
+    }
+    /* 汽水：模板里的 resize 尺寸直接改成请求值 */
+    if (/resize:\d+:\d+\.image/.test(u)) {
+      const s = Math.max(120, Math.min(1440, Math.round(Number(size) || 200)));
+      return u.replace(/resize:\d+:\d+\.image/, `resize:${s}:${s}.image`);
+    }
+    /* 酷狗：路径里的尺寸段（/stdmusic/240/、/soft/collection/400/、/fmlogov2/240/…） */
+    if (/\.(?:kugou|kgimg)\.com\//.test(u)) {
+      const s = nearSize(KG_SIZES, size);
+      return u.replace(/(\/(?:stdmusic|soft\/collection|collection|custom|fmlogov2)\/)(\d{2,4})(?=\/)/,
+        (m, pre) => pre + s);
+    }
+    /* 酷我：/star/albumcover/<尺寸>/… */
+    if (/\.kuwo\.cn\//.test(u)) {
+      const s = nearSize(KW_SIZES, size);
+      return u.replace(/(\/star\/albumcover\/)(\d{2,4})(?=\/)/, (m, pre) => pre + s);
+    }
+    // 其余（网易云等）沿用 ?param=，且和以前一样只在 URL 没带查询串时追加
+    return u.includes('?') ? u : `${u}?param=${size}y${size}`;
+  };
+
   /** 网易云封面多数是 http://，页面是 http:// 本机，混用没问题；统一转为代理地址 */
   const img = (u, size = 200) => {
     if (!u) return '';
-    // 网易云支持 ?param=w×h 直接让服务端缩图，省流量
-    const withSize = u.includes('?') ? u : `${u}?param=${size}y${size}`;
-    return `/api/img?url=${encodeURIComponent(withSize)}`;
+    /* 本地音乐 / DJ 本地曲目的封面是本地 data URL（内嵌图抠出来的），
+       不能塞进 /api/img 代理 —— 直接给 <img>。 */
+    if (/^(data:|blob:)/i.test(u)) return u;
+    return `/api/img?url=${encodeURIComponent(sizedCover(u, size))}`;
+  };
+
+  /* 音质档位必须在**播放时**才读 EqEngine：eq-engine.js 的加载顺序不保证，
+     用户也可能刚在音效面板里改过档位。顶层 `const EqEngine` 不会自动挂到
+     window（eq-engine.js 末尾显式挂了一份），这里两个都兜一下。 */
+  const eqEngine = () => {
+    try {
+      if (typeof window !== 'undefined' && window.EqEngine) return window.EqEngine;
+      return typeof EqEngine !== 'undefined' ? EqEngine : null;
+    } catch { return null; }
+  };
+  const eqQualityFor = (src) => {
+    try {
+      const E = eqEngine();
+      return (E && typeof E.qualityFor === 'function' && E.qualityFor(src)) || null;
+    } catch { return null; }
   };
 
   return {
@@ -110,6 +167,14 @@ const API = (() => {
       level: level || (typeof window !== 'undefined' && window.LIZI_QUALITY) || 'exhigh',
     }),
     songWiki: (id) => call('song/wiki', { id }),
+
+    /* 高潮 / 副歌节点（2026-11-15）。字段说明见 server.mjs 里 handleChorus 上面那段。
+       chorus(plat, id) → { ok:true, start, end, length, unit:'ms' }
+                        | { ok:false, reason:'no-chorus' | 'unsupported' }
+       chorusCaps()     → { supported:['bodian','netease'], detail:{...} }
+       形态开跑前先调 chorusCaps()，就知道当前音源能不能拿到高潮。 */
+    chorus: (plat, id) => call('chorus', { plat, id }, 'GET'),
+    chorusCaps: () => call('chorus/capabilities', {}, 'GET'),
     /* 直链要走本机代理：网易云 CDN 不回 ACAO，而 <audio> 带着 crossOrigin='anonymous'
        （Web Audio 取频谱用），直接挂 CDN 地址会被 CORS 拦成 net::ERR_FAILED。 */
     neteaseAudio: (u) => (u ? `/api/netease/audio?url=${encodeURIComponent(u)}` : ''),
@@ -137,12 +202,22 @@ const API = (() => {
     qqQrCheck: (key) => call('qq/login/qr/check', { key }, 'GET'),
     qqLogout: () => call('qq/logout', {}, 'GET'),
     qqSearch: (s, limit = 20) => call('qq/search', { s, limit }, 'GET'),
-    qqSongUrl: (mid, quality = '128') => call('qq/song/url', { mid, quality }, 'GET'),
+    /* 档位为空时取音效面板给 QQ 存的档位（默认 128）。实际能拿到什么由
+       QQ 账号/会员决定，服务端只透传。 */
+    qqSongUrl: (mid, quality) => {
+      const q = quality || eqQualityFor('qq') || '128';
+      return call('qq/song/url', { mid, quality: q }, 'GET');
+    },
     qqLyric: (mid) => call('qq/lyric', { mid }, 'GET'),
     /* 铺色态的内容（2026-11-06）：推荐歌单 / 新歌 / 歌单详情 / 我的 都是同一个翻译层 */
     qqRecommendPlaylists: (limit = 9) => call('qq/recommend/playlists', { limit }, 'GET'),
     qqNewSongs: (limit = 30) => call('qq/recommend/new-songs', { limit }, 'GET'),
-    qqPlaylistDetail: (id) => call('qq/playlist/detail', { id }, 'GET'),
+    /* dirId 可选：用户自己的歌单要带上目录 id，详情才能读到（不公开的歌单尤其需要） */
+    qqPlaylistDetail: (id, dirId) => call(
+      'qq/playlist/detail',
+      dirId ? { id, dirId } : { id },
+      'GET'
+    ),
     qqLikedSongs: (limit = 100) => call('qq/user/liked-songs', { limit }, 'GET'),
     qqUserPlaylists: () => call('qq/user/playlists', {}, 'GET'),
     qqDailySongs: () => call('qq/user/daily-songs', {}, 'GET'),
@@ -159,12 +234,18 @@ const API = (() => {
        每个平台一个边车，形状统一是 { code, ... }，所以前端这边也做成一套：
        用 track.source 决定打哪个前缀，调用方（player.js / 搜索）不用 if/else。
        ------------------------------------------------------------------ */
-    srcHealth: (src) => callSoft(`${src}/health`),
-    srcStatus: (src) => callSoft(`${src}/status`),
-    srcQrKey: (src) => callSoft(`${src}/login/qr/key`),
-    srcQrCreate: (src, key) => callSoft(`${src}/login/qr/create`, { key }),
-    srcQrCheck: (src, key) => callSoft(`${src}/login/qr/check`, { key }),
-    srcLogout: (src) => callSoft(`${src}/logout`),
+    /* params 可选：酷狗概念版行靠 { profile: 'lite' } 指定边车和 cookie jar */
+    srcHealth: (src, params) => callSoft(`${src}/health`, params),
+    /** /status 里的 activeProfile / profileSource / jarWritable 是当前版本诊断字段 */
+    srcStatus: (src, params) => callSoft(`${src}/status`, params),
+    srcQrKey: (src, params) => callSoft(`${src}/login/qr/key`, params),
+    srcQrCreate: (src, key, params) => callSoft(`${src}/login/qr/create`, { key, ...(params || {}) }),
+    /** 803 成功时服务端已把 jar 落盘并回读校验（token+userid），active 也切到这一版 */
+    srcQrCheck: (src, key, params) => callSoft(`${src}/login/qr/check`, { key, ...(params || {}) }),
+    srcLogout: (src, params) => callSoft(`${src}/logout`, params),
+    /** 酷狗两版状态：evaluate 强制重算，platform 读 10 分钟缓存。
+        版本由「最后成功登录」决定，VIP 只用于显示，不再自动选路。 */
+    kugouPlatform: (force = true) => callSoft(force ? 'kugou/platform/evaluate' : 'kugou/platform'),
     /** Spotify 骨架：PKCE 授权地址（没有 client_id 时服务端会回 { code:400, error } ） */
     srcLoginUrl: (src) => callSoft(`${src}/login/url`),
 
@@ -179,8 +260,10 @@ const API = (() => {
     qishuiPlaylistTracks: (id, limit = 50) => call('qishui/playlist/tracks', { id, limit }, 'GET'),
     /* 波点用 callSoft：边车起不来 / 老主服务还没重启时，服务端会回 502/404 +
        真实原因；这里不抛 HTTP 错，界面才能把 reason 原样显示出来。 */
-    bodianPlaylistTracks: (id, limit = 50, source = 0) => callSoft('bodian/playlist/tracks',
-      source ? { id, limit, source } : { id, limit }),
+    /* count 是列表里的 musicCount，只用于区分「真空歌单」和「source 传错回空」，
+       不参与取曲目；服务端拿到 0 首时会据此返回可显示的 error。 */
+    bodianPlaylistTracks: (id, limit = 50, source = 0, count = 0) => callSoft('bodian/playlist/tracks',
+      source ? { id, limit, source, count } : { id, limit, count }),
     /** 波点：推荐歌单 / 潮趣日推 / 私人 FM（匿名可用） */
     bodianRecommendations: () => callSoft('bodian/recommendations'),
     bodianDaily: (index = 0) => callSoft('bodian/ai/playlist', { index }),
@@ -194,8 +277,12 @@ const API = (() => {
     /** 酷狗电台：频道目录匿名可读，按 fmid 取歌也匿名 */
     kugouRadioStations: () => call('kugou/fm/class', {}, 'GET'),
     kugouRadioTracks: (fmid, limit = 30) => call('kugou/fm/songs', { fmid, limit }, 'GET'),
-    kugouPlaylistTracks: (id, limit = 100) => call('kugou/playlist/tracks', { id, limit }, 'GET'),
+    kugouPlaylistTracks: (id, limit = 100, page = 1) => call('kugou/playlist/tracks', { id, limit, page }, 'GET'),
+    /** 整张酷狗歌单：服务端按 100/页翻完并去重（大厅跑马带 / 歌单详情用） */
+    kugouPlaylistTracksAll: (id) => call('kugou/playlist/tracks', { id, all: 1 }, 'GET'),
     kugouUserPlaylists: () => call('kugou/user/playlists', {}, 'GET'),
+    /** 酷狗「我喜欢」＝账号歌单里的系统歌单（collection_…_2_0）；服务端挑出来再翻曲目 */
+    kugouLikedSongs: (limit = 100) => callSoft('kugou/liked/songs', { limit }),
 
     /* 酷我（services/kuwo-api/）：内容接口用 callSoft，边车没起来 / 主服务没重启时
        能把 { code:404|502, error } 原样显示出来，而不是一句 "HTTP 502"。 */
@@ -214,24 +301,42 @@ const API = (() => {
     /**
      * 播放直链。每个平台的必填参数不一样，差异只留在这里：
      *   酷狗认 hash + album_id + album_audio_id；汽水/波点是数字 id；Spotify 本期没有音频。
-     * 统一返回 { url, preview, reason, error, clipStartMs?, previewRange? }
+     * 统一返回 { url, preview, reason, error, clipStartMs?, previewRange? }；
+     * 没有地址时 url 为空串 + reason（登录 / 版权 / 地区等），player 不会再合成演示音。
      */
-    srcSongUrl: (track) => {
+    srcSongUrl: (track, quality) => {
       const src = track.source;
+      /* 档位由音效面板按平台保存；没有档位的源（本地 / Spotify / 未知）不传
+         quality，免得服务端把 undefined 当字符串。酷狗服务端白名单是
+         ['128','320','flac']，传别的会被降成 128。 */
+      const q = quality || eqQualityFor(src);
       if (src === 'kugou') {
-        return call('kugou/song/url', {
+        const params = {
           hash: track.hash || track.id,
           albumId: track.albumIdNum || track.albumId || 0,
           albumAudioId: track.albumAudioId || 0,
-        }, 'GET');
+        };
+        if (q) params.quality = q;
+        return call('kugou/song/url', params, 'GET');
       }
       if (src === 'spotify') return call('spotify/song/url', { id: track.id }, 'GET');
-      return call(`${src}/song/url`, { id: track.id }, 'GET');
+      const params = { id: track.id };
+      if (q) params.quality = q;
+      return call(`${src}/song/url`, params, 'GET');
     },
 
     srcLyric: (track) => {
       const src = track.source;
-      if (src === 'kugou') return call('kugou/lyric', { hash: track.hash || track.id, s: track.name || '' }, 'GET');
+      if (src === 'kugou') {
+        /* 酷狗歌词只认 hash 不够：上游对纯音乐/翻唱会回别人的词（见 server.mjs
+           kugouLyricPick）。把歌名、歌手、时长一起带上，服务端据此核对候选。 */
+        return call('kugou/lyric', {
+          hash: track.hash || track.id,
+          s: track.name || '',
+          singer: track.artists || track.singer || track.artist || '',
+          duration: Number(track.duration) || 0,
+        }, 'GET');
+      }
       if (src === 'spotify') return call('spotify/lyric', { id: track.id }, 'GET');
       return call(`${src}/lyric`, { id: track.id }, 'GET');
     },

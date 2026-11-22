@@ -1,0 +1,247 @@
+/* 早期网页 Web 1.0 · 1997
+ * 灰底、1px 灰边、3D 凸起控件、Times/Verdana、海军蓝与蓝链接。
+ * 依据：public/app.css 顶栏 161–285、设置行/控件 335–541、开关 8982–9020、
+ *       设置卡 8893–8926、胶囊按钮 1537–1568；`.track__flag` 1779。
+ * 只做一条签名：按钮 / 分段 / 开关 / 输入统一 3D 凸起或凹陷，按下变 inset。
+ */
+
+html[data-ui-theme="web1"] {
+  /* 字体 */
+  --tm-font-display: "Times New Roman", "宋体", SimSun, "Songti SC", serif;
+  --tm-font-body: Verdana, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --tm-font-mono: "Courier New", Courier, "SimSun", monospace;
+  --tm-display-weight: 700;
+  --tm-display-tracking: 0em;
+  --tm-display-transform: none;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 颜色 */
+  --tm-bg: #c0c0c0;
+  --tm-bg-pattern:
+    repeating-linear-gradient(0deg, rgba(0, 0, 128, .045) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(90deg, rgba(0, 0, 128, .045) 0 1px, transparent 1px 24px);
+  --tm-surface: #c0c0c0;
+  --tm-surface-2: #c0c0c0;
+  --tm-surface-3: #ffffff;
+  --tm-ink: #000000;
+  --tm-ink-2: #000080;
+  --tm-ink-3: #404040;
+  --tm-accent: #0000ee;
+  --tm-accent-2: #000080;
+  --tm-accent-ink: #ffffff;
+  --tm-line: #808080;
+  --tm-line-strong: #000000;
+  --tm-focus: #000080;
+
+  /* 形状 */
+  --tm-border-w: 1px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 0px;
+  --tm-radius-pill: 0px;
+  --tm-radius-input: 0px;
+  --tm-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #808080;
+  --tm-shadow-sm: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #404040;
+  --tm-shadow-inset: inset 1px 1px 0 #404040, inset -1px -1px 0 #ffffff;
+
+  /* 其他 */
+  --tm-card-bg: #ffffff;
+  --tm-overlay-bg: #c0c0c0;
+  --tm-scrim: rgba(0, 0, 0, .35);
+  --tm-filter: none;
+}
+
+/* 正文压到 13px：1997 年的页面没有 14/16px 的正文 */
+html[data-ui-theme="web1"] body:not(.is-stage) {
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* 签名 · 凸起：左上白、右下深灰的 1px 立体边；按钮 / 分段 / 开关共用 */
+html[data-ui-theme="web1"] body:not(.is-stage) :is(
+  .tbtn, .btn, .btn.lg-surface, .icbtn, .hall-cta__btn, .hall-hero__play, .hall-hero__ghost,
+  .setpage__seg button,
+  .drawer__x, .drawer__tile, .drawer__row--diy, .topbtn, .updtoast__btn
+) {
+  border: 1px solid;
+  border-color: #ffffff #404040 #404040 #ffffff;
+  border-radius: 0;
+  background: #c0c0c0;
+  color: #000000;
+  box-shadow: none;
+}
+
+/* 输入是凹槽：白底、上左深灰、下右白，和凸起的按钮相反 */
+html[data-ui-theme="web1"] body:not(.is-stage) :is(.search, .field) {
+  border: 1px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  border-radius: 0;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: inset 1px 1px 0 #c0c0c0;
+}
+
+/* 焦点是 1997 的虚线框，不用现代外发光 */
+html[data-ui-theme="web1"] body:not(.is-stage) :is(
+  .tbtn, .btn, .btn.lg-surface, .icbtn, .hall-cta__btn, .hall-hero__play, .hall-hero__ghost,
+  .setpage__seg button, .setpage__switch,
+  .drawer__x, .drawer__tile, .drawer__row--diy, .topbtn, .updtoast__btn
+):focus-visible,
+html[data-ui-theme="web1"] body:not(.is-stage) :is(.search, .field):focus-within {
+  outline: 1px dotted #000080;
+  outline-offset: -4px;
+}
+
+/* 签名 · 按下 / 选中：边色反转，内压一道灰 */
+html[data-ui-theme="web1"] body:not(.is-stage) :is(
+  .tbtn, .btn, .btn.lg-surface, .icbtn, .hall-cta__btn, .hall-hero__play, .hall-hero__ghost,
+  .setpage__seg button,
+  .drawer__x, .drawer__tile, .drawer__row--diy, .topbtn, .updtoast__btn
+):active {
+  border-color: #404040 #ffffff #ffffff #404040;
+  background: #c0c0c0;
+  box-shadow: inset 1px 1px 0 #808080;
+}
+
+html[data-ui-theme="web1"] body:not(.is-stage) .setpage__seg button.is-on {
+  border-color: #404040 #ffffff #ffffff #404040;
+  background: #c0c0c0;
+  color: #000080;
+  box-shadow: inset 1px 1px 0 #808080;
+}
+
+/* 开关：老式机箱上的方形拨杆 */
+html[data-ui-theme="web1"] body:not(.is-stage) .setpage__switch {
+  border: 1px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  border-radius: 0;
+  background: #c0c0c0;
+  box-shadow: inset 1px 1px 0 #404040;
+}
+html[data-ui-theme="web1"] body:not(.is-stage) .setpage__switch-knob {
+  border: 1px solid;
+  border-color: #ffffff #404040 #404040 #ffffff;
+  border-radius: 0;
+  background: #c0c0c0;
+  box-shadow: none;
+}
+html[data-ui-theme="web1"] body:not(.is-stage) .setpage__switch[aria-checked="true"] {
+  border-color: #404040 #ffffff #ffffff #404040;
+  background: #000080;
+  box-shadow: inset 1px 1px 0 #000040;
+}
+html[data-ui-theme="web1"] body:not(.is-stage) .setpage__switch[aria-checked="true"] .setpage__switch-knob {
+  background: #ffffff;
+}
+
+/* 顶栏是一条老式工具栏：灰面 + 上白下深的两条边，不要下方那层现代渐隐 */
+html[data-ui-theme="web1"] body:not(.is-stage) .topbar,
+html[data-ui-theme="web1"] body:not(.is-stage) .topbar.lg-surface {
+  background: #c0c0c0;
+  border-bottom: 1px solid #404040;
+  box-shadow: inset 0 1px 0 #ffffff;
+}
+html[data-ui-theme="web1"] body:not(.is-stage) .topbar::after { display: none; }
+
+/* 卡片是白纸，边框做出凸起感；不用投影 */
+html[data-ui-theme="web1"] body:not(.is-stage) :is(.setpage__sec.setcard, .modal__card) {
+  border: 1px solid;
+  border-color: #ffffff #808080 #808080 #ffffff;
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #c0c0c0;
+}
+
+/* 直角收口：app.css 里写死的胶囊 / 圆角，base 的令牌够不到 */
+html[data-ui-theme="web1"] body:not(.is-stage) :is(
+  .setpage__avatar, .setpage__src-avatar .setpage__avatar, .setpage__src-chip,
+  .btn--user img, .hall-me__ava,
+  .hall-hero, .hall-hero__cover, .hall-hero__lock, .hall-hero__badge,
+  .hall-cta, .hall-cta__btn, .marq__art, .marq__tag,
+  .hall-pl__cover, .hall-pl__play, .hall-tools__i, .tool-card__ico,
+  .tools-page__card, .tools-page__ico,
+  .me-grid .plat, .plat__front, .plat__back,
+  .drawer__x, .drawer__row, .drawer__tile, .drawer__ico,
+  .drawer__val, .drawer__sub, .drawer__sw, .qq-qr__box, .gnode, .gnode--tile
+) {
+  border-radius: 0;
+}
+
+/* 1997 的链接：base 负责常态蓝，这里补上「走过是紫的」 */
+html[data-ui-theme="web1"] body:not(.is-stage) a:not(.brand):visited { color: #551a8b; }
+
+/* 品牌上的 Air 仍写死 Fraunces 斜体，改回 Times */
+html[data-ui-theme="web1"] body:not(.is-stage) .brand__air {
+  font-family: var(--tm-font-display);
+}
+
+/* 去掉现代装饰层：行的模糊色雾、设置卡 spotlight、设置页极光与光泽字
+   （都是纯装饰；前两个是伪元素，后两个只压透明度/背景，不动布局） */
+html[data-ui-theme="web1"] body:not(.is-stage) .track::after,
+html[data-ui-theme="web1"] body:not(.is-stage) .setcard::before { display: none; }
+html[data-ui-theme="web1"] body:not(.is-stage) .setconsole__aurora {
+  opacity: 0;
+  animation: none;
+  filter: none;
+}
+html[data-ui-theme="web1"] body:not(.is-stage) .setconsole__shiny {
+  background: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--ink);
+}
+
+/* 我的专辑：pages.css 只在本页写了两档冷灰，换成 1997 的两档 */
+html[data-ui-theme="web1"] body:not(.is-stage) .ma {
+  --ma-ink-4: #404040;
+  --ma-rule-soft: #d4d4d4;
+}
+
+/* 迁移浮层自带暖纸令牌，整块映射到灰 / 白 / 蓝，弹层像一张灰对话框 */
+html[data-ui-theme="web1"] body:not(.is-stage) .mig {
+  --mig-paper: #c0c0c0;
+  --mig-paper-2: #ffffff;
+  --mig-card: #ffffff;
+  --mig-ink: #000000;
+  --mig-ink-2: #000080;
+  --mig-ink-3: #404040;
+  --mig-line: #808080;
+  --mig-line-strong: #404040;
+  --mig-accent: #0000ee;
+  --mig-accent-ink: #000080;
+  --mig-accent-soft: #ffffcc;
+  --mig-orange: #cc6600;
+  --mig-orange-soft: #ffff99;
+  --mig-green: #008000;
+  --mig-green-soft: #ccffcc;
+  --mig-red: #cc0000;
+  --mig-red-soft: #ffcccc;
+  background: rgba(0, 0, 0, .4);
+}
+html[data-ui-theme="web1"] body:not(.is-stage) .mig__sheet {
+  border: 1px solid #808080;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 主按钮渐变在 app.css:1565 / #view-settings:307 带 !important，只有背景需要同样压过 */
+html[data-ui-theme="web1"] body:not(.is-stage) .btn--primary,
+html[data-ui-theme="web1"] body:not(.is-stage) #view-settings .btn--primary {
+  background: #c0c0c0 !important;
+  color: #000000;
+}
+
+/* 局部硬编码：琥珀标签换成 1997 的红黄小面积 */
+html[data-ui-theme="web1"] body:not(.is-stage) .track__flag {
+  border: 1px solid #808080;
+  border-radius: 0;
+  background: #ffff00;
+  color: #000000;
+}
+
+/* 手机：13px 在窄屏偏挤，行距再收一点 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="web1"] body:not(.is-stage) {
+    font-size: 12.5px;
+    line-height: 1.42;
+  }
+}

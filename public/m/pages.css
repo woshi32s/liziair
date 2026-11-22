@@ -321,7 +321,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
 }
 .mehero__banner img {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -329,7 +329,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
 .mehero__banner::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   background: linear-gradient(to top,
     var(--paper-2) 0%,
     color-mix(in oklab, var(--paper-2) 62%, transparent) 26%,
@@ -360,7 +360,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
 }
 .mehero__avaimg {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 1;
   width: 100%;
   height: 100%;
@@ -706,7 +706,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
   /* 控制键高度 54 + 上内边距 8 + main 底部留白 14 + 面板与按键之间 6 = 82（再加安全区） */
   --now-ctl-space: calc(var(--m-safe-b) + 82px);
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 1200;
   display: flex;
   flex-direction: column;
@@ -727,7 +727,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
    下面那层取色渐变只作兜底 / 封面色偏灰时补氛围。 */
 .nowsheet__bg {
   position: absolute;
-  inset: -10%;
+  top: -10%;  right: -10%;  bottom: -10%;  left: -10%;
   z-index: 0;
   pointer-events: none;
   background:
@@ -743,7 +743,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
 /* 大半径 + 低透明：只剩封面的色光，不留下"糊成一片"的图块边缘 */
 .nowsheet__photo {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: block;
   background-size: cover;
   background-position: center;
@@ -755,7 +755,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
 .nowsheet__bg::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   background:
     radial-gradient(120% 64% at 50% -8%, rgb(255 255 255 / .05) 0%, transparent 62%),
     linear-gradient(180deg,
@@ -843,7 +843,7 @@ button.brand:active { opacity: .62; transform: scale(.98); }
 /* 桌面是悬停浮出播放/暂停；手机改成点一下封面闪一下 */
 .nowart__cue {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: grid;
   place-items: center;
   color: rgb(255 255 255 / .95);
@@ -1245,7 +1245,7 @@ body.is-playing .nowctl__play .pn-r { d: path("M13.8 5L17 5L17 19L13.8 19Z"); }
 .stageview {
   --ease-apple: cubic-bezier(.32, .72, 0, 1);
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 1400;
   background: #000;
   overflow: hidden;
@@ -1272,7 +1272,7 @@ body.is-playing .nowctl__play .pn-r { d: path("M13.8 5L17 5L17 19L13.8 19Z"); }
 }
 .stageview__canvas iframe {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   border: 0;

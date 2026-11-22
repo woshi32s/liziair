@@ -64,6 +64,15 @@ node services/qishui-api/start.mjs       # 手动起（调试）
 | `/lyrics` | ✅ | KRC 逐字，实测 36 行 |
 | `/status`、`/feed`、`/liked_songs`、编辑歌单 | ❌ | 需要扫码登录 |
 
+## 会员整曲（2026-11-12）
+
+公共客户端令牌问 `/media/mget/` 时，`player_type=2`（受版权保护）的曲目上游**不下发**
+`player_info.full`，只给 30 秒 `preview` —— 会员账号也一样。所以 `/audio` 现在对
+「已登录且 `is_vip=true`」的账号先用 ticket-guard 走一次账号级 `/media/mget/` 再解析播放地址；
+遇到 `auth-required` 先续期一次并重试一次，仍失败则原样回退公共令牌路径。
+非会员和匿名请求不碰账号路径，仍是 30 秒试听；账号接口任何失败都不会让普通播放挂掉。
+账号级命中后仍只取明文资源，加密档位限制不变。
+
 ## 已知限制
 
 - 登录二维码：上游给的是 356 字节的 `aweme://authorizedy?...` 深链（77×77、ECC M、3px/模块的 256px PNG）。

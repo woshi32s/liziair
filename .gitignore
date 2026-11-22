@@ -38,3 +38,18 @@ public/site/download/
 .scratch-*/
 .claude/
 __pycache__/
+
+# 随包分发的 Node 24 运行时（node.exe 约 90MB，靠脚本下载，不进版本库）
+runtime/
+
+# 本地工作记录 / 一次性原型，不进版本库
+WORKLOG.md
+WORKORDER.md
+MOBILE-HANDOFF.md
+lizi-stage-mvp.zip
+stage-mvp/
+public/dev/reports/
+public/dev/.chk693/
+
+# 内部文档 / 交接 / 提示词：只在本机留档，不公开
+docs/

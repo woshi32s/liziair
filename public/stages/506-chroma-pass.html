@@ -16,8 +16,11 @@
 <script>
 window.__stagePanel = {
   title: '偏色过境',
-  hint: '歌词自左向右掠过；拖「景深厚度」拉开红蓝分离，拖「黑边宽度」加厚黑框。调完自动记住，切歌不变。',
+  hint: '歌词自左向右掠过；拖「景深厚度」拉开红蓝分离，拖「黑边宽度」加厚黑框。颜色默认就是原来的黑框、蓝场、品红字，改完自动记住，切歌不变。',
   items: [
+    { key: 'fg',       label: '字色',     type: 'color', def: '#ff007f' },
+    { key: 'field',    label: '底色',     type: 'color', def: '#0018ff' },
+    { key: 'deep',     label: '残影色',   type: 'color', def: '#00076b' },
     { key: 'offset',   label: '景深厚度', type: 'range', min: 0,   max: 60,  step: 1,   def: 24 },
     { key: 'size',     label: '字号',     type: 'range', min: 48,  max: 220, step: 1,   def: 140 },
     { key: 'stroke',   label: '线条粗细', type: 'range', min: 1,   max: 9,   step: 0.5, def: 3.5 },
@@ -97,7 +100,12 @@ addEventListener('message', function (e) {
   var LIM = {
     offset: [0, 60], size: [48, 220], stroke: [1, 9], pad: [0, 240], speed: [0.3, 2.2]
   };
-  var P = { offset: 24, size: 140, stroke: 3.5, pad: 96, speed: 1, enter: "slide", style: "sketch", hatch: true, breath: false, beat: false };
+  var P = {
+    offset: 24, size: 140, stroke: 3.5, pad: 96, speed: 1,
+    enter: "slide", style: "sketch", hatch: true, breath: false, beat: false,
+    /* 颜色：默认值 = 原来的 PAL。宿主推 setting 时和 PAL 一起改。 */
+    fg: "#ff007f", field: "#0018ff", deep: "#00076b"
+  };
 
   /* 这些必须在 resize() 之前就存在（resize 会清烤版缓存） */
   var cache = new Map();
@@ -411,12 +419,17 @@ addEventListener('message', function (e) {
       if (s1 === "slide" || s1 === "fade") P.enter = s1;
     } else if (k === "hatch" || k === "breath" || k === "beat") {
       P[k] = !!v;
+    } else if (k === "fg" || k === "field" || k === "deep") {
+      /* 颜色：PAL 是每帧直接读的绘制色，P 存一份给持久化/默认值对齐 */
+      var c0 = String(v || "").toLowerCase();
+      if (/^#[0-9a-f]{6}$/.test(c0)) { P[k] = c0; PAL[k] = c0; }
     } else if (LIM[k]) {
       var n = Number(v);
       if (isFinite(n)) P[k] = clamp(n, LIM[k][0], LIM[k][1]);
     }
-    /* 只有影响"烤版"的参数才重建 */
-    if (k === "stroke" || k === "style" || k === "hatch" || k === "pad") cache.clear();
+    /* 只有影响"烤版"的参数才重建（字色/残影色是烤进画布的，也要重建） */
+    if (k === "stroke" || k === "style" || k === "hatch" || k === "pad"
+        || k === "fg" || k === "deep") cache.clear();
     if (k === "pad") layout();
     if (k === "beat" && !P.beat) beatK = 0;
   }

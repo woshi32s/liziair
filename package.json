@@ -1,7 +1,7 @@
 {
   "name": "lyric-glass-player",
   "productName": "LIZI",
-  "version": "1.0.5",
+  "version": "1.1.5",
   "description": "粒子播放器",
   "author": "LIZI",
   "license": "MIT",
@@ -12,6 +12,8 @@
   "main": "desktop/main.js",
   "scripts": {
     "start": "electron .",
+    "fetch:node24": "node scripts/ensure-node24.mjs",
+    "predist": "node scripts/ensure-node24.mjs",
     "dist": "electron-builder --win nsis --x64 --publish never",
     "release": "node release.mjs"
   },
@@ -32,6 +34,7 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "afterPack": "scripts/after-pack.cjs",
     "files": [
       "desktop/**",
       "public/**",
@@ -49,9 +52,8 @@
         "to": "app/services",
         "filter": [
           "**/*",
-          "!**/.log",
-          "!**/.log.1",
-          "!**/.port",
+          "!**/.log*",
+          "!**/.port*",
           "!**/.cache/**",
           "!**/node_modules/.bin/**",
           "!**/.auth-*",
@@ -61,6 +63,14 @@
           "!**/.client.json",
           "!**/cookie*.txt",
           "!**/*.cookie"
+        ]
+      },
+      {
+        "from": "runtime/node",
+        "to": "node",
+        "filter": [
+          "node.exe",
+          "node"
         ]
       }
     ],

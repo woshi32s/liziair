@@ -260,11 +260,8 @@ var QCFG = {
   high: { march: 1.00, steps: 84, pr: 2.0, rain: 150, bloom: 8, textGlow: 8, shadow: 1, puffs: 54 }
 };
 function autoQuality() {
-  try {
-    var ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
-    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return 'low';
-    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return 'low';
-  } catch (e) {}
+  /* 2026-11-19：手机也默认高画质（用户实测多数手机带得动）。
+     想省电/降负载可在形态设置里手动选低/中。 */
   return 'high';
 }
 function qualityLevel() {

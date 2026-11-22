@@ -45,16 +45,48 @@
     { id: 'kugou', name: '酷狗', nav: '酷狗', logo: '../assets/platforms/kugou-mark.svg', color: '#3D8BFA', bg: '#3D8BFA', ink: '#FFFFFF' },
     { id: 'qishui', name: '汽水', nav: '汽水', logo: '../assets/platforms/qishui.svg', color: '#111111', bg: '#111111', ink: '#FFFFFF' },
     { id: 'bodian', name: '波点', nav: '波点', logo: '../assets/platforms/bodian.svg', color: '#04E3B4', bg: '#04E3B4', ink: '#062A24' },
+    /* 自定义音源：不是账号，但在导航里和五家同排；点它切到本地曲库，
+       跑马带 / 播放全部走和平台曲目同一条路径。 */
+    { id: 'local', name: '本地音乐', nav: '本地', logo: '../assets/platforms/local.svg', color: '#3A3A3E', bg: '#3A3A3E', ink: '#FFFFFF', local: true },
   ];
   const PLAT = (id) => PLATS.find((p) => p.id === id) || PLATS[0];
   const PLAT_NICE = Object.fromEntries(PLATS.map((p) => [p.id, p.name]));
 
-  /* 搜索页签：桌面同款「全部 + 五家」。全部时并行请求，按平台分组列。 */
-  const SEARCH_SRCS = [
-    { id: 'all', name: '全部' },
-    ...PLATS.map((p) => ({ id: p.id, name: p.name })),
-  ];
-  const SEARCH_NAME = Object.fromEntries(SEARCH_SRCS.map((s) => [s.id, s.name]));
+  /* 平台白名单：和桌面 app.js 的 PlatVis 共用 localStorage['lizi.platforms.v1']。
+     没记录 / 坏数据 = 全开；显式隐藏优先（含已登录平台）。 */
+  const PLAT_KEY = 'lizi.platforms.v1';
+  function platVisible() {
+    let ids = null;
+    try {
+      const raw = JSON.parse(readLs(PLAT_KEY, 'null'));
+      if (Array.isArray(raw)) {
+        ids = raw.filter((x) => typeof x === 'string' &&
+          PLATS.some((p) => p.id === x || (x === 'local' && p.local)));
+      }
+    } catch { ids = null; }
+    /* 没有记录 = 五家全开、自定义音源关（和桌面 PlatVis.get() 一致）。
+       以前这里把 local 也算进默认，手机导航会凭空多一个空的「本地」。 */
+    if (!ids) return new Set(PLATS.filter((p) => !p.local).map((p) => p.id));
+    return new Set(ids);
+  }
+  function visiblePlats() {
+    const ids = platVisible();
+    return PLATS.filter((p) => ids.has(p.id));
+  }
+
+  /* 搜索页签：「全部 + 可见平台（+ 本地）」。全部时并行请求，按来源分组列。
+     ⚠️ 这里只声明，真正的第一次调用在 searchPlat 声明之后（那时 S / searchPlat 才有值）。 */
+  let SEARCH_SRCS = [];
+  let SEARCH_NAME = {};
+  function rebuildSearchSrcs() {
+    SEARCH_SRCS = [{ id: 'all', name: '全部' },
+      ...visiblePlats().map((p) => ({ id: p.id, name: p.name }))];
+    SEARCH_NAME = Object.fromEntries(SEARCH_SRCS.map((s) => [s.id, s.name]));
+    if (!SEARCH_SRCS.some((p) => p.id === searchPlat)) {
+      searchPlat = SEARCH_SRCS.some((p) => p.id === S.plat) ? S.plat
+        : (SEARCH_SRCS[1] ? SEARCH_SRCS[1].id : 'all');
+    }
+  }
 
   /* nav 是导航行里用的短名：五个平台 + 五个来源要在两行里同时排下，
      位置固定（星线的锚点依赖这一点），所以不用全名。 */
@@ -138,7 +170,15 @@
    * 状态
    * ------------------------------------------------------------------ */
   const S = {
-    plat: PLAT(readLs(KEY.plat, 'netease')).id,
+    /* 平台管理里关掉的平台不能被选成当前平台：回落第一个可见的。
+       本地曲库现在也是可持久化的台，上次停在本地就恢复到本地。 */
+    plat: (() => {
+      const want = PLAT(readLs(KEY.plat, 'netease')).id;
+      const vis = visiblePlats();
+      if (vis.some((p) => p.id === want)) return want;
+      const first = vis.find((p) => !p.local) || vis[0];
+      return first ? first.id : want;
+    })(),
     src: SRC_ITEMS.some((s) => s.id === readLs(KEY.src, '')) ? readLs(KEY.src, '') : 'daily',
     type: 'tracks',          // tracks | collections
     items: [],
@@ -156,8 +196,9 @@
   let coverFx = null;                      // 半调封面切换
 
   /* 搜索 */
-  const savedSearchPlat = readLs(KEY.searchPlat, S.plat);
-  let searchPlat = SEARCH_SRCS.some((p) => p.id === savedSearchPlat) ? savedSearchPlat : S.plat;
+  /* 搜索页签：白名单变了就重建（见 rebuildSearchSrcs）；存的是已隐藏平台就换一个 */
+  let searchPlat = readLs(KEY.searchPlat, S.plat);
+  rebuildSearchSrcs();
   let searchHist = [];
   try {
     const rawHist = JSON.parse(readLs(KEY.searchHist, '[]'));
@@ -255,10 +296,24 @@
     updateLabels();
   }
 
+  function openLocalPage() {
+    /* 和桌面同一个视图：app.js 里监听这条事件 → Pages.openLocal()（压栈，返回键能回大厅）。
+       m.js 与 app.js 同页加载，但 app.js 的 Pages 在 IIFE 里，不往外挂全局。 */
+    document.dispatchEvent(new CustomEvent('lizi:open-local'));
+  }
+
   function selectPlatform(id) {
+    /* 「本地」也是播放平台：点它切到本地曲库，跑马带直接画本机导入的歌，
+       不再跳到独立的 #view-local 页面。管理 / 导入仍在设置里。 */
     if (id === S.plat) return;
     S.plat = id;
     writeLs(KEY.plat, id);
+    /* 本地曲库只有「每日推荐」这一层有内容：从精选 / 电台切过来时回到它，
+       否则用户会看到一个空跑马带，以为本地导入没生效。 */
+    if (id === 'local' && S.src !== 'daily') {
+      S.src = 'daily';
+      writeLs(KEY.src, S.src);
+    }
     paintPlatform();
     clearDrill(false);
     loadSource(S.src);
@@ -333,6 +388,22 @@
 
   /* ---- 每日推荐：每家用自己能给的推荐流（匿名能取的就匿名取） ---- */
   async function railDaily(pid) {
+    /* 自定义音源和桌面同一条路：本机 IndexedDB 里的曲目直接进跑马带。
+       手机导航里「本地」不再是单独页面入口，而是和五家并列的一个音源。 */
+    if (pid === 'local') {
+      const l = window.LIZI_LOCAL;
+      if (!l) return railNone('本地音乐不可用');
+      const rows = await l.list();
+      return railTracks('local', (rows || []).map((t) => ({
+        id: t.id,
+        source: 'local',
+        name: t.name || '未命名',
+        artists: t.artists || '未知歌手',
+        album: t.album || '本地文件',
+        duration: t.duration || 0,
+        cover: t.cover || '',
+      })), '还没有导入本地歌曲');
+    }
     if (pid === 'netease') {
       let tracks = [];
       try {
@@ -506,6 +577,8 @@
   }
 
   function railFetch(pid, kind) {
+    /* 本地曲库只有全部歌曲这一层，没有精选 / 喜欢 / 歌单 / 电台。 */
+    if (pid === 'local' && kind !== 'daily') return railNone('本地曲库只有「每日推荐」这一层');
     if (kind === 'daily') return railDaily(pid);
     if (kind === 'featured') return railFeatured(pid);
     if (kind === 'liked') return railLiked(pid);
@@ -518,9 +591,9 @@
   function playlistApi(pid, p) {
     const src = pid || (p && p.source) || 'netease';
     return src === 'qq' ? API.qqPlaylistDetail(p.id)
-      : src === 'kugou' ? API.kugouPlaylistTracks(p.id)
+      : src === 'kugou' ? API.kugouPlaylistTracksAll(p.id)
         : src === 'qishui' ? API.qishuiPlaylistTracks(p.id)
-          : src === 'bodian' ? API.bodianPlaylistTracks(p.id, 50, p.sourceType)
+          : src === 'bodian' ? API.bodianPlaylistTracks(p.id, 50, p.sourceType, p.trackCount)
             : API.playlistDetail(p.id);
   }
 
@@ -881,6 +954,15 @@
   }
 
   async function searchTracks(pid, q) {
+    if (pid === 'local') {
+      const l = window.LIZI_LOCAL;
+      if (!l) return [];
+      const rows = await l.search(q);
+      return rows.map((t) => ({
+        id: t.id, source: 'local', name: t.name, artists: t.artists,
+        album: t.album, duration: t.duration, cover: t.cover,
+      }));
+    }
     if (pid === 'netease') {
       const d = await API.search(q, 20);
       return (d && d.tracks) || [];
@@ -1116,8 +1198,8 @@
     if (el.searchHint) el.searchHint.textContent = '';
 
     if (pid === 'all') {
-      /* 全部：五家并行，一家挂了不影响其它家。顺序固定按 PLATS 排，和桌面一致。 */
-      const groups = await Promise.all(PLATS.map((p) =>
+      /* 全部：可见来源并行，一家挂了不影响其它家。顺序固定按 PLATS 排，和桌面一致。 */
+      const groups = await Promise.all(visiblePlats().map((p) =>
         searchTracks(p.id, term).then(
           (items) => ({ id: p.id, name: p.name, items }),
           () => ({ id: p.id, name: p.name, items: [] })
@@ -1447,10 +1529,15 @@
             const t = Number(p.dataset.t);
             if (!Number.isFinite(t)) return;
             nowLyUserAt = 0;
-            try { Player.seek(t); } catch { return; }
+            /* t 是整曲时间；试听片段（汽水 VIP 从高潮起播）时音频从片段开头算 0，
+               seek / 进度 / 歌词定位都要换算成片段内时间。lyricAt 内部会自己补偏移，
+               所以传进去的是已经减掉偏移的 clipT，不能传整曲时间（会补两次）。 */
+            const off = (Player.state.clipStartMs || 0) / 1000;
+            const clipT = Math.max(0, t - off);
+            try { (Player.seekSongTime || Player.seek).call(Player, t); } catch { return; }
             let idx = -1;
-            try { idx = Player.lyricAt(t).index; } catch { idx = -1; }
-            paintNowProgress(t, Player.audio.duration || nowDuration);
+            try { idx = Player.lyricAt(clipT).index; } catch { idx = -1; }
+            paintNowProgress(clipT, Player.audio.duration || nowDuration);
             paintNowLyrics(Player.state.lyric, idx);
           });
           scroll.appendChild(p);
@@ -2507,7 +2594,9 @@
 
     Player.on('mode', (m) => paintNowMode(m));
 
-    Player.on('source', ({ demo }) => {
+    Player.on('source', ({ demo, track, reason }) => {
+      /* 和桌面同一套提示：VIP 曲目 + 当前平台账号没 VIP 时浮一条 */
+      if (window.LIZI_VIP) LIZI_VIP.notice(track, { reason });
       el.demo.hidden = !demo;
     });
   }
@@ -2576,24 +2665,46 @@
     if (!coverFx) el.coverFx.style.display = 'none';
   }
 
+  /** 平台行：按白名单重建（设置 → 平台管理 改完会发 lizi:platforms） */
+  function createHallNav() {
+    if (!window.HallNav) return null;
+    if (hallNav) { try { hallNav.destroy(); } catch { /* 老环境没有 destroy */ } }
+    return window.HallNav.create({
+      platRow: el.platRow,
+      srcRow: el.srcRow,
+      plat: S.plat,
+      src: S.src,
+      plats: visiblePlats().map((p) => ({ id: p.id, label: p.name, logo: p.logo, bg: p.bg, ink: p.ink })),
+      srcs: SRC_ITEMS.map((s) => ({ id: s.id, label: s.nav })),
+      onPick: (row, id) => {
+        if (row === 'plat') selectPlatform(id);
+        else selectSource(id);
+      },
+    });
+  }
+
+  /** 平台管理改完：导航行、搜索页签、当前平台三处一起对齐 */
+  function rebuildPlatformUI() {
+    rebuildSearchSrcs();
+    hallNav = createHallNav();
+    paintPlatform();
+    if (el.searchSrc) { try { renderSearchSources(); } catch { /* 搜索页还没建好 */ } }
+    const vis = visiblePlats();
+    if (vis.length && !vis.some((p) => p.id === S.plat)) {
+      const first = vis.find((p) => !p.local) || vis[0];
+      S.plat = first.id;
+      writeLs(KEY.plat, S.plat);
+      paintPlatform();
+      clearDrill(false);
+      loadSource(S.src);
+    }
+  }
+
   function init() {
     applyPrefs();
     initCoverFx();
 
-    if (window.HallNav) {
-      hallNav = window.HallNav.create({
-        platRow: el.platRow,
-        srcRow: el.srcRow,
-        plat: S.plat,
-        src: S.src,
-        plats: PLATS.map((p) => ({ id: p.id, label: p.name, logo: p.logo, bg: p.bg, ink: p.ink })),
-        srcs: SRC_ITEMS.map((s) => ({ id: s.id, label: s.nav })),
-        onPick: (row, id) => {
-          if (row === 'plat') selectPlatform(id);
-          else selectSource(id);
-        },
-      });
-    }
+    hallNav = createHallNav();
 
     if (window.MobileRing) {
       ring = window.MobileRing.create({
@@ -2615,6 +2726,9 @@
     document.body.dataset.view = 'hall';
     setTimeout(() => checkUpdate(false), 6000);
   }
+
+  /* 设置页（同页的 app.js）改了平台白名单：手机导航立刻跟着变 */
+  document.addEventListener('lizi:platforms', rebuildPlatformUI);
 
   init();
 })();

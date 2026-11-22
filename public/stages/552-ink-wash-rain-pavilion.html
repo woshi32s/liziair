@@ -1654,6 +1654,65 @@ function buildBackdrop(){
   CTX = null;
 }
 
+/* ---------- 投屏陀螺仪视角叠加 ----------
+   2026-11-17：宿主（同源 iframe 的 StageHost）把「相对回正基准」的绝对增量四元数
+   写到 window.__stageViewQuat（约 60Hz 覆盖写；关闭时写 null；宿主没开陀螺仪时
+   这个全局根本不存在）。这里只做一层叠加：不写 lookY/lookP —— 那两个变量在非
+   拖动时每帧缓动回 0，写进去会被自动回正慢慢吃掉。做法是先让原逻辑算完相机基础
+   姿态，再把陀螺仪旋转 premultiply 上去（世界空间叠加，不依赖相机自身欧拉顺序）。 */
+var _gyroQ = null, _gyroE = null, _gyroTmpE = null;
+var gyroYaw = 0, gyroPitch = 0, gyroRoll = 0;
+
+/* 偏航折回 (-π, π]：转一整圈也不会越滚越大 */
+function gyroWrapPi(a){
+  if (!isFinite(a)) return 0;
+  a = (a + PI) % (PI * 2);
+  if (a < 0) a += PI * 2;
+  return a - PI;
+}
+
+function applyStageGyro(cam, dt){
+  if (!_gyroQ){
+    _gyroQ = new THREE.Quaternion();
+    _gyroE = new THREE.Euler(0, 0, 0, "ZXY");
+    _gyroTmpE = new THREE.Euler(0, 0, 0, "ZXY");
+  }
+  var q = window.__stageViewQuat;
+  var usable = false;
+  if (q){
+    var qx = fin(q.x, 0), qy = fin(q.y, 0), qz = fin(q.z, 0), qw = fin(q.w, 0);
+    var n = Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+    if (isFinite(n) && n > 1e-6){
+      /* 和 542 同一套 ZXY 欧拉分解：x=俯仰、y=偏航、z=翻滚 */
+      _gyroTmpE.setFromQuaternion(_gyroQ.set(qx / n, qy / n, qz / n, qw / n), "ZXY");
+      usable = true;
+    }
+  }
+  if (dragOn){
+    /* 用户正在拖动：暂停陀螺仪输入，保持当前叠加值不变，松手后再继续跟随 */
+  } else if (usable){
+    /* 正常跟手，时间常数约 45ms；宿主重新校准时角度突变也走这里，不会瞬跳 */
+    var ease = 1 - Math.exp(-dt * 22);
+    gyroYaw += gyroWrapPi(_gyroTmpE.y - gyroYaw) * ease;
+    gyroPitch += (_gyroTmpE.x - gyroPitch) * ease;
+    gyroRoll += (_gyroTmpE.z - gyroRoll) * ease;
+  } else {
+    /* 陀螺仪关闭 / 全局不存在：约 300ms 阻尼回正，不瞬间跳回正面 */
+    var back = 1 - Math.exp(-dt * 10);
+    gyroYaw += (0 - gyroYaw) * back;
+    gyroPitch += (0 - gyroPitch) * back;
+    gyroRoll += (0 - gyroRoll) * back;
+    if (Math.abs(gyroYaw) < 1e-4) gyroYaw = 0;
+    if (Math.abs(gyroPitch) < 1e-4) gyroPitch = 0;
+    if (Math.abs(gyroRoll) < 1e-4) gyroRoll = 0;
+  }
+  /* 没有陀螺仪、不在拖动、叠加已归零：完全跳过，不影响正常播放 */
+  if (!usable && !dragOn && gyroYaw === 0 && gyroPitch === 0 && gyroRoll === 0) return;
+  /* 复用临时欧拉/四元数，每帧只多一次 setFromEuler + premultiply，不建对象 */
+  _gyroQ.setFromEuler(_gyroE.set(gyroPitch, gyroYaw, gyroRoll, "ZXY"));
+  cam.quaternion.premultiply(_gyroQ);
+}
+
 /* ---------- 12) 动画更新 ---------- */
 function updateCamera(dt){
   var d = dt || 0.016;
@@ -1698,6 +1757,8 @@ function updateCamera(dt){
       "YXZ"
     );
   }
+  /* 2026-11-17 陀螺仪叠加：必须放在相机基础姿态算完之后、建矩阵之前 */
+  applyStageGyro(camera, d);
   camera.updateMatrixWorld();
 }
 

@@ -1,607 +1,1003 @@
 /* ==========================================================================
    LIZI · 歌单搬运浮层（migrate.css）
    --------------------------------------------------------------------------
-   照 tokens.css 的语言：纸白、墨黑、1px 细线、极小圆角、等宽数字。
-   强调色只做一处角色：当前选中的来源 / 目标，以及轨道上正在走的那一段。
-   没有大块渐变、没有投影堆叠，也没有 backdrop-filter —— 浮层只需要安静地
-   把「左边 → 轨道 → 右边」这件事摆清楚。
+   暖纸底、墨色字、一个强调色。桌面下 01 是左右两栏（左平台 / 右歌单），
+   其余三段纵向排列：搬到哪儿 → 开始搬 → 核对。平台 / 歌单 / 目标都用
+   大方块卡片，按钮是实心块，不用「小字 + 下划线」当按钮。
+
+   动效只做必要的位移：卡片 hover 上浮、小货车 translateX 跟进度。
+   没有 backdrop-filter，没有粒子 / 闪烁 / 循环动画。
    ========================================================================== */
 
 .mig {
+  /* 暖纸色板：不跟着全局 --paper 的冷灰走，避免整页发白 */
+  --mig-paper: #f7f2e8;
+  --mig-paper-2: #fdf8ee;
+  --mig-card: #fffaf1;
+  --mig-ink: #2b241b;
+  --mig-ink-2: #6f6455;
+  --mig-ink-3: #958875;
+  --mig-line: #e6dbc8;
+  --mig-line-strong: #d6c7ae;
+  --mig-accent: var(--accent, #e2453c);
+  --mig-accent-ink: #b4372e;
+  --mig-accent-soft: #fbe4da;
+  --mig-orange: #d9853f;
+  --mig-orange-soft: #f7ddc0;
+  --mig-green: #4e7c55;
+  --mig-green-soft: #e6efe2;
+  --mig-red: #a64b3f;
+  --mig-red-soft: #f6e3de;
+
   position: fixed;
-  inset: 0;
+  top: 0; right: 0; bottom: 0; left: 0;
   z-index: 260;
   display: grid;
   place-items: center;
   padding: var(--sp-6);
-  background: oklch(21% 0.022 270 / 0.34);
+  background: rgba(43, 34, 22, 0.44);
 }
-.mig[hidden] { display: none; }
 
+.mig[hidden] { display: none; }
 .mig *,
 .mig *::before,
 .mig *::after { box-sizing: border-box; }
+.mig [hidden] { display: none !important; }
+
+.mig button,
+.mig input,
+.mig select { font: inherit; }
+.mig button { -webkit-tap-highlight-color: transparent; }
+.mig :focus-visible {
+  outline: 3px solid var(--mig-accent);
+  outline-offset: 2px;
+}
 
 .mig__sheet {
-  width: min(1080px, 100%);
-  max-height: 88vh;
-  /* dvh 兜住移动端地址栏：vh 会按「地址栏收起」算高，矮窗口下底栏会被裁出视口。
-     min() 保留 88vh 上限，同时保证浮层四周还有 padding 的余量。 */
-  max-height: min(88vh, calc(100dvh - var(--sp-6) - var(--sp-6)));
-  min-height: 0;          /* 作为 grid 子项时允许被压缩，滚动交给 .mig__scroll */
+  width: min(1240px, 100%);
+  max-height: 92vh;
+  /* dvh 兜住移动端地址栏：vh 会按「地址栏收起」算高，矮窗口下底栏会被裁出视口 */
+  max-height: min(92vh, calc(100dvh - var(--sp-6) - var(--sp-6)));
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--paper-2);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
+  background: var(--mig-paper);
+  color: var(--mig-ink);
+  border: 1px solid rgba(74, 56, 32, 0.14);
+  border-radius: 26px;
+  box-shadow: 0 30px 80px rgba(43, 34, 22, 0.28);
   overflow: hidden;
 }
 
+/* ---------- 顶部 ---------- */
 .mig__head {
+  position: relative;
   flex: none;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  padding: var(--sp-5) var(--sp-6) var(--sp-4);
-  border-bottom: 1px solid var(--rule);
-}
-.mig__t {
-  margin: 0 0 2px;
-  font-size: 20px;
-  font-weight: var(--fw-semi);
-  letter-spacing: -0.02em;
-  color: var(--ink);
-}
-.mig__sub {
-  margin: 0;
-  font-size: var(--text-xs);
-  line-height: 1.55;
-  color: var(--ink-3);
-}
-.mig__x {
-  flex: none;
-  width: 30px; height: 30px;
-  display: grid; place-items: center;
-  border: 1px solid transparent;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--ink-3);
-  cursor: pointer;
-}
-.mig__x:hover { border-color: var(--rule); color: var(--ink); }
-.mig__x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-/* ---------- 滚动区：搬运台 + 核对 ---------- */
-.mig__scroll {
-  flex: 1;
-  min-height: 0;          /* 关键：没有它 flex 子项会被内容撑高，底栏就会被推出视口 */
-  overflow: auto;
-  overscroll-behavior: contain;   /* 滚到底不把外层页面一起滚走 */
-  padding: var(--sp-5) var(--sp-6);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
-.mig__board {
-  display: grid;
-  grid-template-columns: 272px minmax(190px, 1fr) 252px;
-  gap: var(--sp-4);
-  align-items: stretch;
-  min-height: 0;          /* 矮窗口下允许整块随 .mig__scroll 一起滚，而不是把 sheet 顶开 */
-}
-
-.mig__col {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
-
-.mig__col-h,
-.mig__row-h,
-.mig__track-h {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--text-sm);
-  color: var(--ink);
+  gap: var(--sp-5);
+  padding: 24px 30px 20px;
+  border-bottom: 1px solid var(--mig-line);
 }
-.mig__col-h b,
-.mig__row-h b,
-.mig__track-h b { font-weight: var(--fw-semi); }
-.mig__k {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.08em;
-  color: var(--ink-3);
+
+.mig__head-tx {
+  flex: 1;
+  min-width: 0;
+}
+
+.mig__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 34px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--mig-ink);
+}
+
+.mig__sub {
+  margin: 8px 0 0;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--mig-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mig__head-art {
+  flex: none;
+  width: 150px;
+  height: 88px;
+  color: var(--mig-orange);
+  pointer-events: none;
+}
+.mig__head-art svg { width: 100%; height: 100%; display: block; }
+
+.mig__x {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--mig-line-strong);
+  border-radius: 14px;
+  background: var(--mig-card);
+  color: var(--mig-ink-2);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.mig__x:hover { transform: translateY(-1px); color: var(--mig-ink); }
+
+/* ---------- 滚动区 ---------- */
+.mig__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 26px 30px 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+/* ---------- 滚动条：暖纸滑钮 ---------- */
+/* 四个滚动容器共用：整张 sheet（.mig__scroll）、桌面左栏（.mig__pick-left）、
+   歌单网格（.mig__plgrid）、04 结果列表（.mig__rows）。
+   只走 ::-webkit-scrollbar：Chromium 一旦看到 scrollbar-width / scrollbar-color，
+   就会丢弃下面的 webkit 伪元素样式，系统灰条（带上下箭头）会顶回来。
+   标准属性只给不认 webkit 伪元素的引擎兜底，必须关在 @supports 里。 */
+.mig__scroll::-webkit-scrollbar,
+.mig__pick-left::-webkit-scrollbar,
+.mig__plgrid::-webkit-scrollbar,
+.mig__rows::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+  background: transparent;
+}
+.mig__scroll::-webkit-scrollbar-button,
+.mig__scroll::-webkit-scrollbar-button:start,
+.mig__scroll::-webkit-scrollbar-button:end,
+.mig__pick-left::-webkit-scrollbar-button,
+.mig__pick-left::-webkit-scrollbar-button:start,
+.mig__pick-left::-webkit-scrollbar-button:end,
+.mig__plgrid::-webkit-scrollbar-button,
+.mig__plgrid::-webkit-scrollbar-button:start,
+.mig__plgrid::-webkit-scrollbar-button:end,
+.mig__rows::-webkit-scrollbar-button,
+.mig__rows::-webkit-scrollbar-button:start,
+.mig__rows::-webkit-scrollbar-button:end { display: none; width: 0; height: 0; }
+.mig__scroll::-webkit-scrollbar-track-piece,
+.mig__scroll::-webkit-scrollbar-track,
+.mig__scroll::-webkit-scrollbar-corner,
+.mig__pick-left::-webkit-scrollbar-track-piece,
+.mig__pick-left::-webkit-scrollbar-track,
+.mig__pick-left::-webkit-scrollbar-corner,
+.mig__plgrid::-webkit-scrollbar-track-piece,
+.mig__plgrid::-webkit-scrollbar-track,
+.mig__plgrid::-webkit-scrollbar-corner,
+.mig__rows::-webkit-scrollbar-track-piece,
+.mig__rows::-webkit-scrollbar-track,
+.mig__rows::-webkit-scrollbar-corner { background: transparent; }
+.mig__scroll::-webkit-scrollbar-thumb,
+.mig__pick-left::-webkit-scrollbar-thumb,
+.mig__plgrid::-webkit-scrollbar-thumb,
+.mig__rows::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-color: var(--mig-line-strong);
+  background-clip: padding-box;
+}
+.mig__scroll::-webkit-scrollbar-thumb:hover,
+.mig__pick-left::-webkit-scrollbar-thumb:hover,
+.mig__plgrid::-webkit-scrollbar-thumb:hover,
+.mig__rows::-webkit-scrollbar-thumb:hover {
+  background-color: var(--mig-ink-3);
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  .mig__scroll,
+  .mig__pick-left,
+  .mig__plgrid,
+  .mig__rows {
+    scrollbar-width: thin;
+    scrollbar-color: var(--mig-ink-3) transparent;
+  }
+}
+
+.mig__sec { min-width: 0; }
+
+.mig__sec-h {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.mig__num {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mig-accent-soft);
+  color: var(--mig-accent-ink);
+  font-size: 15px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+.mig__sec-t {
+  margin: 0;
+  font-size: 23px;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--mig-ink);
+}
+
 .mig__hint {
   margin-left: auto;
   min-width: 0;
-  font-size: 10.5px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: var(--mig-ink-2);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-/* ---------- 来源：网易云平台卡 ---------- */
-.mig__plat {
+/* ---------- 01 来源平台卡 ---------- */
+.mig__sources {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.mig__src {
+  position: relative;
+  min-width: 0;
+  min-height: 120px;
+  aspect-ratio: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--sp-3);
-  padding: 8px 10px;
-  border: 1px solid var(--rule);
-  border-radius: 5px;
-  background: var(--paper-2);
+  justify-content: center;
+  gap: 7px;
+  padding: 12px 8px;
+  border: 2px solid transparent;
+  border-radius: 18px;
+  background: var(--mig-card);
+  color: var(--mig-ink);
+  box-shadow: 0 1px 0 rgba(74, 56, 32, 0.06);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
 }
-.mig__plat-mark {
-  flex: none;
-  width: 30px; height: 30px;
-  display: grid; place-items: center;
-  border: 1px solid var(--rule);
-  border-radius: 3px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-2);
+.mig__src:hover { transform: translateY(-2px); }
+/* 选中态只留右上角小勾，不再给整张卡描大边框 */
+.mig__src:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
 }
-.mig__plat-tx {
+
+.mig__src-logo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  border-radius: 12px;
+}
+.mig__src b {
+  max-width: 100%;
+  font-size: 16px;
+  line-height: 1.2;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mig__src-status {
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--mig-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mig__src-check,
+.mig__tcard-check,
+.mig__pl-check {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 24px;
+  height: 24px;
+  display: none;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mig-accent);
+  color: #fff;
+}
+.mig__src.is-on .mig__src-check,
+.mig__tcard.is-on .mig__tcard-check,
+.mig__pl.is-on .mig__pl-check { display: grid; }
+
+.mig__sources.is-locked .mig__src { pointer-events: none; }
+
+/* ---------- 01 来源 / 歌单两栏 ---------- */
+.mig__pick { display: block; }
+.mig__pick-left { min-width: 0; }
+
+/* ---------- 歌单卡网格 ---------- */
+.mig__picker { margin-top: 16px; }
+
+.mig__plgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+  align-content: start;
+  padding: 2px;
+}
+
+.mig__pl {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 1px;
-}
-.mig__plat-tx b {
-  font-size: 12.5px;
-  font-weight: var(--fw-semi);
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mig__plat-tx i {
-  font-style: normal;
-  font-size: 10px;
-  color: var(--ink-3);
-}
-.mig__plat-tag {
-  margin-left: auto;
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  color: var(--ink-3);
-}
-
-/* ---------- 歌单列表 ---------- */
-.mig__list {
-  flex: 1;
-  min-height: 0;
-  max-height: 318px;
-  overflow: auto;
-  border: 1px solid var(--rule);
-  border-radius: 5px;
-  background: var(--paper-2);
-}
-.mig__pl {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 7px 9px;
-  border: 0;
-  border-bottom: 1px solid var(--rule);
-  background: transparent;
-  color: inherit;
-  font: inherit;
+  gap: 8px;
+  padding: 10px;
+  border: 2px solid transparent;
+  border-radius: 16px;
+  background: var(--mig-card);
+  color: var(--mig-ink);
   text-align: left;
   cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-out);
+  transition: transform var(--dur-fast) var(--ease-out);
 }
-.mig__pl:last-child { border-bottom: 0; }
-.mig__pl:hover { background: oklch(21% 0.022 270 / 0.035); }
-.mig__pl:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-/* 选中态要一眼看出来：底色 + 左侧 2px 强调条（不是只换个很浅的灰） */
-.mig__pl.is-on {
-  background: oklch(21% 0.022 270 / 0.07);
-  box-shadow: inset 2px 0 0 var(--accent);
+.mig__pl:hover { transform: translateY(-2px); }
+/* 选中态只留封面右上角小勾 */
+.mig__pl:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
 }
-.mig__pl.is-on b { color: var(--accent-ink); }
-/* 匹配/写入期间来源列表锁住，视觉上说明「这会儿不能换」 */
-.mig__list.is-locked .mig__pl { pointer-events: none; opacity: 0.55; }
 
 .mig__pl-cv {
   position: relative;
-  width: 38px; height: 38px;
-  overflow: hidden;
+  min-height: 120px;
+  aspect-ratio: 1;
   display: grid;
   place-items: center;
-  border: 1px solid var(--rule);
-  border-radius: 3px;
-  background: var(--paper-2);
-}
-.mig__pl-cv i {
-  font-style: normal;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--ink-3);
+  overflow: hidden;
+  border-radius: 12px;
+  background: #efe4d2;
+  color: var(--mig-ink-3);
+  font-size: 30px;
+  font-weight: 600;
 }
 .mig__pl-cv img {
   position: absolute;
-  inset: 0;
-  width: 100%; height: 100%;
+  top: 0; right: 0; bottom: 0; left: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
 }
-.mig__pl-tx {
+.mig__pl-cv i { font-style: normal; }
+
+.mig__pl b {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-.mig__pl-tx b {
-  font-size: 12px;
-  font-weight: var(--fw-body);
-  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 600;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-.mig__pl-tx span {
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-.mig__empty {
-  margin: 0;
-  padding: var(--sp-4);
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  color: var(--ink-3);
+.mig__pl-n {
+  font-size: 13px;
+  line-height: 1.3;
+  color: var(--mig-ink-2);
 }
 
-/* ---------- 中间：传输轨道 ---------- */
-.mig__track {
-  position: relative;
-  min-width: 0;           /* grid 子项默认 min-width:auto，窄屏会被内容撑破 */
-  min-height: 212px;
+.mig__pl-tag {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--mig-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.mig__plgrid.is-locked .mig__pl { pointer-events: none; }
+
+/* ---------- 空态 / 登录提示 ---------- */
+.mig__empty {
+  grid-column: 1 / -1;
+  min-height: 180px;
   display: flex;
   flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-  background: oklch(21% 0.022 270 / 0.018);
+  gap: 12px;
+  padding: 26px;
+  border: 2px dashed var(--mig-line-strong);
+  border-radius: 18px;
+  background: rgba(255, 250, 241, 0.6);
+  text-align: center;
 }
-.mig__track-h { margin-bottom: 2px; }
-
-.mig__lane {
-  position: relative;
-  height: 92px;
+.mig__empty-art {
+  width: 64px;
+  height: 52px;
+  color: var(--mig-ink-3);
+}
+.mig__empty-art svg { width: 100%; height: 100%; display: block; }
+.mig__empty p {
   margin: 0;
+  max-width: 520px;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--mig-ink-2);
 }
-.mig__lane::before,
-.mig__lane::after {
-  content: "";
-  position: absolute;
-  top: 62%;
-  width: 5px; height: 5px;
-  border: 1px solid var(--ink-2);
-  border-radius: 50%;
-  background: var(--paper-2);
-  transform: translate(-50%, -50%);
-}
-.mig__lane::before { left: 0; }
-.mig__lane::after { left: 100%; }
 
-.mig__rail {
-  position: absolute;
-  left: 0; right: 0;
-  top: 62%;
-  height: 1px;
-  background: var(--rule);
+/* ---------- 酷我搜索 ---------- */
+.mig__search {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
 }
-.mig__rail-fill {
-  height: 1px;
-  width: 100%;
-  background: var(--accent);
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform var(--dur-med) var(--ease-out);
+.mig__search-box {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: block;
 }
-.mig__track.is-done .mig__rail-fill { background: var(--ink); }
-
-/* 状态机在轨道上的三种可见态：空闲（灰）→ 传输中（强调色）→ 完成/失败 */
-.mig__track.is-run { border-color: var(--accent); }
-.mig__track.is-run .mig__note { color: var(--ink-2); }
-.mig__track.is-err { border-color: var(--accent); }
-
-/* 小文件块：CSS 动画沿轨道飞过，带一条淡尾迹；JS 只负责生成和回收 */
-.mig__file {
+.mig__search-box svg {
   position: absolute;
-  top: 62%;
-  left: 0;
-  width: 12px; height: 15px;
-  border: 1px solid var(--ink);
-  border-radius: 2px;
-  background: var(--paper-2);
-  transform: translate(-50%, -50%);
-  animation: mig-fly 1s var(--ease-inout) forwards;
+  left: 16px;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  transform: translateY(-50%);
+  color: var(--mig-ink-3);
   pointer-events: none;
 }
-.mig__file::after {
-  content: "";
-  position: absolute;
-  right: calc(100% + 1px);
-  top: 50%;
-  width: 20px; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--ink));
-  opacity: 0.26;
+.mig__search input {
+  width: 100%;
+  height: 50px;
+  padding: 0 16px 0 50px;
+  border: 2px solid var(--mig-line-strong);
+  border-radius: 14px;
+  background: var(--mig-card);
+  color: var(--mig-ink);
+  font-size: 16px;
 }
-@keyframes mig-fly {
-  0%   { left: 0;    transform: translate(-50%, -50%) rotate(-4deg) scale(0.7); opacity: 0; }
-  10%  { opacity: 1; }
-  50%  { left: 50%;  transform: translate(-50%, -150%) rotate(2deg) scale(1); }
-  92%  { opacity: 1; }
-  100% { left: 100%; transform: translate(-50%, -50%) rotate(5deg) scale(0.75); opacity: 0; }
-}
-
-.mig__note {
-  margin: 0;
-  min-height: 15px;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-
-/* 完成卡：一次搬运结束就收束成这一张 */
-.mig__done {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 7px 10px;
-  border: 1px solid var(--ink);
-  border-radius: 4px;
-  background: var(--paper-2);
-  animation: mig-done-in var(--dur-med) var(--ease-out);
-}
-.mig__done[hidden] { display: none; }
-.mig__done-k {
+.mig__search input::placeholder { color: var(--mig-ink-3); }
+.mig__search input:focus { border-color: var(--mig-accent); }
+.mig__search-go {
   flex: none;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  color: var(--accent-ink);
+  height: 50px;
+  padding: 0 24px;
+  border: 2px solid var(--mig-ink);
+  border-radius: 14px;
+  background: var(--mig-ink);
+  color: var(--mig-paper);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
 }
-.mig__done-t {
-  min-width: 0;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--ink);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mig__track.is-err .mig__done { border-color: var(--accent); }
-@keyframes mig-done-in {
-  from { opacity: 0; transform: translateY(4px) scale(0.98); }
-  to   { opacity: 1; transform: none; }
+.mig__search-go:hover { transform: translateY(-1px); }
+.mig__search-go:disabled { opacity: 0.6; cursor: default; transform: none; }
+
+.mig__picker-note {
+  margin: 0 0 12px;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--mig-ink-2);
 }
 
-/* ---------- 目标：五张大卡 ---------- */
-.mig__targets {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* ---------- 来源 → 目标的箭头 ---------- */
+.mig__flow {
+  display: grid;
+  place-items: center;
+  margin: -14px 0 -8px;
+  color: var(--mig-ink-3);
 }
+.mig__flow svg {
+  width: 38px;
+  height: 38px;
+  padding: 7px;
+  border: 2px solid var(--mig-line);
+  border-radius: 50%;
+  background: var(--mig-card);
+}
+
+/* ---------- 02 目标平台卡 ---------- */
+.mig__targets {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
 .mig__tcard {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "n tag" "d d";
-  gap: 1px var(--sp-2);
-  padding: 9px 11px;
-  border: 1px solid var(--rule);
-  border-radius: 5px;
-  background: var(--paper-2);
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color var(--dur-fast) var(--ease-out),
-              background var(--dur-fast) var(--ease-out);
-}
-.mig__tcard:hover { border-color: oklch(21% 0.022 270 / 0.24); }
-.mig__tcard:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.mig__tcard:disabled { opacity: 0.5; cursor: default; }
-.mig__tcard:disabled:hover { border-color: var(--rule); }
-.mig__tcard.is-on {
-  border-color: var(--accent);
-  background: oklch(62% 0.22 12 / 0.04);
-}
-.mig__tcard-n {
-  grid-area: n;
-  font-size: 13px;
-  font-weight: var(--fw-semi);
-  color: var(--ink);
-}
-.mig__tcard-tag {
-  grid-area: tag;
-  align-self: center;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  color: var(--ink-3);
-  white-space: nowrap;
-}
-.mig__tcard.is-on .mig__tcard-tag { color: var(--accent-ink); }
-.mig__tcard-d {
-  grid-area: d;
-  font-size: 10px;
-  color: var(--ink-3);
-}
-
-/* ---------- 核对（横跨整行） ---------- */
-.mig__step {
-  padding: var(--sp-4) var(--sp-5);
-  border: 1px solid var(--rule);
-  border-radius: 6px;
-}
-.mig__step[hidden] { display: none; }
-.mig__row-h { margin-bottom: var(--sp-3); }
-
-.mig__table {
-  max-height: 34vh;
-  overflow: auto;
-  border: 1px solid var(--rule);
-  border-radius: 3px;
-}
-.mig__tr {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.3fr) 76px;
-  align-items: center;
-  gap: var(--sp-3);
-  padding: 7px var(--sp-3);
-  border-bottom: 1px solid var(--rule);
-  font-size: var(--text-xs);
-}
-.mig__tr:last-child { border-bottom: 0; }
-.mig__tr-src { min-width: 0; }
-.mig__tr-src b { display: block; font-weight: var(--fw-body); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mig__tr-src span { display: block; font-size: 10.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mig__tr-pick { min-width: 0; }
-.mig__sel {
-  width: 100%;
-  height: 26px;
-  padding: 0 6px;
-  border: 1px solid var(--rule);
-  border-radius: 3px;
-  background: var(--paper-2);
-  color: var(--ink-2);
-  font-size: 11px;
-  font-family: inherit;
-}
-.mig__sel:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.mig__tr-tag {
-  text-align: right;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  letter-spacing: 0.04em;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
-}
-.mig__tr.is-auto .mig__tr-tag { color: var(--ink-2); }
-.mig__tr.is-review .mig__tr-tag { color: var(--accent-ink); }
-.mig__tr.is-miss .mig__tr-src b { color: var(--ink-3); text-decoration: line-through; text-decoration-thickness: 1px; }
-.mig__none { color: var(--ink-3); font-size: 11px; }
-
-/* ---------- 底栏 ---------- */
-.mig__foot {
-  flex: none;
-  display: flex;
-  flex-wrap: wrap;        /* 窄窗口下按钮换行，而不是被横向裁掉 */
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-3) var(--sp-6);
-  border-top: 1px solid var(--rule);
-  background: var(--paper-2);
-}
-.mig__btn {
-  height: 32px;
-  padding: 0 var(--sp-4);
-  border: 1px solid var(--ink);
-  border-radius: 4px;
-  background: var(--ink);
-  color: var(--paper-2);
-  font-family: inherit;
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.mig__btn:disabled { opacity: 0.4; cursor: default; }
-.mig__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.mig__btn--ghost { background: transparent; color: var(--ink-2); border-color: var(--rule); }
-.mig__btn--ghost:hover { color: var(--ink); border-color: oklch(21% 0.022 270 / 0.22); }
-.mig__btn--ghost[hidden] { display: none; }
-.mig__msg {
-  margin-left: auto;
   min-width: 0;
-  font-size: 10.5px;
-  line-height: 1.5;
-  color: var(--ink-3);
-  font-variant-numeric: tabular-nums;
+  min-height: 140px;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 10px;
+  border: 2px solid transparent;
+  border-radius: 18px;
+  background: var(--mig-card);
+  color: var(--mig-ink);
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.mig__tcard:hover { transform: translateY(-2px); }
+/* 选中态只留右上角小勾 */
+.mig__tcard:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
+.mig__tcard-logo {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.mig__tcard b {
+  max-width: 100%;
+  font-size: 16px;
+  line-height: 1.2;
+  font-weight: 600;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.mig__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
   white-space: nowrap;
+}
+.mig__badge--write {
+  background: var(--mig-accent);
+  color: #fff;
+}
+.mig__badge--export {
+  background: var(--mig-ink);
+  color: var(--mig-paper);
+}
+.mig__tcard-d {
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--mig-ink-2);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mig__targets.is-locked .mig__tcard { pointer-events: none; }
+
+/* ---------- 03 行动卡 ---------- */
+.mig__action {
+  position: relative;
+  min-height: 200px;
+  padding: 22px 24px 18px;
+  border: 2px solid var(--mig-line-strong);
+  border-radius: 22px;
+  background: var(--mig-card);
+  overflow: hidden;
+}
+.mig__action.is-run { border-color: var(--mig-orange); }
+.mig__action.is-done { border-color: var(--mig-green); }
+.mig__action.is-err { border-color: var(--mig-red); }
+
+.mig__road {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 56px;
+  height: 70px;
+  color: var(--mig-line-strong);
+}
+.mig__road svg { width: 100%; height: 100%; display: block; }
+
+.mig__truck {
+  position: absolute;
+  left: 24px;
+  bottom: 67px;
+  width: 88px;
+  height: 60px;
+  color: var(--mig-orange);
+  will-change: transform;
+  transition: transform 260ms var(--ease-out);
+}
+.mig__truck svg { width: 100%; height: 100%; display: block; }
+
+.mig__boxes {
+  position: absolute;
+  right: 28px;
+  bottom: 64px;
+  width: 76px;
+  height: 56px;
+  color: var(--mig-orange);
+  opacity: 0.9;
+}
+.mig__boxes svg { width: 100%; height: 100%; display: block; }
+
+.mig__progress {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 16px;
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--mig-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- 04 筛选胶囊 ---------- */
+.mig__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.mig__filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 18px;
+  border: 2px solid var(--mig-line-strong);
+  border-radius: 999px;
+  background: var(--mig-card);
+  color: var(--mig-ink-2);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.mig__filter:hover { transform: translateY(-1px); color: var(--mig-ink); }
+.mig__filter[aria-pressed="true"] {
+  background: var(--mig-ink);
+  border-color: var(--mig-ink);
+  color: var(--mig-paper);
+}
+.mig__filter-n {
+  min-width: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+/* ---------- 04 结果大行 ---------- */
+.mig__rows {
+  max-height: 52vh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 2px solid var(--mig-line);
+  border-radius: 18px;
+  background: var(--mig-card);
+}
+.mig__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.35fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 64px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--mig-line);
+}
+.mig__row:last-child { border-bottom: 0; }
+
+.mig__row-src { min-width: 0; }
+.mig__row-src b {
+  display: block;
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--mig-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mig__row-src span {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--mig-ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mig__row-pick { min-width: 0; }
+.mig__sel {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--mig-line-strong);
+  border-radius: 12px;
+  background: var(--mig-paper);
+  color: var(--mig-ink);
+  font-size: 14px;
+  cursor: pointer;
+}
+.mig__sel:focus { border-color: var(--mig-accent); }
+.mig__nomatch {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--mig-ink-3);
+}
+
+.mig__pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 96px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mig__pill svg { flex: none; }
+.mig__pill--auto { background: var(--mig-green-soft); color: var(--mig-green); }
+.mig__pill--review { background: var(--mig-orange-soft); color: #8f4e12; }
+.mig__pill--miss { background: var(--mig-red-soft); color: var(--mig-red); }
+
+.mig__row.is-miss .mig__row-src b {
+  color: var(--mig-ink-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* ---------- 底部操作条 ---------- */
+.mig__foot {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 14px 30px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--mig-line);
+  background: var(--mig-paper);
+}
+
+.mig__foot-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.mig__btn {
+  min-height: 44px;
+  padding: 0 20px;
+  border: 2px solid var(--mig-line-strong);
+  border-radius: 14px;
+  background: var(--mig-card);
+  color: var(--mig-ink);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.mig__btn:hover { transform: translateY(-1px); }
+.mig__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+.mig__btn--primary {
+  min-height: 50px;
+  padding: 0 28px;
+  border-color: var(--mig-accent);
+  background: var(--mig-accent);
+  color: #fff;
+  font-size: 16px;
+}
+.mig__btn--primary:hover {
+  background: var(--mig-accent-ink);
+  border-color: var(--mig-accent-ink);
+}
+.mig__btn--retry { margin-top: 2px; }
+
+.mig__msg {
+  flex: 1;
+  min-width: 160px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--mig-ink-2);
+  text-align: right;
 }
 
 /* ---------- 响应式 ---------- */
-@media (max-width: 1020px) {
-  .mig__board {
-    grid-template-columns: 1fr;
-    gap: var(--sp-3);
-  }
-  .mig__track { min-height: 150px; }
-  .mig__lane { height: 70px; }
-  .mig__list { max-height: 220px; }
-  .mig__targets {
+/* 桌面：01 改成左右两栏，平台卡和歌单同屏可见，各自滚各自的 */
+@media (min-width: 1000px) {
+  .mig__pick {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: clamp(360px, 32%, 410px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 22px;
+    /* vh 先兜底，dvh 再按实际视口修正。
+       减 300 而不是 330：762px 高的窗口下左栏 3 行平台卡约 384px，
+       给到 401px 才不会被裁出滚动条。 */
+    height: clamp(320px, calc(92vh - 300px), 560px);
+    height: clamp(320px, calc(92dvh - 300px), 560px);
+    min-height: 0;
+  }
+  .mig__pick-left {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: 2px;
+  }
+  .mig__sources {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  /* 左栏变窄后卡片宽度约 118px，基础规则的 min-height:120px 会把三行撑出
+     左栏高度；桌面两栏里让 aspect-ratio 自己决定，三行正好落在可视区。 */
+  .mig__src { min-height: 0; }
+  .mig__picker {
+    margin-top: 0;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .mig__plgrid {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
   }
 }
 
-@media (max-width: 620px) {
+/* 窄屏：退回单列上下布局 */
+@media (max-width: 999px) {
+  .mig__targets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mig__plgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .mig__head-art { width: 120px; height: 72px; }
+}
+
+@media (max-width: 640px) {
   .mig { padding: 0; }
   .mig__sheet {
     width: 100%;
-    max-height: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
     border: 0;
     border-radius: 0;
   }
-  .mig__head,
-  .mig__scroll,
-  .mig__foot { padding-left: var(--sp-4); padding-right: var(--sp-4); }
-  .mig__targets { grid-template-columns: 1fr; }
-  .mig__tr { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 64px; }
-  .mig__foot { flex-wrap: wrap; }
-  .mig__msg {
-    flex-basis: 100%;
-    margin-left: 0;
-    white-space: normal;
+  .mig__head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 20px 18px 16px;
   }
+  .mig__head-art {
+    position: absolute;
+    right: 74px;
+    top: 18px;
+    width: 84px;
+    height: 56px;
+    opacity: 0.75;
+  }
+  .mig__x {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+  }
+  .mig__title { font-size: 28px; }
+  .mig__sub {
+    max-width: calc(100% - 8px);
+    font-size: 14px;
+  }
+  .mig__scroll {
+    padding: 20px 18px 24px;
+    gap: 24px;
+  }
+  .mig__sources,
+  .mig__targets,
+  .mig__plgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mig__sources { gap: 10px; }
+  .mig__src { min-height: 132px; }
+  .mig__src b { font-size: 15px; }
+  .mig__src-status { font-size: 13px; }
+  .mig__plgrid { max-height: none; }
+  .mig__search { flex-direction: column; }
+  .mig__search-go { width: 100%; }
+  .mig__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "src pill" "pick pick";
+    gap: 8px 12px;
+    padding: 12px 14px;
+  }
+  .mig__row-src { grid-area: src; }
+  .mig__row-pick { grid-area: pick; }
+  .mig__pill { grid-area: pill; min-width: 0; }
+  .mig__rows { max-height: none; }
+  .mig__foot {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+  .mig__foot-btns { width: 100%; }
+  .mig__btn { flex: 1 1 0; min-width: 0; padding: 0 14px; }
+  .mig__msg { min-width: 0; text-align: left; }
+  .mig__action { min-height: 180px; padding: 18px 16px 14px; }
+  .mig__road { bottom: 52px; height: 60px; }
+  .mig__truck { left: 16px; bottom: 58px; width: 70px; height: 48px; }
+  .mig__boxes { right: 16px; bottom: 58px; width: 60px; height: 44px; }
+  .mig__progress { left: 16px; right: 16px; bottom: 14px; font-size: 15px; }
+  .mig__flow { margin: -10px 0 -4px; }
 }
 
-/* 矮窗口：中间轨道和来源列表都可以缩，让底栏永远留在 sheet 里。
-   列表自己仍是独立滚动（max-height + overflow:auto），不会把整块顶长。 */
+/* 矮窗口：先把行动卡和头部收紧，底栏始终留在 sheet 里 */
 @media (max-height: 760px) {
-  .mig__scroll { padding-top: var(--sp-4); padding-bottom: var(--sp-4); }
-  .mig__track { min-height: 150px; }
-  .mig__lane { height: 64px; }
-  .mig__list { max-height: 220px; }
-  .mig__table { max-height: 26vh; }
+  .mig__head { padding-top: 18px; padding-bottom: 14px; }
+  .mig__scroll { padding-top: 20px; padding-bottom: 20px; gap: 22px; }
+  .mig__action { min-height: 170px; }
+  .mig__road { bottom: 50px; height: 60px; }
+  .mig__truck { bottom: 56px; }
+  .mig__boxes { bottom: 54px; }
+  .mig__rows { max-height: 42vh; }
 }
 
 @media (max-height: 600px) {
-  .mig__track { min-height: 120px; }
-  .mig__lane { height: 48px; }
-  .mig__list { max-height: 170px; }
-  .mig__table { max-height: 22vh; }
-  .mig__sub { display: none; }        /* 最矮的窗口里先让副标题让位给操作区 */
+  .mig__head-art { display: none; }
+  .mig__sub { display: none; }
+  .mig__action { min-height: 150px; }
+  .mig__rows { max-height: 36vh; }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .mig__src,
   .mig__pl,
   .mig__tcard,
-  .mig__rail-fill { transition: none; }
-  .mig__done { animation: none; }
-  .mig__file {
-    animation: none;
-    display: none;
-  }
+  .mig__btn,
+  .mig__x,
+  .mig__filter,
+  .mig__search-go,
+  .mig__truck { transition: none; }
+  .mig__src:hover,
+  .mig__pl:hover,
+  .mig__tcard:hover,
+  .mig__btn:hover,
+  .mig__x:hover,
+  .mig__filter:hover,
+  .mig__search-go:hover { transform: none; }
 }

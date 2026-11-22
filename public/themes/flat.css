@@ -1,0 +1,284 @@
+/* 扁平化 Flat Design · 2014
+ * 纯色、零阴影、零渐变、零模糊；Roboto 系、小号大写按钮、2–4px 圆角。
+ * 签名只有一条：分区标题一条纯蓝色块（白字），不加图标、不加装饰线。
+ * 依据：public/app.css 顶栏 161–270、设置标题 331–342、大厅分区标题 4891/5103、
+ *       浏览分组 1720、设置卡 8893、主按钮 1563–1568、文字按钮 461、
+ *       标签 1779/7430、设置页 hero 8755–8799；migrate.css 12–30/56–70。
+ */
+
+html[data-ui-theme="flat"] {
+  --fl-bar-pad: 5px 10px 6px;
+
+  /* 字体 */
+  --tm-font-display: Roboto, "Segoe UI", "Helvetica Neue", Arial,
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --tm-font-body: Roboto, "Segoe UI", "Helvetica Neue", Arial,
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --tm-font-mono: "Roboto Mono", "SFMono-Regular", ui-monospace, monospace;
+  --tm-display-weight: 500;
+  --tm-display-tracking: 0em;
+  --tm-display-transform: none;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 颜色 */
+  --tm-bg: #ffffff;
+  --tm-bg-pattern: none;
+  --tm-surface: #ffffff;
+  --tm-surface-2: #f5f5f5;
+  --tm-surface-3: #eeeeee;
+  --tm-ink: #212121;
+  --tm-ink-2: #616161;
+  --tm-ink-3: #757575;
+  --tm-accent: #1565c0;
+  --tm-accent-2: #2e7d32;
+  --tm-accent-ink: #ffffff;
+  --tm-line: #e0e0e0;
+  --tm-line-strong: #bdbdbd;
+  --tm-focus: #1565c0;
+
+  /* 形状 */
+  --tm-border-w: 1px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 4px;
+  --tm-radius-pill: 2px;
+  --tm-radius-input: 2px;
+  --tm-shadow: none;
+  --tm-shadow-sm: none;
+  --tm-shadow-inset: none;
+
+  /* 其他 */
+  --tm-card-bg: var(--tm-surface);
+  --tm-overlay-bg: rgba(255, 255, 255, .98);
+  --tm-scrim: rgba(0, 0, 0, .32);
+  --tm-filter: none;
+}
+
+/* 签名：分区标题做成一条纯蓝色块（白字），用色块分区，不用装饰线 */
+html[data-ui-theme="flat"] body:not(.is-stage) .setpage__h,
+html[data-ui-theme="flat"] body:not(.is-stage) .setgroup__h,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cell__h,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-feed__h,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-public__head,
+html[data-ui-theme="flat"] body:not(.is-stage) .track-group,
+html[data-ui-theme="flat"] body:not(.is-stage) .panel__label,
+html[data-ui-theme="flat"] body:not(.is-stage) .pg-sec__h,
+html[data-ui-theme="flat"] body:not(.is-stage) .ma-drawer__h,
+html[data-ui-theme="flat"] body:not(.is-stage) .recent__h,
+html[data-ui-theme="flat"] body:not(.is-stage) .searchgroup {
+  border: 0;
+  padding: var(--fl-bar-pad);
+  background: #1565c0;
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+/* 色块条右侧的计数 / 注记：跟着变白，不再用浅灰 */
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cell__h span,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-feed__h span,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-public__head span,
+html[data-ui-theme="flat"] body:not(.is-stage) .pg-sec__h span,
+html[data-ui-theme="flat"] body:not(.is-stage) .ma-drawer__h span {
+  color: rgba(255, 255, 255, .92);
+}
+
+/* 按钮：纯色矩形、小号大写、加字距；悬停加深约 8%，按下加深约 16%，
+   不位移、不投影、不发光。 */
+html[data-ui-theme="flat"] body:not(.is-stage) .btn,
+html[data-ui-theme="flat"] body:not(.is-stage) .setpage__act,
+html[data-ui-theme="flat"] body:not(.is-stage) .src-switch__b,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cta__btn,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-hero__ghost,
+html[data-ui-theme="flat"] body:not(.is-stage) .setpage__seg button {
+  border-radius: 2px;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .btn:hover,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cta__btn:hover {
+  transform: none;
+  filter: none;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .btn:active {
+  transform: none;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .setpage__act {
+  border: 0;
+  color: #1976d2;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .setpage__act:hover {
+  border: 0;
+  color: #1565c0;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .btn--primary,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cta__btn {
+  /* app.css:1563–1567 的主按钮渐变带 !important，只能同样用 !important 压过 */
+  background: #1565c0 !important;
+  color: #ffffff;
+  border: 0;
+  border-radius: 2px;
+  box-shadow: none;
+  filter: none;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .btn--primary:hover,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cta__btn:hover {
+  background: #145fae !important;
+  color: #ffffff;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .btn--primary:active,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cta__btn:active {
+  background: #1257a8 !important;
+  transform: none;
+}
+/* app.css:301–309 用 ID + !important 把设置页主按钮钉成黑色，这里同样用 ID 压回蓝色 */
+html[data-ui-theme="flat"] body:not(.is-stage) #view-settings .btn--primary {
+  background: #1565c0 !important;
+  color: #ffffff;
+  border-radius: 2px;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) #view-settings .btn--primary:hover {
+  background: #145fae !important;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) #view-settings .btn--primary:active {
+  background: #1257a8 !important;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-hero__play {
+  border-radius: 50%;
+  background-color: #1565c0;
+  background: #1565c0;
+  color: #ffffff;
+  box-shadow: none;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-hero__play:hover {
+  transform: none;
+  background: #145fae;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-hero__play:active {
+  background: #1257a8;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-hero.is-hover .hall-hero__play {
+  box-shadow: none;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-hero__ghost {
+  border-color: #ffffff;
+  color: #ffffff;
+}
+
+/* 局部补齐：去掉 app.css 硬编码的取色雾、上浮、投影、spotlight 和玻璃光效 */
+html[data-ui-theme="flat"] body:not(.is-stage) .track::after {
+  display: none;            /* 纯装饰伪元素：行右侧的模糊取色雾 */
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .dcard:hover .dcard__art,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-pl:hover .hall-pl__cover,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-tools__i:hover,
+html[data-ui-theme="flat"] body:not(.is-stage) .tools-page__card:hover {
+  transform: none;
+  box-shadow: none;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .dcard__art,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-thumb,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-pl__cover,
+html[data-ui-theme="flat"] body:not(.is-stage) .pg-ava,
+html[data-ui-theme="flat"] body:not(.is-stage) .setnav__item.is-on,
+html[data-ui-theme="flat"] body:not(.is-stage) .setpage__switch-knob {
+  box-shadow: none;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .setcard::before {
+  display: none;            /* 纯装饰伪元素：跟随鼠标的 spotlight */
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .setconsole__aurora {
+  background: none;
+  filter: none;
+  opacity: 0;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .setconsole__shiny {
+  background-image: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--ink);
+}
+/* 2014 的圆角只到 2–4px：把仍写死的大圆角控件收回来（主播放键保留圆形 FAB） */
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-tools__i,
+html[data-ui-theme="flat"] body:not(.is-stage) .tools-page__card,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-cta,
+html[data-ui-theme="flat"] body:not(.is-stage) .tool-card__ico,
+html[data-ui-theme="flat"] body:not(.is-stage) .tools-page__ico {
+  border-radius: 4px;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-hero__lock,
+html[data-ui-theme="flat"] body:not(.is-stage) .hall-pl__play,
+html[data-ui-theme="flat"] body:not(.is-stage) .icbtn {
+  border-radius: 2px;
+}
+
+/* 局部硬编码色：琥珀标签改蓝灰纯色小方块；圆角标签收到 2px */
+html[data-ui-theme="flat"] body:not(.is-stage) .track__flag {
+  border-radius: 2px;
+  background: #607d8b;
+  color: #ffffff;
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .marq__tag {
+  border-radius: 2px;
+  background: #607d8b;
+  color: #ffffff;
+  box-shadow: none;
+  text-transform: uppercase;
+}
+/* pages.css 的「我的专辑」自带两档冷灰，单独对齐扁平灰阶 */
+html[data-ui-theme="flat"] body:not(.is-stage) .ma {
+  --ma-ink-4: #757575;
+  --ma-rule-soft: #eeeeee;
+}
+
+/* 搬运浮层自带暖纸令牌，单独映射到白底 / 蓝灰阶 / 扁平色板 */
+html[data-ui-theme="flat"] body:not(.is-stage) .mig {
+  --mig-paper: #ffffff;
+  --mig-paper-2: #fafafa;
+  --mig-card: #ffffff;
+  --mig-ink: #212121;
+  --mig-ink-2: #616161;
+  --mig-ink-3: #757575;
+  --mig-line: #e0e0e0;
+  --mig-line-strong: #bdbdbd;
+  --mig-accent: #1565c0;
+  --mig-accent-ink: #1565c0;
+  --mig-accent-soft: #e3f2fd;
+  --mig-orange: #ff9800;
+  --mig-orange-soft: #fff3e0;
+  --mig-green: #4caf50;
+  --mig-green-soft: #e8f5e9;
+  --mig-red: #f44336;
+  --mig-red-soft: #ffebee;
+  background: rgba(0, 0, 0, .32);
+}
+html[data-ui-theme="flat"] body:not(.is-stage) .mig__sheet {
+  border-color: #e0e0e0;
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+/* 手机：色块条压薄一档、字距收紧，触屏页头不溢出 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="flat"] body:not(.is-stage) {
+    --fl-bar-pad: 4px 8px 5px;
+  }
+  html[data-ui-theme="flat"] body:not(.is-stage) .setpage__h,
+  html[data-ui-theme="flat"] body:not(.is-stage) .setgroup__h,
+  html[data-ui-theme="flat"] body:not(.is-stage) .hall-cell__h,
+  html[data-ui-theme="flat"] body:not(.is-stage) .hall-feed__h,
+  html[data-ui-theme="flat"] body:not(.is-stage) .hall-public__head,
+  html[data-ui-theme="flat"] body:not(.is-stage) .track-group,
+  html[data-ui-theme="flat"] body:not(.is-stage) .panel__label,
+  html[data-ui-theme="flat"] body:not(.is-stage) .pg-sec__h,
+  html[data-ui-theme="flat"] body:not(.is-stage) .ma-drawer__h,
+  html[data-ui-theme="flat"] body:not(.is-stage) .recent__h,
+  html[data-ui-theme="flat"] body:not(.is-stage) .searchgroup {
+    letter-spacing: .04em;
+  }
+}

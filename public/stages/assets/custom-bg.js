@@ -42,7 +42,17 @@
     { key: 'bg', label: '自定义背景', type: 'switch', def: false },
     { key: 'scrim', label: '壁纸暗化', type: 'range', min: 0, max: 0.9, step: 0.05, def: 0.45 }
   ];
-  var galleryItem = null;
+  /* 2026-11-23：同步就要有这一项。以前是 fetch 回来才 new，宿主在 ready 时
+     深拷贝一次 __stagePanel，壁纸库扫描慢/用户在扫描中点开设置时整行都不出现。
+     占位项「当前壁纸」本身可用，列表回来后再补齐。 */
+  var galleryItem = {
+    key: 'bgpick',
+    label: '选择壁纸',
+    type: 'gallery',
+    def: '',                 /* 空 = 还没选过；避免宿主 pushAll 默认值把背景打开 */
+    onSelect: { key: 'bg', value: true },  /* 声明：选图 = 打开「自定义背景」开关 */
+    items: [{ v: CURRENT, t: '当前 Wallpaper Engine 壁纸', thumb: '/api/wallpaper/thumb' }]
+  };
 
   function mergePanel(p) {
     if (!p || typeof p !== 'object') p = {};
@@ -57,13 +67,58 @@
     return p;
   }
 
-  /* 把异步 gallery 项塞进同一个 items 数组（宿主若持有该数组引用即可看到） */
+  /* 把 gallery 项塞进同一个 items 数组（宿主若持有该数组引用即可看到） */
   function appendGallery(p) {
     if (!galleryItem || !p || !Array.isArray(p.items)) return;
     for (var i = 0; i < p.items.length; i++) {
       if (p.items[i] && p.items[i].key === 'bgpick') return;
     }
     p.items.push(galleryItem);
+  }
+
+  /* ---- 宿主面板：列表晚回来时让已打开的面板重读一次 ---- */
+  function hostDoc() {
+    try {
+      if (window.parent && window.parent !== window && window.parent.document) return window.parent.document;
+    } catch (e) { /* 用户自制形态是不透明源 */ }
+    return null;
+  }
+
+  function refreshHostPanel() {
+    var doc = hostDoc();
+    if (!doc) return;
+    var box = doc.getElementById('stage-settings');
+    if (!box || !box.classList.contains('is-open')) return;
+    /* 用户正在四角取景编辑器里：别把面板关掉 */
+    if (doc.querySelector('.spnl-crop')) return;
+    var gal = doc.querySelector('#spnl-body .spnl__gal');
+    if (gal && gal.querySelectorAll('.spnl__galcard').length > 1) return;
+    var btn = doc.getElementById('stage-settings-btn');
+    if (!btn || btn.hidden) return;
+    btn.click();
+    setTimeout(function () { if (!btn.hidden) btn.click(); }, 60);
+  }
+
+  /* 宿主 gallery 点击只改 data + push；开关的 aria-checked 要等下次 render
+     才更新。选壁纸后宿主会推 bg=true，这里顺手把那一行点亮。 */
+  function syncHostControl(key, value) {
+    var doc = hostDoc();
+    var p = window.__stagePanel;
+    var list = (p && Array.isArray(p.items)) ? p.items : PANEL_ITEMS;
+    var item = null, i;
+    for (i = 0; i < list.length; i++) {
+      if (list[i] && list[i].key === key) { item = list[i]; break; }
+    }
+    if (!doc || !item) return;
+    var label = item.label || key;
+    var rows = doc.querySelectorAll('#spnl-body .spnl__row');
+    for (i = 0; i < rows.length; i++) {
+      var nameEl = rows[i].querySelector('.spnl__lab span');
+      if (!nameEl || nameEl.textContent !== label) continue;
+      var sw = rows[i].querySelector('.spnl__sw');
+      if (sw) sw.setAttribute('aria-checked', String(!!value));
+      return;
+    }
   }
 
   (function installStagePanel() {
@@ -433,21 +488,21 @@
 
   /* ================= 6. gallery 数据（异步填充） ================= */
   function buildGallery() {
-    if (galleryItem) return;
-
     var items = [];
     if (listState.ok) {
       items.push({
         v: CURRENT,
         t: '当前 Wallpaper Engine 壁纸',
-        thumb: '/api/wallpaper/preview'
+        thumb: '/api/wallpaper/thumb'
       });
       for (var i = 0; i < listState.items.length; i++) {
         var it = listState.items[i];
         items.push({
           v: it.id,
           t: it.title || it.id,
-          thumb: '/api/wallpaper/preview?id=' + enc(it.id)
+          /* 视频壁纸的预览可能是 mp4：/preview 会把它当视频流发，<img> 放不了。
+             /thumb 在有封面图时发封面，没有时发占位图。 */
+          thumb: '/api/wallpaper/thumb?id=' + enc(it.id)
         });
       }
     } else {
@@ -455,19 +510,15 @@
       items.push({
         v: CURRENT,
         t: '当前壁纸',
-        thumb: '/api/wallpaper/preview'
+        thumb: '/api/wallpaper/thumb'
       });
     }
 
-    galleryItem = {
-      key: 'bgpick',
-      label: '选择壁纸',
-      type: 'gallery',
-      def: '',                 /* 空 = 还没选过；避免宿主 pushAll 默认值把背景打开 */
-      onSelect: { key: 'bg', value: true },  /* 声明：选图 = 打开「自定义背景」开关 */
-      items: items
-    };
+    var before = galleryItem.items.length;
+    galleryItem.items = items;
     appendGallery(window.__stagePanel);
+    /* 空库时数量不变，不必让面板闪一下 */
+    if (items.length !== before) refreshHostPanel();
   }
 
   function loadGallery() {
@@ -548,6 +599,8 @@
   function handleSetting(key, value) {
     if (key === 'bg') {
       setBg(value);
+      /* onSelect 由宿主直接改 data，不会重绘开关：把可见状态补上 */
+      syncHostControl('bg', truthy(value));
       return;
     }
     if (key === 'scrim') {
@@ -564,6 +617,7 @@
       writePick(v);
       bgOn = true;
       applyPick(v);
+      syncHostControl('bg', true);
     }
   }
 

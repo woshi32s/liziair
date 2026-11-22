@@ -10,7 +10,7 @@
    -------------------------------------------------------------------------- */
 .pskin-layer {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
@@ -178,7 +178,7 @@ body[data-pskin][data-view="hall"] .player .player__inner {
 .psp__thumb::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
   border-radius: inherit;
 }
@@ -606,7 +606,7 @@ body.pskin-07[data-view="hall"] .knob {
 /* Magic UI ShineBorder 的核心：radial-gradient 背景 + mask-composite 只留边框 */
 .pskin-neon {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   padding: 1px;
   border-radius: inherit;
   background-image: radial-gradient(transparent, transparent, #22d3ee, #e879f9, transparent, transparent);
@@ -658,7 +658,7 @@ body.pskin-08[data-view="hall"] .knob {
 
 .pskin-glass-sheen {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   background:
     linear-gradient(112deg, transparent 0 26%, rgba(255, 255, 255, 0.5) 35%, transparent 44%),
     radial-gradient(40% 120% at 20% 0%, rgba(255, 150, 220, 0.14), transparent 72%),
@@ -718,7 +718,7 @@ body.pskin-10[data-view="hall"] .knob {
 
 .pskin-goo {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   filter: url(#pskin-goo-filter);
   opacity: 0.88;
   will-change: filter;

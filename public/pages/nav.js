@@ -16,14 +16,16 @@ import { ensureCss, api, esc } from './util.js';
 import * as artist from './artist.js';
 import * as album from './album.js';
 import * as myalbums from './myalbums.js';
+import * as local from './local.js';
 
 const els = () => ({
   artist: document.getElementById('view-artist'),
   album: document.getElementById('view-album'),
   myalbums: document.getElementById('view-myalbums'),
+  local: document.getElementById('view-local'),
 });
 
-let stack = [];                 // [{ view: 'artist'|'album'|'myalbums', id }]
+let stack = [];                 // [{ view: 'artist'|'album'|'myalbums'|'local', id }]
 let source = 'hall';            // 第一个页面是从哪个视图点进来的
 const songMeta = new Map();     // songId → track（DJ 台曲库那格的缓存）
 
@@ -76,6 +78,19 @@ export async function openMyAlbums() {
   await myalbums.mount(els().myalbums);
 }
 
+/** 本地音乐（自定义音源）：和「我的专辑」一样是独立视图，共用这份栈 */
+export async function openLocal() {
+  ensureCss();
+  const at = stack.findIndex((s) => s.view === 'local');
+  if (at >= 0) stack.length = at + 1;
+  else {
+    if (!stack.length) source = currentView();
+    stack.push({ view: 'local' });
+  }
+  go('local');
+  await local.mount(els().local);
+}
+
 export function back() {
   if (!stack.length) return false;
   stack.pop();
@@ -83,6 +98,7 @@ export function back() {
     const top = stack[stack.length - 1];
     go(top.view);
     if (top.view === 'myalbums') myalbums.mount(els().myalbums);
+    else if (top.view === 'local') local.mount(els().local);
     else (top.view === 'artist' ? artist : album).mount(els()[top.view], { id: top.id });
   } else {
     go(source || 'hall');
@@ -94,8 +110,9 @@ export function back() {
 export function onShow(view) {
   /* 我的专辑是从大厅工具箱进来的独立视图：不管谁切的视图，切到它就把它叫醒 */
   if (view === 'myalbums') { ensureCss(); myalbums.mount(els().myalbums); }
+  if (view === 'local') { ensureCss(); local.mount(els().local); }
   if (!stack.length) return;
-  if (view === 'artist' || view === 'album' || view === 'myalbums') return;
+  if (view === 'artist' || view === 'album' || view === 'myalbums' || view === 'local') return;
   stack.length = 0;
 }
 
@@ -125,11 +142,13 @@ window.__LIZI_PAGES = {
   openArtist,
   openAlbum,
   openMyAlbums,
+  openLocal,
   back,
   openArtistFromSong,
   artist,
   album,
   myalbums,
+  local,
   // 给测试看的：专辑页里那张唯一的大封面
   albumCoverWidth: () => {
     const img = document.querySelector('#view-album .pg-album-art img');
@@ -137,4 +156,4 @@ window.__LIZI_PAGES = {
   },
 };
 
-export { artist, album, myalbums, esc };
+export { artist, album, myalbums, local, esc };

@@ -1,0 +1,195 @@
+/* ==========================================================================
+   LIZI Air · Rubber Segment（2026-11-16）
+   组件结构与物理在 hall/rubber-segment.js；这里只放外观。
+   颜色 / 尺寸全部由 JS 写进 root 上的 --rs-* 变量，外部可覆盖：
+     --rs-track / --rs-thumb / --rs-text / --rs-active-text
+     --rs-h / --rs-font / --rs-pad / --rs-minw / --rs-radius /
+     --rs-thumb-radius / --rs-inset
+   动画只碰 clip-path（滑块）和 transform（按压反馈），不动布局属性。
+   ========================================================================== */
+
+.rubber-segment {
+  --rs-h: 36px;
+  --rs-font: 13px;
+  --rs-pad: 14px;
+  --rs-minw: 44px;
+  --rs-radius: 10px;
+  --rs-thumb-radius: 7px;
+  --rs-inset: 3px;
+  --rs-track: #27272a;
+  --rs-thumb: #fafafa;
+  --rs-text: #fafafa;
+  --rs-active-text: #18181b;
+
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  background: var(--rs-track);
+  border-radius: var(--rs-radius);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;          /* Firefox：页签不要滚动条 */
+  overscroll-behavior-x: contain;  /* 滚到头别带着外层抽屉一起滚 */
+  -webkit-overflow-scrolling: touch;
+  /* 横向滑动滚页签，纵向滑动仍然交给页面；拖动滑块由 thumb 自己的
+     touch-action 接管（见下），所以这里不能用 pan-x 把纵向手势也吃掉。 */
+  touch-action: pan-x pan-y;
+  -webkit-tap-highlight-color: transparent;
+}
+.rubber-segment::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+.rubber-segment--vertical {
+  width: auto;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  touch-action: pan-x pan-y;
+}
+.rubber-segment--vertical::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* 内容层：宽度随内容撑开；放不下时由 root 横向滚动 */
+.rubber-segment__inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  height: var(--rs-h);
+  border-radius: var(--rs-radius);
+}
+.rubber-segment--vertical .rubber-segment__inner {
+  flex-direction: column;
+  width: var(--rs-h);
+  min-width: 0;
+  height: max-content;
+  min-height: 100%;
+}
+/* 2026-11-16：横向模式下让内容层左右各内收一个 inset。
+   滑块盒四边都缩进 inset；页签如果贴着内容层边缘，首个槽位
+   （offsetLeft - inset）会被裁到 0，最后一个槽位右端也会被裁掉一截，
+   表现为首尾滑块比按钮窄 2px。内容层同步内收后，槽位和滑块盒对齐。 */
+.rubber-segment:not(.rubber-segment--vertical) .rubber-segment__inner {
+  padding: 0 var(--rs-inset);
+}
+
+/* 高亮块：盒子和内容层一样大，靠 clip-path 只露出当前槽位。
+   pointer-events:auto + touch-action:pan-y 让可见的滑块自己可以横向拖、
+   纵向手势仍能滚页面；clip-path 会把命中测试一起裁掉，滑块以外照样能滚。 */
+.rubber-segment__thumb {
+  position: absolute;
+  z-index: 2;
+  top: var(--rs-inset);
+  right: var(--rs-inset);
+  bottom: var(--rs-inset);
+  left: var(--rs-inset);
+  border-radius: var(--rs-thumb-radius);
+  background: var(--rs-thumb);
+  clip-path: inset(0 0 0 0 round var(--rs-thumb-radius));
+  pointer-events: auto;
+  cursor: grab;
+  /* 横向拖动归组件，纵向滑动留给页面（竖向 orientation 时反过来） */
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  will-change: clip-path;
+}
+.rubber-segment[data-held] .rubber-segment__thumb { cursor: grabbing; }
+.rubber-segment--vertical .rubber-segment__thumb { touch-action: pan-x; }
+.rubber-segment--static .rubber-segment__thumb {
+  pointer-events: none;
+  touch-action: auto;
+  cursor: default;
+}
+.rubber-segment--disabled { opacity: 0.48; pointer-events: none; }
+
+/* 文字副本层：向外多铺一个 inset，和真实按钮的内容层完全同尺寸、同布局。
+   只改颜色；字体、内边距、min-width、flex 都复用 .rubber-segment__item，
+   否则揭示的字和底下的字会错位。 */
+.rubber-segment__ghosts {
+  position: absolute;
+  top: calc(-1 * var(--rs-inset));
+  left: calc(-1 * var(--rs-inset));
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: calc(100% + 2 * var(--rs-inset));
+  height: calc(100% + 2 * var(--rs-inset));
+  color: var(--rs-active-text);
+  pointer-events: none;
+}
+/* 副本层和真实按钮层一样左右内收，否则揭示的字会比底下的字偏 2px */
+.rubber-segment:not(.rubber-segment--vertical) .rubber-segment__ghosts {
+  padding: 0 var(--rs-inset);
+}
+.rubber-segment--vertical .rubber-segment__ghosts { flex-direction: column; }
+
+.rubber-segment__item {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 100%;
+  min-width: var(--rs-minw);
+  margin: 0;
+  padding: 0 var(--rs-pad);
+  border: 0;
+  border-radius: var(--rs-thumb-radius);
+  background: none;
+  color: var(--rs-text);
+  font-family: inherit;
+  font-size: var(--rs-font);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: normal;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  /* 不做 color transition：揭示层靠 clip-path 瞬时翻色，避免多一层动画抢帧 */
+}
+.rubber-segment--equal .rubber-segment__item { flex: 1 1 0; }
+.rubber-segment--vertical .rubber-segment__item {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--rs-minw);
+  height: auto;
+  padding: var(--rs-pad) 0;
+}
+
+.rubber-segment__label { display: inline-block; line-height: 1; }
+
+/* 副本：只负责翻色，永远不接收指针事件 */
+.rubber-segment__ghost {
+  color: var(--rs-active-text);
+  pointer-events: none;
+  cursor: default;
+}
+.rubber-segment__ghost .rubber-segment__label { color: inherit; }
+
+.rubber-segment__item[data-pressed] { transform: scale(0.96); }
+.rubber-segment__item:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: -2px;
+}
+/* 当前槽位被滑块盖住，按钮自己的 focus 圈看不见；键盘聚焦时把圈挪到轨道上 */
+.rubber-segment:has(.rubber-segment__item:focus-visible) {
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rubber-segment__thumb { will-change: auto; }
+}

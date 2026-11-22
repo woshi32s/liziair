@@ -8,6 +8,8 @@
  *   GET  /api/wallpaper/list       → 壁纸库列表（30 秒缓存）
  *   GET  /api/wallpaper/preview?id → 指定壁纸的预览（mp4/webm 预览同样支持 Range）
  *   GET  /api/wallpaper/media?id   → 指定壁纸的视频（支持 Range / 206）
+ *   GET  /api/wallpaper/thumb[?id] → 图集缩略图：有图片封面发封面，
+ *                                    视频预览 / 没有封面时发占位图（<img> 可显示）
  *
  * 全部只读。不带 id 时每次重新解析「当前选中的壁纸」，结果只缓存 2 秒 ——
  * 用户随时会在 WE 里换壁纸，缓存久了就会一直放旧图。
@@ -30,7 +32,24 @@ const MIME = {
   '.png': 'image/png',
   /* 壁纸库里不少老动画壁纸的预览就是 gif，浏览器要 image/gif 才会当图渲染 */
   '.gif': 'image/gif',
+  '.svg': 'image/svg+xml; charset=utf-8',
 };
+
+/* 视频壁纸的预览有时只有 preview.mp4，没有 jpg/png 封面。
+   <img> 播不了 mp4，直接发视频字节就是破图；图集要的是一个能显示的静帧。
+   这里发一张 320×180 占位图（深色底 + 播放三角），表示「这是视频壁纸」，
+   有封面图的视频壁纸仍然走 sendImageFile 发真封面。 */
+const THUMB_SVG = Buffer.from(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180" viewBox="0 0 320 180">'
+  + '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+  + '<stop offset="0" stop-color="#1c2430"/><stop offset="1" stop-color="#0a0d12"/>'
+  + '</linearGradient></defs>'
+  + '<rect width="320" height="180" fill="url(#g)"/>'
+  + '<circle cx="160" cy="82" r="30" fill="#ffffff" fill-opacity="0.12"/>'
+  + '<path d="M152 66 L186 82 L152 98 Z" fill="#e8eef8"/>'
+  + '<text x="160" y="142" text-anchor="middle" font-family="sans-serif" font-size="12"'
+  + ' letter-spacing="1.2" fill="#93a4bb">VIDEO WALLPAPER</text>'
+  + '</svg>', 'utf8');
 
 let weCache = null;      // { dir, libs }：WE 安装目录和 Steam 库根目录，找到后不再变
 let procCache = null;    // { at, running }：进程检测也走 2 秒缓存
@@ -515,12 +534,36 @@ function sendImageFile(res, file, headOnly) {
   stream.pipe(res);
 }
 
+function sendSvg(res, buf, headOnly) {
+  res.writeHead(200, {
+    'Content-Type': MIME['.svg'],
+    'Content-Length': buf.length,
+    'Cache-Control': 'no-store',
+  });
+  if (headOnly) return res.end();
+  return res.end(buf);
+}
+
+/* 图集缩略图：图片封面原样发；视频预览 / 无预览时发占位图。
+   与 /preview 分开，是因为 /preview 还要给 <video> / drawImage 用，
+   不能把 mp4 预览偷偷换成 SVG。 */
+function sendThumb(res, record, headOnly) {
+  const file = record && record.previewFile ? record.previewFile : '';
+  const we = file ? findWallpaperEngine() : null;
+  const safe = we ? safePath(file, PREVIEW_IMAGE_EXTS, we) : '';
+  if (safe) return sendImageFile(res, safe, headOnly);
+  return sendSvg(res, THUMB_SVG, headOnly);
+}
+
 function sendPreview(res, record, headOnly) {
-  if (!record.data.ok || record.kind !== 'image') {
+  if (!record.data.ok) {
     return sendJson(res, 404, { ok: false, error: 'no preview' }, headOnly);
   }
   const we = findWallpaperEngine();
-  const file = we ? safePath(record.previewFile, IMAGE_EXTS, we) : '';
+  /* 视频壁纸也常有 jpg/png 封面（preview / thumb），之前按 kind !== 'image'
+     一刀切回 404，图集里视频壁纸的缩略图全是破图。这里只认扩展名：
+     是图片就发，是 mp4 预览就继续回 404（<img> 也放不了）。 */
+  const file = we ? safePath(record.previewFile, PREVIEW_IMAGE_EXTS, we) : '';
   if (!file) return sendJson(res, 404, { ok: false, error: 'preview not found' }, headOnly);
   return sendImageFile(res, file, headOnly);
 }
@@ -630,6 +673,14 @@ function sendPreviewById(req, res, entry, headOnly) {
   return sendImageFile(res, safe, headOnly);
 }
 
+function sendThumbById(req, res, entry, headOnly) {
+  const file = entry && entry.previewFile ? entry.previewFile : '';
+  const we = file ? findWallpaperEngine() : null;
+  const safe = we ? safePath(file, PREVIEW_IMAGE_EXTS, we) : '';
+  if (safe) return sendImageFile(res, safe, headOnly);
+  return sendSvg(res, THUMB_SVG, headOnly);
+}
+
 function sendMediaById(req, res, entry, headOnly) {
   const file = entry && entry.mediaFile ? entry.mediaFile : '';
   const we = file ? findWallpaperEngine() : null;
@@ -663,9 +714,11 @@ export function handleWallpaper(req, res, url) {
      完全沿用旧逻辑，老调用方的行为一个字节都不变。 */
   const idParam = url.searchParams.get('id');
   if (idParam !== null
-    && (url.pathname === '/api/wallpaper/preview' || url.pathname === '/api/wallpaper/media')) {
+    && (url.pathname === '/api/wallpaper/preview' || url.pathname === '/api/wallpaper/media'
+      || url.pathname === '/api/wallpaper/thumb')) {
     const entry = findById(idParam);
     if (!entry) return sendJson(res, 404, { ok: false }, headOnly);
+    if (url.pathname === '/api/wallpaper/thumb') return sendThumbById(req, res, entry, headOnly);
     return url.pathname === '/api/wallpaper/preview'
       ? sendPreviewById(req, res, entry, headOnly)
       : sendMediaById(req, res, entry, headOnly);
@@ -673,6 +726,7 @@ export function handleWallpaper(req, res, url) {
 
   const record = resolveRecord();
   if (url.pathname === '/api/wallpaper') return sendJson(res, 200, record.data, headOnly);
+  if (url.pathname === '/api/wallpaper/thumb') return sendThumb(res, record, headOnly);
   if (url.pathname === '/api/wallpaper/preview') return sendPreview(res, record, headOnly);
   if (url.pathname === '/api/wallpaper/media') return sendMedia(req, res, record, headOnly);
   return sendJson(res, 404, { ok: false, error: 'unknown wallpaper api' }, headOnly);

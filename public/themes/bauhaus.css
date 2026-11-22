@@ -1,0 +1,160 @@
+/* 包豪斯 · Bauhaus（1925）
+ * 暖纸、3px 黑规线、红黄蓝三原色块面与硬投影；直角几何，没有渐变和模糊。
+ * 依据：public/app.css 按钮 1537–1568、设置分区标题 331–342、播放键 4728–4737、
+ *       登录引导按钮 4878–4890、抽屉标题 2002–2007；
+ *       歌手/专辑分区标题 pages/pages.css:62–68；方向见 docs/主题UI-方向.md。
+ */
+
+html[data-ui-theme="bauhaus"] {
+  /* 字体：几何无衬线；正文回落系统 CJK */
+  --tm-font-display: "Futura", "Century Gothic", "Avenir Next", "Futura PT", sans-serif;
+  --tm-font-body: "Century Gothic", "Futura", "Avenir Next", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --tm-font-mono: "Geist Mono", "Century Gothic", ui-monospace, monospace;
+  --tm-display-weight: 700;
+  --tm-display-tracking: 0.01em;
+  --tm-display-transform: uppercase;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 色板：暖纸 + 黑 + 三原色；黄只作第三点缀 */
+  --tm-yellow: #f5c518;
+  --tm-bg: #f7f1e3;
+  --tm-bg-pattern: none;
+  --tm-surface: #fffdf6;
+  --tm-surface-2: #f1e8d3;
+  --tm-surface-3: #e7d9b9;
+  --tm-ink: #111111;
+  --tm-ink-2: #3b382f;
+  --tm-ink-3: #5f594a;
+  --tm-accent: #e03a2f;
+  --tm-accent-2: #1f4fa8;
+  --tm-accent-ink: #111111;
+  --tm-line: #111111;
+  --tm-line-strong: #111111;
+  --tm-focus: #1f4fa8;
+
+  /* 形状：零圆角、3px 黑边、没有模糊的硬投影 */
+  --tm-border-w: 3px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 0px;
+  --tm-radius-pill: 0px;
+  --tm-radius-input: 0px;
+  --tm-shadow: 6px 6px 0 #111111;
+  --tm-shadow-sm: 3px 3px 0 #111111;
+  --tm-shadow-inset: none;
+
+  /* 其他 */
+  --tm-card-bg: var(--tm-surface);
+  --tm-overlay-bg: #f7f1e3;
+  --tm-scrim: rgba(17, 17, 17, 0.40);
+  --tm-filter: none;
+}
+
+/* 签名 · 分区标题左侧一组三原色小方块：一个伪元素画三个 5×5 色块 */
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .setpage__h,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .pg-sec__h b,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-public__head,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .drawer__title {
+  padding-left: 26px;
+  color: var(--tm-ink);
+  background-image:
+    linear-gradient(var(--tm-accent), var(--tm-accent)),
+    linear-gradient(var(--tm-yellow), var(--tm-yellow)),
+    linear-gradient(var(--tm-accent-2), var(--tm-accent-2));
+  background-repeat: no-repeat;
+  background-position: left center, 6.5px center, 13px center;
+  background-size: 5px 5px;
+}
+
+/* 局部 · 按钮：整块三原色，黑边硬投影；按下位移 3px 并收掉投影。
+   规律：红 = 主操作，黄 = 播放，蓝 = 导航 / 次要。 */
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .btn,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-cta__btn,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-hero__play {
+  border: 3px solid var(--tm-line);
+  border-radius: 0;
+  box-shadow: var(--tm-shadow-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .btn {
+  background: var(--tm-accent-2);
+  color: #ffffff;
+}
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-cta__btn {
+  background: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-hero__play {
+  background: var(--tm-yellow);
+  color: var(--tm-ink);
+}
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .btn:hover {
+  background: var(--tm-accent-2);
+  color: #ffffff;
+  filter: none;
+}
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-cta__btn:hover {
+  background: var(--tm-accent);
+  color: var(--tm-accent-ink);
+  filter: none;
+}
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-hero__play:hover {
+  background: var(--tm-yellow);
+  color: var(--tm-ink);
+  transform: none;
+}
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .btn:active,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-cta__btn:active,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-hero__play:active {
+  transform: translate(3px, 3px);
+  box-shadow: none;
+}
+
+/* app.css:1563 的主按钮渐变带 !important，背景同样用 !important 压回平涂红；
+   文字色原样式没有 !important，正常覆盖即可。 */
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .btn--primary,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) #view-settings .btn--primary {
+  background: var(--tm-accent) !important;
+  color: var(--tm-accent-ink);
+}
+
+/* 直角补丁 · base 用 --r-* 令牌能压平大部分胶囊，这里补仍写死半径的控件 */
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .search,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .field,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .badge,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .setpage__checkupd,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .setpage__seg button,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .setpage__switch,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .setpage__switch-knob,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .sw,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .sw i,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .icbtn,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .drawer__x,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .drawer__ico,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .drawer__val,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .drawer__sw,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .drawer__sw > i,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .me__act,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .me__lv,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .me__vip,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .me__demo-tag,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .me__pl,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-cta,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-tools__i,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .tool-card__ico,
+html[data-ui-theme="bauhaus"] body:not(.is-stage) .marq__tag {
+  border-radius: 0;
+}
+
+/* 手机：方块组收一档，避免在窄标题前占掉太多字宽 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="bauhaus"] body:not(.is-stage) .setpage__h,
+  html[data-ui-theme="bauhaus"] body:not(.is-stage) .pg-sec__h b,
+  html[data-ui-theme="bauhaus"] body:not(.is-stage) .hall-public__head,
+  html[data-ui-theme="bauhaus"] body:not(.is-stage) .drawer__title {
+    padding-left: 21px;
+    background-position: left center, 5.5px center, 11px center;
+    background-size: 4px 4px;
+  }
+}

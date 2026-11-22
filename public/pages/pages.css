@@ -85,6 +85,7 @@
 .pg-row:first-child { border-top: 0; }
 .pg-row:hover { background: oklch(21% 0.022 270 / 0.035); }
 .pg-row__i {
+  position: relative;
   display: flex; align-items: center; justify-content: flex-end;
   font-family: var(--font-mono); font-size: 11px; color: var(--ink-4);
   font-variant-numeric: tabular-nums;
@@ -109,6 +110,25 @@
 .pg-row--hot.is-on .pg-row__num { display: none; }
 .pg-row--hot.is-on .pg-row__pl { display: inline; color: var(--accent-ink); }
 .pg-row--hot.is-on:hover .pg-row__pl { color: var(--accent-ink); }
+
+/* 全部歌曲：悬浮时 01/02 序号位滑出该曲封面（热门行的「序号换 ▶」原样保留）。
+   序号和封面都在 DOM 里，只切 opacity/transform，不动几何。 */
+.pg-row__cov {
+  position: absolute; right: 0; top: 50%; margin-top: -14px;
+  width: 28px; height: 28px; border-radius: 3px;
+  object-fit: cover; pointer-events: none;
+  opacity: 0;
+  transform: translateX(-10px) scale(.92);
+  transition: opacity var(--dur-fast) var(--ease-out),
+              transform var(--dur-fast) var(--ease-out);
+}
+@media (hover: hover) {
+  .pg-row--cov:not(.pg-row--hot) .pg-row__num {
+    transition: opacity var(--dur-fast) var(--ease-out);
+  }
+  .pg-row--cov:not(.pg-row--hot):hover .pg-row__num { opacity: 0; }
+  .pg-row--cov:not(.pg-row--hot):hover .pg-row__cov { opacity: 1; transform: none; }
+}
 
 /* ---------- 专辑墙 ---------- */
 .pg-albums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-5) var(--sp-4); }
@@ -423,8 +443,10 @@ body[data-view="myalbums"] .view--myalbums { bottom: 0; }
 }
 .ma-stage:focus-visible { outline: 1px solid var(--ink-3); outline-offset: 14px; }
 .ma-stage.is-dragging { cursor: grabbing; }
-/* 拖拽期间才许愿要合成层；松手就摘掉，静止时不留 will-change */
-.ma-stage.is-dragging .ma-item { will-change: transform; }
+/* 合成层不再在拖拽开始时才挂：指针按下的那一帧把整排 40 张卡一起提升 + 重栅格，
+   真机快滑的头几帧会出现封面只剩白底、整块舞台没绘制（2026-11-14 复现）。
+   现在由 myalbums.js 的 promote() 按「离当前位置 ±6 格」常驻预提升，见那里的注释。
+   这里只留 cursor，will-change 一个都不写。 */
 
 .ma-world {
   position: absolute;
@@ -451,7 +473,7 @@ body[data-view="myalbums"] .view--myalbums { bottom: 0; }
 .ma-item__art,
 .ma-item__back {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: block;
   border-radius: 2px;
   overflow: hidden;
@@ -476,7 +498,7 @@ body[data-view="myalbums"] .view--myalbums { bottom: 0; }
 .ma-item__back::after {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   pointer-events: none;
   background: linear-gradient(130deg,
     oklch(100% 0 0 / 0.22) 0%,
@@ -487,7 +509,7 @@ body[data-view="myalbums"] .view--myalbums { bottom: 0; }
 }
 .ma-item__ph {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: grid;
   place-items: center;
   background:
@@ -502,7 +524,7 @@ body[data-view="myalbums"] .view--myalbums { bottom: 0; }
 /* 后退的卡往纸白里融 —— 深色参考里那层灯光衰减的浅色版 */
 .ma-item__veil {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: block;
   border-radius: 2px;
   background: #fff;
@@ -693,7 +715,7 @@ body[data-view="myalbums"] .view--myalbums { bottom: 0; }
 .ma-item__vinyl::before {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   border-radius: 50%;
   background: conic-gradient(from 30deg,
     transparent 0deg,

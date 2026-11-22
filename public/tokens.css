@@ -96,3 +96,39 @@
 @media (max-width: 900px) {
   :root { --gutter: var(--sp-4); --side-w: 232px; --player-h: 104px; }
 }
+
+/* -----------------------------------------------------------------------------
+   老内核 / 定制 WebView 兜底（Chromium < 111，不支持 oklch）
+   -----------------------------------------------------------------------------
+   vivo Y27t 这类机型的系统 WebView 可能停在 Chromium 87～109：
+   oklch() 会在 computed-value 阶段整条失效，--paper / --ink / --accent
+   全部作废，大厅 hero 和铺色面板会退成白底；badge 里直接写的
+   `oklch(100% 0 0 / .78)` 失效后回落到继承色（黑）——真机截图里
+   「· 还没播过」是深色、其余白字全消失，就是这条链路。
+   下面是同一色板的 sRGB 等价值，只在拿不到 oklch 的 WebView 命中；
+   Chrome / Edge / Electron（111+）完全不会进入这个 @supports 分支。
+   -------------------------------------------------------------------------- */
+@supports not (color: oklch(50% 0.1 12)) {
+  :root {
+    --paper: #f1f3f9;
+    --paper-2: #fbfcfe;
+    --ink: #141823;
+    --ink-2: #4e525d;
+    --ink-3: #777a83;
+    --accent: #eb3062;
+    --accent-ink: #c30048;
+    --rule: rgba(20, 24, 35, .09);
+
+    --glass-tint: rgba(255, 255, 255, .30);
+    --glass-edge: rgba(255, 255, 255, .62);
+    --glass-tint-strong: rgba(255, 255, 255, .46);
+
+    --tone-a: #70a1ff;
+    --tone-b: #00cdc5;
+    --tone-c: #f59cd8;
+
+    /* 这两个只在大厅/设置里用到；旧内核同样需要一份 sRGB 值 */
+    --ink-4: #83868c;
+    --rule-soft: rgba(20, 24, 35, .06);
+  }
+}

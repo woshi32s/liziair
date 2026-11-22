@@ -66,6 +66,34 @@ function normalize(a) {
   };
 }
 
+/** 归一化：去掉括号内容、标点、空白，转小写 —— 只用来跨音源比对「是不是同一张」 */
+function normText(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[（(【\[《<][^）)】\]》>]*[）)】\]》>]/g, '')
+    .replace(/[\s\-_·・.,，。!！?？'"“”‘’:：;；/\\|+&]/g, '')
+    .trim();
+}
+
+/** 去重指纹 = 标题 + 首位艺人。同一张专辑在不同音源上 id 不同，但指纹应该一样。
+    标题只比第一个艺人，避免「A / B」和「A, B」这种写法差异导致漏判。 */
+export function fingerprint(album) {
+  if (!album) return '';
+  const name = normText(album.name);
+  if (!name) return '';
+  const first = normText(String(album.artists || '').split(/\s*[/,、&]\s*/)[0]);
+  return first ? `${name}|${first}` : name;
+}
+
+/** 找「同一张专辑」但 key 不同的已有条目（跨音源重复用） */
+export function findDuplicate(album) {
+  const o = normalize(album);
+  if (!o) return null;
+  const fp = fingerprint(o);
+  if (!fp) return null;
+  return read().find((x) => x.id !== o.id && fingerprint(x) === fp) || null;
+}
+
 /** 唯一键：传专辑对象或已经拼好的 key 都行 */
 export function keyOf(album) {
   if (album === undefined || album === null) return '';
@@ -86,8 +114,10 @@ export function has(key) {
   return read().some((x) => x.id === k);
 }
 
-/** 收一张。已经收过就只刷新它的元信息（不改变 addedAt，也不挪位置）。 */
-export function add(album) {
+/** 收一张。已经收过就只刷新它的元信息（不改变 addedAt，也不挪位置）。
+ *  opts.crossSource === false 时才允许同一张专辑以不同音源各存一份；
+ *  默认会按 fingerprint 拦掉跨音源重复，返回 { duplicate: true, dupOf: 已有条目的 id }。 */
+export function add(album, opts) {
   const item = normalize(album);
   if (!item) return { ok: false, added: false, key: '', list: read() };
   const arr = read();
@@ -97,6 +127,14 @@ export function add(album) {
     arr[at] = { ...old, ...item, addedAt: old.addedAt || item.addedAt };
     write(arr);
     return { ok: true, added: false, key: item.id, list: arr };
+  }
+  /* 同一张专辑换了个音源再来一次：不再入架，把先收的那张的 key 告诉调用方 */
+  const allowDup = opts && opts.crossSource === false;
+  if (!allowDup) {
+    const dup = findDuplicate(item);
+    if (dup) {
+      return { ok: true, added: false, duplicate: true, key: item.id, dupOf: dup.id, list: arr };
+    }
   }
   arr.unshift(item);
   write(arr);
@@ -126,6 +164,35 @@ export function toggle(album) {
 export function clear() {
   write([]);
   return [];
+}
+
+/** 维护用：把已经存进去的跨音源重复合并掉（同一指纹只留最早收的那张）。
+ *  返回 { removed: 去掉了多少张, list }。启动时调一次即可，无重复时不会写盘。 */
+export function dedupe() {
+  const arr = read();
+  const seen = new Map();          // fingerprint -> 已保留的条目
+  const kept = [];
+  const dropped = [];
+  for (const item of arr) {
+    const fp = fingerprint(item);
+    const hit = fp ? seen.get(fp) : null;
+    if (hit) {
+      /* 留 addedAt 更早的（先收的那张），另一张丢弃 */
+      if ((Number(item.addedAt) || 0) < (Number(hit.addedAt) || 0)) {
+        const i = kept.indexOf(hit);
+        if (i >= 0) kept.splice(i, 1, item);
+        seen.set(fp, item);
+        dropped.push(hit);
+      } else {
+        dropped.push(item);
+      }
+      continue;
+    }
+    if (fp) seen.set(fp, item);
+    kept.push(item);
+  }
+  if (dropped.length) write(kept);
+  return { removed: dropped.length, list: kept };
 }
 
 /** 订阅变化，返回退订函数 */

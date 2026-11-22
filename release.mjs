@@ -188,24 +188,61 @@ if (!isChannelTag && tag !== stableTag) {
 
 if (!fs.existsSync(GRADLE_FILE)) fail(`找不到 Android 工程：${GRADLE_FILE}`);
 const gradle = fs.readFileSync(GRADLE_FILE, 'utf8');
-const versionNameMatch = gradle.match(/versionName\s+['"]([^'"]+)['"]/);
-const versionCodeMatch = gradle.match(/versionCode\s+(\d+)/);
-if (!versionNameMatch) fail('app/build.gradle 里没有 versionName');
-if (!versionCodeMatch) fail('app/build.gradle 里没有整数 versionCode');
 
-const gradleNums = parseVersion(versionNameMatch[1]);
-if (!gradleNums) fail(`app/build.gradle 的 versionName 不是 x.y.z：${versionNameMatch[1]}`);
-if (versionString(gradleNums) !== version) {
-  fail(`Android versionName 和 package.json 不一致：${versionNameMatch[1]} ≠ ${version}`);
+/* build.gradle 现在有两种写法：
+   ① 写死 versionName '1.1.5' / versionCode 10105（旧工程）；
+   ② 自动读桌面 package.json：versionName desktopVersion / versionCode vCode。
+   逐行取真正的声明并先剥掉 // 注释，避免命中
+   `// 1.0.5 → versionCode 10005` 这种说明文字。 */
+function gradleDirective(name) {
+  const re = new RegExp(`^${name}\\s+(.+)$`);
+  for (const raw of gradle.split(/\r?\n/)) {
+    const line = raw.replace(/\/\/.*$/, '').trim();
+    const m = line.match(re);
+    if (m) return m[1].trim();
+  }
+  return '';
 }
 
-const versionCode = Number(versionCodeMatch[1]);
+const versionNameDecl = gradleDirective('versionName');
+const versionCodeDecl = gradleDirective('versionCode');
+if (!versionNameDecl) fail('app/build.gradle 里没有 versionName');
+if (!versionCodeDecl) fail('app/build.gradle 里没有 versionCode');
+
+let gradleVersion = version;
+let versionNameAuto = false;
+if (versionNameDecl === 'desktopVersion') {
+  versionNameAuto = true;
+} else {
+  const m = versionNameDecl.match(/^['"]([^'"]+)['"]$/);
+  if (!m) fail(`app/build.gradle 的 versionName 既不是 desktopVersion 也不是字符串：${versionNameDecl}`);
+  gradleVersion = m[1];
+}
+
+const gradleNums = parseVersion(gradleVersion);
+if (!gradleNums) fail(`app/build.gradle 的 versionName 不是 x.y.z：${gradleVersion}`);
+if (versionString(gradleNums) !== version) {
+  fail(`Android versionName 和 package.json 不一致：${gradleVersion} ≠ ${version}`);
+}
+
+let versionCode;
+let versionCodeAuto = false;
+if (versionCodeDecl === 'vCode') {
+  /* 和 app/build.gradle 里的 vCode 公式保持一致。 */
+  versionCode = gradleNums[0] * 10000 + gradleNums[1] * 100 + gradleNums[2];
+  versionCodeAuto = true;
+} else {
+  if (!/^\d+$/.test(versionCodeDecl)) {
+    fail(`app/build.gradle 的 versionCode 既不是 vCode 也不是整数：${versionCodeDecl}`);
+  }
+  versionCode = Number(versionCodeDecl);
+}
 if (!Number.isInteger(versionCode) || versionCode <= 0) {
-  fail(`versionCode 必须是正整数，当前是：${versionCodeMatch[1]}`);
+  fail(`versionCode 必须是正整数，当前是：${versionCodeDecl}`);
 }
 const codeScheme = matchVersionCode(versionCode, gradleNums);
 if (!codeScheme) {
-  fail(`versionCode ${versionCode} 和 versionName ${versionNameMatch[1]} 对不上；` +
+  fail(`versionCode ${versionCode} 和 versionName ${gradleVersion} 对不上；` +
     '常用写法是 major*10000+minor*100+patch');
 }
 
@@ -220,7 +257,8 @@ if (/^YOUR_|PLACEHOLDER/i.test(publish.owner) || /PLACEHOLDER/i.test(publish.rep
 const repoSlug = `${publish.owner}/${publish.repo}`;
 
 log(`版本 ${version}，tag ${tag}，仓库 ${repoSlug}`);
-log(`Android versionName ${versionNameMatch[1]}，versionCode ${versionCode}（${codeScheme[1]}）`);
+log(`Android versionName ${gradleVersion}${versionNameAuto ? '（自动）' : ''}，` +
+  `versionCode ${versionCode}${versionCodeAuto ? '（自动）' : ''}（${codeScheme[1]}）`);
 if (isChannelTag) warn(`通道 tag（${tag}）：不要求与 package.json 版本相等，将按预发布发布`);
 
 /* ============================================================ 2. Windows == */
@@ -272,7 +310,11 @@ if (apkSources.length === 0) fail(`APK 输出目录里没有 .apk：${apkDir}`);
 
 const apkCopies = apkSources.map((src) => {
   const base = path.basename(src);
-  const arch = /arm64/i.test(base) ? 'arm64-v8a' : (/x86_64|x86-64/i.test(base) ? 'x86_64' : 'universal');
+  const arch = /arm64/i.test(base)
+    ? 'arm64-v8a'
+    : (/armeabi|arm-v7a/i.test(base)
+      ? 'armeabi-v7a'
+      : (/x86_64|x86-64/i.test(base) ? 'x86_64' : 'universal'));
   const dest = path.join(DIST, `LIZI-Android-${version}-${arch}.apk`);
   fs.copyFileSync(src, dest);
   return dest;

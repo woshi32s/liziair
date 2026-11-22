@@ -189,7 +189,19 @@
     /* ---- 拖拽：超过 4px 才 setPointerCapture，轻点仍然能点选 ---- */
     function onPointerDown(e) {
       if (!count || e.button !== 0) return;
-      drag = { y: e.clientY, start: target, id: e.pointerId, captured: false };
+      /* 2026-11-20：铺色态用 transform: scale(--src-size / 13) 放大滚轮（默认 28，
+         约 2.15 倍），但 rowH 还是按 13px 算的。按 1:1 映射，指针拖 18px 视觉上
+         会滚 39px，滑得发飘。按下时量一次缩放比，拖拽 / rowH 都乘上它，指针和
+         行距才重新对上。没缩放（手机竖屏 / glide-select）时 ratio = 1，行为不变。 */
+      var ratio = 1;
+      try {
+        var rh = root.getBoundingClientRect().height;
+        if (rh > 0 && root.offsetHeight > 0) ratio = rh / root.offsetHeight;
+      } catch (err) { /* 量不到就按 1 处理 */ }
+      drag = {
+        y: e.clientY, start: target, id: e.pointerId,
+        captured: false, ratio: ratio > 0 ? ratio : 1,
+      };
       dragMoved = false;
       root.classList.add('is-dragging');
     }
@@ -200,20 +212,28 @@
       if (!drag.captured && Math.abs(dy) > 4) {
         drag.captured = true;
         dragMoved = true;
+        /* 2026-11-20：真开始拖动才挂 is-grow，CSS 在设定倍率上再放大 8%
+           （拖动时变大，松手变小）。行距也跟着变，先挂类再重量一次缩放比，
+           拖拽距离才和放大后的行距对上；量不到就沿用手按下时的比例。 */
+        root.classList.add('is-grow');
+        try {
+          var rh2 = root.getBoundingClientRect().height;
+          if (rh2 > 0 && root.offsetHeight > 0) drag.ratio = rh2 / root.offsetHeight;
+        } catch (err) { /* 量不到就沿用手按下时的比例 */ }
         try {
           root.setPointerCapture(drag.id);
         } catch (err) {
           /* 拿不到捕获也能继续用 */
         }
       }
-      if (drag.captured) applyTarget(drag.start - dy / rowH, false);
+      if (drag.captured) applyTarget(drag.start - dy / (rowH * drag.ratio), false);
     }
 
     function onPointerEnd() {
       if (!drag) return;
       var wasDrag = drag.captured;
       drag = null;
-      root.classList.remove('is-dragging');
+      root.classList.remove('is-dragging', 'is-grow');
       if (wasDrag) applyTarget(target, true);
     }
 

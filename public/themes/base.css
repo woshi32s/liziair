@@ -1,0 +1,1877 @@
+/* ==========================================================================
+   LIZI · 主题公共骨架（base.css）
+   --------------------------------------------------------------------------
+   作用域（每个视觉规则都带双前缀）：
+     html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) …
+   · 第一段只让非 glass 主题命中；glass 不做任何覆盖，保持现在的 LIZI。
+   · 非 glass 条件包在 :where() 里（权重 0）。否则 base 会比主题文件的
+     html[data-ui-theme="<id>"] 多一个属性权重，把主题签名规则压住。
+   · 第二段让形态页整体失效：body.is-stage 一挂上，下列规则全部不命中。
+   · 文件顶部那段 :where(html[data-ui-theme])… 只是 --tm-* 的默认值，
+     不是视觉规则；选择器权重 (0,1,0) 低于主题文件的 html[data-ui-theme="<id>"]
+     (0,1,1)，所以主题文件永远能覆盖它。它不定位任何组件，形态页即使继承了
+     这些变量也不会被用到。
+
+   分工：
+     · 本文件：令牌映射、玻璃中和、通用表面/控件/排版、25 组基础覆盖。
+     · themes/<id>.css：定义 --tm-* 变量 + 2–4 组签名规则，不重复写这些通用规则。
+     · themes/timeline.css / theme.js：时间轴，本文件不给时间轴组件写任何规则。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   0. --tm-* 默认值（仅变量回落；主题文件在同为 html 的更具体选择器上覆盖）
+   -------------------------------------------------------------------------- */
+:where(html[data-ui-theme]):not([data-ui-theme="glass"]) {
+  --tm-font-display: "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --tm-font-body: "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --tm-font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --tm-display-weight: 600;
+  --tm-display-tracking: -0.02em;
+  --tm-display-transform: none;
+  --tm-heading-font: var(--tm-font-display);
+
+  --tm-bg: #f1f3f9;
+  --tm-bg-pattern: none;
+  --tm-surface: #fbfcfe;
+  --tm-surface-2: #f1f3f9;
+  --tm-surface-3: #e6e9f1;
+  --tm-ink: #141823;
+  --tm-ink-2: #4e525d;
+  --tm-ink-3: #777a83;
+  --tm-accent: #eb3062;
+  --tm-accent-2: #c30048;
+  --tm-accent-ink: #ffffff;
+  --tm-line: rgba(20, 24, 35, 0.16);
+  --tm-line-strong: rgba(20, 24, 35, 0.32);
+  --tm-focus: #eb3062;
+
+  --tm-border-w: 1px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 16px;
+  --tm-radius-pill: 999px;
+  --tm-radius-input: 10px;
+  --tm-shadow: 0 16px 36px -26px rgba(20, 24, 35, 0.45);
+  --tm-shadow-sm: 0 4px 12px -8px rgba(20, 24, 35, 0.35);
+  --tm-shadow-inset: none;
+
+  --tm-card-bg: var(--tm-surface);
+  --tm-overlay-bg: rgba(241, 243, 249, 0.9);
+  --tm-scrim: rgba(20, 24, 35, 0.38);
+  --tm-filter: none;
+  --tm-cover-bg-opacity: 0.12;
+}
+
+/* --------------------------------------------------------------------------
+   1. 令牌映射（只在 body:not(.is-stage) 上；形态页拿回 tokens.css 原值）
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) {
+  --paper: var(--tm-surface);
+  --paper-2: var(--tm-surface-2);
+  --ink: var(--tm-ink);
+  --ink-2: var(--tm-ink-2);
+  --ink-3: var(--tm-ink-3);
+  --ink-4: var(--tm-ink-3);
+  --accent: var(--tm-accent);
+  /* 现有 --accent-ink 的语义是「强调色文字」，不是「强调底上的字」。
+     所以这里映射到第二强调色；强调底上的字统一显式用 --tm-accent-ink。 */
+  --accent-ink: var(--tm-accent-2, var(--tm-accent));
+  --rule: var(--tm-line);
+  --rule-soft: var(--tm-line);
+
+  --font-display: var(--tm-font-display);
+  --font-body: var(--tm-font-body);
+  --font-mono: var(--tm-font-mono);
+
+  --r-sm: var(--tm-radius-input);
+  --r-md: var(--tm-radius-input);
+  --r-lg: var(--tm-radius-card);
+  --r-xl: var(--tm-radius-card);
+  --r-full: var(--tm-radius-pill);
+
+  --glass-tint: var(--tm-surface);
+  --glass-tint-strong: var(--tm-surface-2);
+  --glass-edge: var(--tm-line);
+
+  color: var(--tm-ink);
+  background-color: var(--tm-bg);
+  background-image: var(--tm-bg-pattern);
+  font-family: var(--tm-font-body);
+  scrollbar-color: var(--tm-line-strong) transparent;
+}
+
+/* 窗口圆角底：app.css 的 body::before 是固定的白色圆角层，必须一起换底，
+   否则大厅、浏览页背后会透出一圈白。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)::before {
+  background-color: var(--tm-bg);
+  background-image: var(--tm-bg-pattern);
+  border-radius: var(--tm-radius-card);
+}
+
+/* 主视图都是不透明画布（app.css 用纯白盖背景）；逐块换成主题底，
+   保证切页时不会闪白，也让 --tm-bg-pattern 真正铺满。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.view--hall, .view--browse, .view--settings, .view--tools,
+      .view--artist, .view--album, .view--myalbums, .view--local,
+      .view--lab, .view--now) {
+  background-color: var(--tm-bg);
+  background-image: var(--tm-bg-pattern);
+}
+
+/* 设置页在 app.css:301-306 把 --accent 改成了 #17171a；
+   这里重新映射，否则设置页的强调色永远不跟主题。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #view-settings {
+  --accent: var(--tm-accent);
+  --accent-ink: var(--tm-accent-2, var(--tm-accent));
+}
+
+/* 覆盖 app.css:307 的 background:#17171a !important（原样式本身就带 important） */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #view-settings .btn--primary {
+  background: var(--tm-accent) !important;
+  color: var(--tm-accent-ink);
+  border-color: var(--tm-accent);
+}
+
+/* --------------------------------------------------------------------------
+   2. 去玻璃：压过散落各处的 backdrop-filter
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage),
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* 液体玻璃的高光描边与表面：非玻璃主题统一换成实色 + 主题描边/圆角/阴影。
+   不碰 .lg-defs、不改 JS 注入的 --lg-backdrop。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lg-sheen::after {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lg-surface {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lg-surface--pill {
+  border-radius: var(--tm-radius-pill);
+}
+
+/* --------------------------------------------------------------------------
+   3. 全站背景氛围
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .backdrop {
+  background-color: var(--tm-bg);
+  background-image: var(--tm-bg-pattern);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) :is(.blob, .grid) {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .cover-bg {
+  opacity: var(--tm-cover-bg-opacity);
+  filter: saturate(0.7);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .scrim {
+  background: var(--tm-bg);
+  background: color-mix(in srgb, var(--tm-bg) 62%, transparent);
+}
+
+/* 主题滤镜（封面/图片）。--tm-filter 默认 none，主题慎用。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.track__cover, .pg-album__cover img, .pg-album-art img,
+      .ma-item__art img, .ma-item__back img, .disc__img, .dock__art img,
+      .hall-hero__art, .hall-hero__cover img, .marq__art img,
+      .hall-pl__cover img, .hall-thumb img, .pg-ava img,
+      .hero-fly__art) {
+  filter: var(--tm-filter);
+}
+
+/* --------------------------------------------------------------------------
+   4. 排版骨架
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.setconsole__title, .setpage__h, .hall-hero__title, .now__title,
+      .toolpage__title, .pg-name, .pg-album-name, .head__text h1,
+      .ma-title, .lc-title, .brand__word, .hall-cell__h b, .hall-feed__h b,
+      .hall-cta__text b, .tool-card__n, .tools-page__n, .marq__card b,
+      .ma-empty__t, .modal__title, .vip-tip, .updmodal__title,
+      .qs__title, .drawer__title, .local-folder__title) {
+  font-family: var(--tm-heading-font);
+  font-weight: var(--tm-display-weight);
+  letter-spacing: var(--tm-display-tracking);
+  text-transform: var(--tm-display-transform);
+}
+
+/* brand__word 是内联 SVG 字标，字体规则对它没有视觉效果；
+   保留这条是为了满足契约里「品牌字标也走 heading 字体」的接口。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .brand__air {
+  font-family: var(--tm-heading-font);
+  font-weight: var(--tm-display-weight);
+  letter-spacing: var(--tm-display-tracking);
+  color: var(--tm-ink-2);
+}
+
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.setpage__h, .toolpage__eyebrow, .pg-kicker, .ma-kicker, .lc-kicker,
+      .setconsole__sub, .toolpage__sub, .pg-brief, .pg-desc,
+      .ma-count, .ma-empty__s, .ma-note, .modal__lead) {
+  color: var(--tm-ink-3);
+}
+
+/* --------------------------------------------------------------------------
+   5. 顶栏 / 品牌 / 搜索 / 来源切换
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .topbar {
+  background: var(--tm-card-bg);
+  border: 0;
+  border-bottom: var(--tm-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .topbar.is-stuck {
+  background: var(--tm-card-bg);
+  border-bottom: var(--tm-border);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .topbar::after {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .topbar__inner {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .brand {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .brand__mark {
+  color: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tbtn {
+  color: var(--tm-ink-2);
+  border-radius: var(--tm-radius-pill);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tbtn:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search {
+  border-radius: var(--tm-radius-pill);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search:hover,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search:focus-within {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search input {
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search input::placeholder {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .src-switch {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .src-switch__b {
+  color: var(--tm-ink-3);
+  border-radius: var(--tm-radius-pill);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .src-switch__b:hover {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .src-switch__b.is-on {
+  color: var(--tm-ink);
+  background: var(--tm-surface);
+  border-color: var(--tm-line);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .src-switch__hint {
+  color: var(--tm-ink-3);
+}
+
+/* --------------------------------------------------------------------------
+   6. 通用按钮 / 图标按钮
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .btn {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow-sm);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .btn:hover {
+  background: var(--tm-surface-3);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .btn--ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .btn--ghost:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .btn--ghost[aria-pressed="true"] {
+  color: var(--tm-ink-3);
+}
+/* app.css:1565 的渐变本身带 !important，这里必须同样用 important 压过 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .btn--primary {
+  background: var(--tm-accent) !important;
+  border-color: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .icbtn {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink-2);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .icbtn:hover {
+  background: var(--tm-surface-3);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .icbtn.is-on {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lyformat {
+  background: var(--tm-surface-3);
+  color: var(--tm-ink-2);
+  border-radius: var(--tm-radius-pill);
+}
+
+/* --------------------------------------------------------------------------
+   7. 大厅：主视觉
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero {
+  background-color: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__badge {
+  font-family: var(--tm-font-mono);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__scrim {
+  background: linear-gradient(180deg, transparent 34%, var(--tm-scrim) 100%);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__cover {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__meta {
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__sub {
+  color: rgba(255, 255, 255, 0.8);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__play {
+  background: var(--tm-accent);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-accent-ink);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__play:hover {
+  background: var(--tm-accent-2, var(--tm-accent));
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__ghost {
+  background: var(--tm-surface);
+  background: color-mix(in srgb, var(--tm-surface) 84%, transparent);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__ghost:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__lock {
+  background: var(--tm-surface);
+  background: color-mix(in srgb, var(--tm-surface) 84%, transparent);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-hero__lock[aria-pressed="true"] {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hero-fly__art {
+  border-radius: var(--tm-radius-card);
+}
+
+/* --------------------------------------------------------------------------
+   8. 大厅：内容轨 / 侧键 / 公开推荐 / 四入口
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-rail {
+  border-top: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-rail.is-plat {
+  border-top: 0;
+  border-radius: var(--tm-radius-card);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-cell + .hall-cell {
+  border-top: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-cta {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow-inset);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-cta__btn {
+  background: var(--tm-accent);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-accent-ink);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-cta__btn:hover {
+  background: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-tools__i {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-tools__i:hover {
+  background: var(--tm-surface-2);
+  border-color: var(--tm-line);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tool-card__ico {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-tools__i:hover .tool-card__ico {
+  background: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tool-card__idx,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tool-card__c {
+  font-family: var(--tm-font-mono);
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tool-card__n {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-thumb,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-pl__cover {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-pl__play {
+  background: var(--tm-accent);
+  color: var(--tm-accent-ink);
+  border-radius: var(--tm-radius-pill);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-sidekeys {
+  background: var(--tm-surface-2);
+  border-radius: var(--tm-radius-pill);
+  box-shadow: inset 0 0 0 var(--tm-border-w) var(--tm-line);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .srail__i {
+  color: var(--tm-ink-2);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .srail__i[aria-checked="true"] {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .srail__thumb {
+  background: var(--tm-surface-3);
+  border-radius: var(--tm-radius-input);
+  box-shadow: inset 0 0 0 var(--tm-border-w) var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .srail__fold {
+  color: var(--tm-ink-2);
+  border-radius: var(--tm-radius-input);
+}
+
+/* --------------------------------------------------------------------------
+   9. 大厅：铺色态（保留 --plat-* 平台色，只改形状/描边/字）
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-plat {
+  border-radius: var(--tm-radius-card);
+  outline: var(--tm-border-w) solid var(--tm-line);
+  outline-offset: calc(-1 * var(--tm-border-w));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .hall-plat__bar {
+  border-radius: var(--tm-radius-input);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pstrip__i,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pstrip__crumb-seg {
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pstrip__search {
+  border-radius: var(--tm-radius-pill);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pstrip__search-input,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pstrip__name,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pstrip__crumb {
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .psrc {
+  border-radius: var(--tm-radius-card);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ow__item {
+  border-radius: var(--tm-radius-input);
+  font-family: var(--tm-font-body);
+}
+
+/* --------------------------------------------------------------------------
+   10. 大厅：跑马带
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .marq__art {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .marq__card b {
+  color: inherit;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .marq__card em {
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .marq__tag {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .marq__note {
+  font-family: var(--tm-font-body);
+}
+
+/* --------------------------------------------------------------------------
+   11. 我的平台卡（保留平台色 / --plink，只改形状与字体）
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat {
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat:hover {
+  box-shadow: var(--tm-shadow);
+}
+/* 平台卡的正反面各自裁切，描边挂到面上，负 offset 保证画在封面图之上 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__front,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__back {
+  border-radius: var(--tm-radius-card);
+  outline: var(--tm-border-w) solid var(--tm-line);
+  outline-offset: calc(-1 * var(--tm-border-w));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__logo {
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat.is-in .plat__logo {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__foot {
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__qr {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__qrph,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__qrmsg {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .plat__qrmsg.is-err {
+  color: var(--tm-accent);
+}
+
+/* --------------------------------------------------------------------------
+   12. 设置：外壳 / 侧栏 / 卡片
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setconsole {
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setconsole__dots {
+  opacity: 0.35;
+}
+/* 极光是一团 26px 模糊的装饰层；非玻璃主题不要它，避免又回到玻璃质感 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setconsole__aurora {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setconsole__shiny {
+  background: none;
+  color: var(--tm-ink);
+  -webkit-text-fill-color: currentColor;
+  animation: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setnav__item {
+  border: 1px solid transparent;
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-3);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setnav__item:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setnav__item.is-on {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__sec.setcard {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setcard::before {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setcard:hover {
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__row {
+  border-bottom: var(--tm-border);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__label {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__val {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__hint {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__note {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__caret {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__act {
+  color: var(--tm-ink-3);
+  border-bottom-color: var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__act:hover {
+  color: var(--tm-ink);
+  border-bottom-color: var(--tm-ink);
+}
+
+/* --------------------------------------------------------------------------
+   13. 设置：控件 / 输入 / 滑杆 / 开关 / 背景效果
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__seg button {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink-3);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__seg button.is-on {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__switch {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__switch:hover {
+  border-color: var(--tm-line-strong);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__switch[aria-checked="true"] {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__switch-knob {
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-line-strong);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  .setpage__switch[aria-checked="true"] .setpage__switch-knob {
+  background: var(--tm-accent-ink);
+  border-color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__switch:focus-visible {
+  outline: 2px solid var(--tm-focus);
+  outline-offset: 3px;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__range {
+  accent-color: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__avatar {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__avatar--ph {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .setpage__mini {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__card {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__card:hover {
+  border-color: var(--tm-line-strong);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__card.is-on {
+  border-color: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__name,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__color,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__state {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__card.is-on .bgfx__name {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .bgfx__swatch {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+
+/* 设置页里的自定义音源文件夹（local.css 的导入区也归设置页） */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .local-box {
+  border-top: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .local-folder__tab {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-bottom: 0;
+  border-radius: var(--tm-radius-input) var(--tm-radius-input) 0 0;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .local-folder__panel {
+  background: linear-gradient(180deg, var(--tm-surface-2) 0%, var(--tm-surface) 100%);
+  border-radius: 0 var(--tm-radius-input) var(--tm-radius-input) var(--tm-radius-input);
+  box-shadow: inset 0 0 0 var(--tm-border-w) var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .local-folder__ic {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .local-folder__sub,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .local-folder__exts {
+  color: var(--tm-ink-3);
+}
+
+/* --------------------------------------------------------------------------
+   14. 浏览 / 搜索 / 歌曲列表
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track {
+  background: transparent;
+  border-bottom: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track.is-current {
+  background: var(--tm-surface-2);
+  background: color-mix(in srgb, var(--tm-accent) 10%, var(--tm-surface));
+}
+/* 每首歌封面色晕染是纯装饰，且带 blur；非玻璃主题一律关掉 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track::after {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track__cover {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track__name {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track.is-current .track__name {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track__sub,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track__dur {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track__flag {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .track-group {
+  border-bottom: var(--tm-border);
+  color: var(--tm-ink-3);
+  font-family: var(--tm-font-mono);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .browse__end {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pl {
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pl:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pl.is-active {
+  background: var(--tm-surface-3);
+  box-shadow: inset 0 0 0 var(--tm-border-w) var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pl img {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pl__count {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .head__cover {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .head__text p {
+  color: var(--tm-ink-3);
+}
+
+/* --------------------------------------------------------------------------
+   15. 歌手 / 专辑页（pages.css 的 .pg-*）
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-ava {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-counts,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-brief,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-desc {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-sec {
+  border-top: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-sec__h span,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-kicker {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row {
+  border-top: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row.is-on {
+  background: var(--tm-surface-2);
+  background: color-mix(in srgb, var(--tm-accent) 9%, var(--tm-surface));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row__n {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row.is-on .pg-row__n,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row.is-on .pg-row__i {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row__i,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row__d,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row__a {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-row__cov {
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-tbl .pg-row--head {
+  border-bottom: var(--tm-border);
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-search {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-search::placeholder {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-sort {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-sort button {
+  color: var(--tm-ink-3);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-sort button:hover {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-sort button.is-on {
+  background: var(--tm-ink);
+  color: var(--tm-surface);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-more {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-more:hover {
+  border-color: var(--tm-line-strong);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-album__cover {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-album__cover:hover {
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-album__name {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-album__meta {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-album-art {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-album-artist {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-play {
+  background: var(--tm-accent);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-accent-ink);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-play:hover {
+  background: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-collect {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-collect:hover {
+  border-color: var(--tm-line-strong);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-collect.is-on {
+  background: var(--tm-surface-2);
+  border-color: var(--tm-line-strong);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .pg-desc__more {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+
+/* --------------------------------------------------------------------------
+   16. 我的专辑（pages.css 的 .ma-*）
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma {
+  /* pages.css 的 .ma 自己定义了两档局部墨色，必须就地重映射 */
+  --ma-ink-4: var(--tm-ink-3);
+  --ma-rule-soft: var(--tm-line);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-count {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-stage:focus-visible {
+  outline: 2px solid var(--tm-focus);
+  outline-offset: 14px;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-item__art,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-item__back {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: var(--tm-shadow-sm);
+}
+/* 唱片封面上的斜向玻璃高光；非玻璃主题不需要 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-item__art::after,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-item__back::after {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-item__veil {
+  background: var(--tm-bg);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-item.is-sel .ma-item__art,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-item.is-sel .ma-item__back {
+  box-shadow: 0 0 0 var(--tm-border-w) var(--tm-accent-2, var(--tm-accent)), var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-drawer {
+  background: var(--tm-card-bg);
+  border-left: var(--tm-border);
+  box-shadow: var(--tm-shadow);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-drawer__h {
+  border-bottom: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-cta {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-cta:hover {
+  border-color: var(--tm-line-strong);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-empty__s,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-note {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-empty__b {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-row {
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-row:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-row__t {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ma-row__a {
+  color: var(--tm-ink-3);
+}
+
+/* 平台里的「我的专辑」面和全屏专辑页是两块自带白纸 + 局部 token 的嵌入视图
+   （app.css 用 ID 写死了 --ink 系列与白底）。base 的 .ma 局部 token 会盖掉它们，
+   这里只把这两块恢复成白纸原文，其余主题规则仍生效。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums .ma {
+  --ma-ink-4: rgb(23 23 26 / 0.55);
+  --ma-rule-soft: rgb(23 23 26 / 0.08);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums .ma {
+  color: #17171a;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums :is(.ma-row__t, .ma-empty__t) {
+  color: #17171a;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums
+  :is(.ma-row__a, .ma-count, .ma-kicker, .ma-empty__s, .ma-note) {
+  color: rgba(23, 23, 26, 0.6);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums :is(.ma-item__art, .ma-item__back) {
+  background: #fff;
+  border: 0;
+  border-radius: 2px;
+  box-shadow: 0 20px 36px -28px rgba(20, 24, 35, 0.55), 0 0 0 1px rgba(21, 21, 24, 0.08);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums .ma-item__veil {
+  background: #fff;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums .ma-drawer {
+  background: #fff;
+  border-left: 1px solid rgba(23, 23, 26, 0.12);
+  box-shadow: -30px 0 70px -56px rgba(20, 24, 35, 0.55);
+  color: #17171a;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.plat-face--albums, .ma-fs) #view-myalbums .ma-row:hover {
+  background: rgba(21, 21, 24, 0.04);
+}
+
+/* --------------------------------------------------------------------------
+   17. 本地音乐（local.css 的 .lc-*）
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-head {
+  border-bottom: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-kicker,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-sub {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-btn {
+  background: var(--tm-accent);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-accent-ink);
+  box-shadow: var(--tm-shadow-sm);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-btn:hover {
+  background: var(--tm-accent-2, var(--tm-accent));
+  opacity: 1;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-btn--ghost {
+  background: transparent;
+  border: var(--tm-border);
+  color: var(--tm-ink);
+  box-shadow: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-btn--ghost:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-row {
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-row:hover,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-row:focus-visible {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-row:active {
+  background: var(--tm-surface-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-name {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-artist,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-dur,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-i {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-empty {
+  border: var(--tm-border);
+  border-style: dashed;
+  border-radius: var(--tm-radius-card);
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .lc-del:hover {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+
+/* --------------------------------------------------------------------------
+   18. 工具箱（toolpage / tools-page）
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .toolpage {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .toolpage__head {
+  border-bottom: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .toolpage__eyebrow,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .toolpage__sub {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__card {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow-sm);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__card:hover {
+  border-color: var(--tm-line);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__ico {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__card:hover .tools-page__ico {
+  background: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__idx,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__c,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__go {
+  font-family: var(--tm-font-mono);
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .tools-page__n {
+  color: var(--tm-ink);
+}
+
+/* --------------------------------------------------------------------------
+   19. 播放页：外壳 / 背景 / 封面 / 传输 / 底栏
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) {
+  --now-font: var(--tm-font-body);
+  --now-fg: var(--tm-ink);
+  --now-fg-2: var(--tm-ink-2);
+  --now-muted: var(--tm-ink-3);
+  background: var(--tm-bg);
+}
+/* 封面背景保留（用户能看出是哪首歌），但压暗、降饱和，交给主题底接管 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) #now-bg {
+  opacity: 0.18;
+  filter: blur(44px) saturate(0.55);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) #now-veil {
+  background: var(--tm-bg);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--tm-bg) 46%, transparent) 0%,
+    color-mix(in srgb, var(--tm-bg) 82%, transparent) 44%,
+    var(--tm-bg) 100%);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .now__bar {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .now__title {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .now__sub {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .now__tab {
+  color: var(--tm-ink-3);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .now__tab.is-on {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .now__lyrics {
+  /* 播放页歌词是无框压在封面薄雾上的，这里不加卡片底，只换字色 */
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .lyformat {
+  background: var(--tm-surface-3);
+  color: var(--tm-ink-2);
+}
+
+/* 歌词只在歌词面板里主题化；大厅海报上的 .hall-hero__rows .ly 继续用白色 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.lyrics, .now__lyrics) .ly {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.lyrics, .now__lyrics) .ly:not(.is-active):hover {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.lyrics, .now__lyrics) .ly.is-active {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.lyrics, .now__lyrics) .ly__tr {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.lyrics, .now__lyrics) .ly__c {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.lyrics, .now__lyrics) .ly__c.is-sung {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .now__lyrics-head .panel__label {
+  color: var(--tm-ink-3);
+}
+
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .disc {
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .disc__glow {
+  display: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ntr {
+  background: transparent;
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink);
+  box-shadow: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ntr:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ntr.is-on {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ntr--play {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+  color: var(--tm-accent-ink);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .ntr--play:hover {
+  background: var(--tm-accent-2, var(--tm-accent));
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .dock {
+  background: var(--tm-card-bg);
+  border-top: var(--tm-border);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .dock__art {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: 0 var(--tm-radius-input) 0 0;
+  box-shadow: none;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .dock__bar {
+  background: var(--tm-surface-3);
+  box-shadow: inset 0 1px 0 var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .dock__head {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .beats {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .beats__head,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .beats__unit {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .beats__num {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .beats.is-locked .beats__num {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+/* 3 行歌词预览的白色光晕换成主题底，避免浅色封面上白得发灰 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .peek::before {
+  background: var(--tm-bg);
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--tm-bg) 80%, transparent),
+    color-mix(in srgb, var(--tm-bg) 46%, transparent) 60%,
+    transparent 88%);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .peek__bar {
+  background: var(--tm-line-strong);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .peek__line {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .peek__line--cur {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .peek__hint {
+  color: var(--tm-ink-3);
+}
+
+/* --------------------------------------------------------------------------
+   20. 抽屉 / 队列
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .drawer {
+  /* app.css:6101-6116 在 .drawer 上另立了一套深色 token，必须就地换掉 */
+  --ink: var(--tm-ink);
+  --ink-2: var(--tm-ink-2);
+  --ink-3: var(--tm-ink-3);
+  --ink-4: var(--tm-ink-3);
+  --rule: var(--tm-line);
+  --rule-soft: var(--tm-line);
+  --lg-tint: var(--tm-surface);
+  --lg-edge: var(--tm-line);
+  color: var(--tm-ink);
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .drawer__head {
+  border-bottom: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .drawer__title {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .drawer__x {
+  background: transparent;
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .drawer__x:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .drawer__body {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .drawer__scrim {
+  background: var(--tm-scrim);
+}
+/* #drawer 的局部深色规则用的是 ID 选择器（app.css:4287-4288 等），
+   所以抽屉内部必须带 #drawer 才压得住。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__t {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__label {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__desc {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__caret {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__row {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__row:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__tile {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: var(--tm-shadow-sm);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__tile:hover {
+  background: var(--tm-surface-3);
+  border-color: var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__ico {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  box-shadow: none;
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__val {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__row--diy {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .drawer__row--diy:hover {
+  background: var(--tm-surface-3);
+  border-color: var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .diy-toggle__label,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .diy__val {
+  color: var(--tm-ink-2);
+}
+/* 抽屉 DIY 开关：app.css:4332-4346 用 #drawer 写死了深色玻璃配色 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .setpage__switch {
+  background: var(--tm-surface-3);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .setpage__switch:hover {
+  border-color: var(--tm-line-strong);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .setpage__switch[aria-checked="true"] {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .setpage__switch[aria-checked="true"] .setpage__switch-knob {
+  background: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .setpage__switch:focus-visible {
+  outline-color: var(--tm-focus);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer .nld__b {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-2);
+}
+/* #drawer-stage-list 是自成一体的深色形态目录（app.css:912 起），
+   不跟随纸面主题；只补一个亮色前景，避免继承抽屉的主题墨色。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #drawer-stage-list {
+  color: #f4f5f8;
+}
+
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qrow {
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qrow:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qrow.is-on {
+  background: var(--tm-surface-3);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qrow__a,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qrow__d,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qrow__i {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qrow.is-on .qrow__i {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .qrow {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .qrow:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body.is-now:not(.is-stage) .qrow.is-on {
+  background: var(--tm-surface-3);
+}
+
+/* --------------------------------------------------------------------------
+   21. 弹窗 / 提示 / 更新 / 二维码
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .modal {
+  background: var(--tm-scrim);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .modal__card {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  box-shadow: var(--tm-shadow);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .modal__lead {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qr__box {
+  background: var(--tm-surface);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qr__ph,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qr__status {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .field {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .field input {
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .field__cc {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .form__err {
+  color: var(--tm-accent-2, var(--tm-accent));
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .rule {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .rule::before,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .rule::after {
+  background: var(--tm-line);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .vip-tip {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .like-toast {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-pill);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__title {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__title i {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__x {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__x:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__btn {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__btn:hover {
+  background: var(--tm-surface-3);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__btn--go {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updtoast__btn--go:hover {
+  background: var(--tm-accent-2, var(--tm-accent));
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal {
+  background: var(--tm-scrim);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__card {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-card);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__title {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__title i {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__desc {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__x {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__x:hover {
+  background: var(--tm-surface-2);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__btn {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__btn:hover {
+  background: var(--tm-surface-3);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__btn--go {
+  background: var(--tm-accent);
+  border-color: var(--tm-accent);
+  color: var(--tm-accent-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .updmodal__btn--go:hover {
+  background: var(--tm-accent-2, var(--tm-accent));
+  color: var(--tm-accent-ink);
+}
+
+/* --------------------------------------------------------------------------
+   22. 手机（/m）：进度线 / 队列 sheet / 来源悬浮菜单
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #phone-progress {
+  background: var(--tm-line-strong);
+  background: color-mix(in srgb, var(--tm-ink) 18%, transparent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #phone-progress > i {
+  background: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #phone-progress .pp-ring {
+  border-color: var(--tm-accent);
+  background: var(--tm-surface);
+  background: color-mix(in srgb, var(--tm-surface) 40%, transparent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #phone-progress .pp-ring::after {
+  background: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #phone-progress:focus-visible {
+  outline: 2px solid var(--tm-focus);
+  outline-offset: 6px;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__mask {
+  background: var(--tm-scrim);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__panel {
+  background: var(--tm-card-bg);
+  border-top: var(--tm-border);
+  border-radius: var(--tm-radius-card) var(--tm-radius-card) 0 0;
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__head {
+  border-bottom: var(--tm-border);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__title {
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__count {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__now {
+  background: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__now-dot {
+  background: var(--tm-accent);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__x {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__list .qrow {
+  color: var(--tm-ink-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__list .qrow:hover {
+  background: var(--tm-surface-2);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .qs__list .qrow.is-on {
+  background: var(--tm-surface-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #glide-select-menu {
+  background: var(--tm-card-bg);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+  box-shadow: var(--tm-shadow);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) #glide-select-menu .gs-row {
+  border-radius: var(--tm-radius-input);
+}
+
+/* --------------------------------------------------------------------------
+   23. 输入 / 焦点 / 选区 / 滚动条
+   -------------------------------------------------------------------------- */
+/* 只覆盖明确的输入位置；时间轴滑杆不在这些容器里，不会被命中。
+   原生 select/textarea 单独写并避开 .view--audio，保证 .eqx 工具维持暗色原样。 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.pg-search,
+      .setpage__row input:not([type="checkbox"]):not([type="radio"]):not([type="range"])) {
+  background-color: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.pg-search,
+      .setpage__row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]))::placeholder {
+  color: var(--tm-ink-3);
+}
+/* 搜索胶囊和 .field 自身已经是主题表面，里面的 input 不能再套一层边框 */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search input,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .field input {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search input::placeholder,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .field input::placeholder {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .search:focus-within {
+  box-shadow: inset 0 0 0 2px var(--tm-focus);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .field:focus-within {
+  outline: 2px solid var(--tm-focus);
+  outline-offset: 1px;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  .view:not(.view--audio) select,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  .view:not(.view--audio) textarea {
+  background-color: var(--tm-surface-2);
+  border: var(--tm-border);
+  border-radius: var(--tm-radius-input);
+  color: var(--tm-ink);
+  font-family: var(--tm-font-body);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  .view:not(.view--audio) :is(select, textarea)::placeholder {
+  color: var(--tm-ink-3);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.btn, .tbtn, .icbtn, .setpage__seg button, .setpage__act, .setpage__mini,
+      .setnav__item, .drawer__tile, .drawer__row, .drawer__x, .hall-tools__i,
+      .hall-cta__btn, .hall-hero, .srail__i, .srail__fold, .pstrip__i,
+      .pstrip__crumb-seg, .tools-page__card, .track, .qrow, .ma-cta,
+      .pg-play, .pg-collect, .pg-more, .lc-btn):focus-visible {
+  outline: 2px solid var(--tm-focus);
+  outline-offset: 2px;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  :is(.pg-search,
+      .setpage__row input:not([type="checkbox"]):not([type="radio"]):not([type="range"])):focus-visible,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage)
+  .view:not(.view--audio) :is(select, textarea):focus-visible {
+  outline: 2px solid var(--tm-focus);
+  outline-offset: 1px;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) ::selection {
+  background: var(--tm-accent);
+  background: color-mix(in srgb, var(--tm-accent) 30%, transparent);
+  color: var(--tm-ink);
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) ::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) ::-webkit-scrollbar-track {
+  background: transparent;
+}
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) ::-webkit-scrollbar-thumb {
+  background: var(--tm-line-strong);
+  border-radius: var(--tm-radius-pill);
+}
+
+/* --------------------------------------------------------------------------
+   24. 音频均衡器：独立暗色工具，不算主题范围。
+   这里只把 base 映射过去的字体变量复位，避免老工具被主题字体影响。
+   -------------------------------------------------------------------------- */
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .view--audio,
+html[data-ui-theme]:where(:not([data-ui-theme="glass"])) body:not(.is-stage) .eqsheet {
+  --font-body: "Geist", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-body);
+}
+

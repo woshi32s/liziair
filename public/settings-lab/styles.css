@@ -86,7 +86,7 @@ h1, h2, h3, p { margin: 0; }
    ============================================================ */
 .labbar {
   position: fixed;
-  inset: 0 0 auto;
+  top: 0;  right: 0;  bottom: auto;  left: 0;
   z-index: 100;
   display: flex;
   align-items: center;

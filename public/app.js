@@ -19,6 +19,7 @@
     viewArtist: $('view-artist'), viewAlbum: $('view-album'), viewAudio: $('view-audio'),
     viewSettings: $('view-settings'),
     viewMyAlbums: $('view-myalbums'),
+    viewLocal: $('view-local'),
     viewTools: $('view-tools'),
     viewForms: $('view-forms'), formsFrame: $('forms-frame'),
     brand: $('brand'), btnBack: $('btn-back'),
@@ -46,6 +47,50 @@
   };
 
   /* ================================================================== *
+   * 平台显示管理（设置页「平台管理」读写，lizi.platforms.v1）
+   * ------------------------------------------------------------------
+   * 数组 = 允许出现的平台 id；没有这条记录 = 五家全开、自定义音源关。
+   * 只影响**展示**（大厅平台条 / 手机平台导航 / 搜索音源页签），
+   * 不碰登录、播放、音频。设置页的登录行永远保留，方便随时再打开。
+   * 已登录平台也听用户的：显式隐藏优先；正在铺色的平台被关掉时，
+   * 大厅会退回普通态（restoreHallTheme 自己处理）。
+   * ================================================================== */
+  const PlatVis = (() => {
+    const KEY = 'lizi.platforms.v1';
+    const ALL = ['netease', 'qq', 'kugou', 'qishui', 'bodian'];
+    const LOCAL = 'local';
+    const IDS = [...ALL, LOCAL];
+
+    function get() {
+      try {
+        const raw = localStorage.getItem(KEY);
+        if (!raw) return new Set(ALL);
+        const arr = JSON.parse(raw);
+        if (!Array.isArray(arr)) return new Set(ALL);
+        const out = arr.map(String).filter((id) => IDS.includes(id));
+        return new Set(out);
+      } catch { return new Set(ALL); }
+    }
+    function has(id) { return get().has(id); }
+    /** 写白名单并广播；空数组 = 全部隐藏（大厅有自己的空态兜底） */
+    function set(ids) {
+      const next = [...new Set(Array.isArray(ids) ? ids : [])].filter((id) => IDS.includes(id));
+      try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* 隐私模式：本次仍生效 */ }
+      /* bubbles:true —— 大厅的 refreshPlatformUI / paintBgFx 挂在 window 上；
+         不冒泡时 document 上派发只有 document 监听器收得到，平台管理改完
+         必须刷新页面才看见（自定义音源首次导入就是这个症状）。 */
+      document.dispatchEvent(new CustomEvent('lizi:platforms', { bubbles: true }));
+    }
+    function toggle(id, on) {
+      if (!IDS.includes(id)) return;
+      const s = get();
+      if (on) s.add(id); else s.delete(id);
+      set([...s]);
+    }
+    return { KEY, ALL, LOCAL, IDS, get, has, set, toggle };
+  })();
+
+  /* ================================================================== *
    * 歌手页 / 专辑页
    *
    * 页面本体整体在 public/pages/（ESM，按需 import），这里只留四件事：
@@ -65,6 +110,7 @@
       openArtist(id) { if (id) load().then((m) => m && m.openArtist(+id)); },
       openAlbum(id) { if (id) load().then((m) => m && m.openAlbum(+id)); },
       openMyAlbums() { load().then((m) => m && m.openMyAlbums()); },
+      openLocal() { load().then((m) => m && m.openLocal()); },
       openArtistFromSong(sid) { if (sid) load().then((m) => m && m.openArtistFromSong(+sid)); },
       back() { return mod ? mod.back() : false; },
       onShow(v) { if (mod) mod.onShow(v); },
@@ -131,9 +177,6 @@
   let profile = null;
   let currentList = [];
   let view = 'hall';        // 大厅是入口视图（browse 现在只放搜索结果/歌单曲目）
-  /* Lab 模块把「停自动过渡演示音源」注册到这里：离开实验室 / 切走分页时要立刻掐掉。
-     那几个是一次性 BufferSource，挂在共享 master 上，不主动停会自己响完（≤8s）。 */
-  let labStopXfade = null;
 
   const fmtTime = (s) => {
     if (!isFinite(s) || s < 0) s = 0;
@@ -172,8 +215,17 @@
    * 整页没有"点外面关掉"这回事，Esc 归各工具自己的浮层处理。
    * ================================================================== */
   const TOOLBOX = [
-    { id: 'migrate', name: '歌单搬运', desc: '跨平台迁移', act: () => window.MIGRATE && window.MIGRATE.open() },
+    /* 2026-11-21：歌单世界杯。随机抽签 + 一对一淘汰，选出歌单里最喜欢的一首。
+       入口同时要加进 hallEntries()（铺色态工具箱面只读那份数组）。 */
+    { id: 'worldcup', name: '歌单世界杯', desc: '淘汰赛选出最爱', act: () => window.LIZI_WORLDCUP && window.LIZI_WORLDCUP.open() },
+    /* 2026-11-22：歌单搬运 / AI 工坊 只在开发者版（edition=dev）保留，
+       用户版（默认 release）不出现。 */
+    { id: 'migrate', name: '歌单搬运', desc: '跨平台迁移', devOnly: true, act: () => window.MIGRATE && window.MIGRATE.open() },
     { id: 'spatial', name: '空间音频', desc: '360° 声场', act: () => window.LIZI_SPATIAL && window.LIZI_SPATIAL.open() },
+    /* 2026-11-15：AI 自定义工坊。用户拿网页版 AI 写的形态粘回来，
+       存在本地 IndexedDB（lizi-studio），保存后自动进形态菜单。
+       实现见 public/studio/studio.js —— 用户代码一律跑在沙箱 iframe 里。 */
+    { id: 'studio', name: 'AI 工坊', desc: '自己做形态', devOnly: true, act: () => window.LIZI_STUDIO && window.LIZI_STUDIO.open() },
     // 小卡先隐藏（文件保留，入口和图标一起注释，恢复时取消注释即可）
     // { id: 'holocard', name: '小卡', desc: '专辑 · 导入', act: () => window.LIZI_HOLOCARD && window.LIZI_HOLOCARD.open() },
   ];
@@ -181,10 +233,16 @@
   /* 24×24 描边、继承 currentColor。画法和大厅入口 ICONS 一致（1.6 / round cap），
      在 46px 图标砖里缩到 22px 才不糊。 */
   const TOOL_ICONS = {
+    /* 歌单世界杯：奖杯 + 杯身星芒（冠军的意思） */
+    worldcup: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5h8v4.8a4 4 0 0 1-8 0z"/><path d="M8 5.2H5.2A1.2 1.2 0 0 0 4 6.4v.7a3.2 3.2 0 0 0 3.2 3.2H8"/><path d="M16 5.2h2.8A1.2 1.2 0 0 1 20 6.4v.7a3.2 3.2 0 0 1-3.2 3.2H16"/><path d="M12 12.3v3.2"/><path d="M9.2 15.5h5.6l.8 4.9H8.4z"/><path d="M8 20.4h8"/><path d="m12 6.1.45 1.05 1.15.12-.85.78.23 1.15L12 8.65l-1 .55.23-1.15-.85-.78 1.15-.12z"/></svg>`,
     migrate: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="8.5" width="7.5" height="8" rx="1.5"/><path d="M7 4.5h12.5"/><path d="m17.5 2 2.5 2.5-2.5 2.5"/><path d="M17 19.5H4.5"/><path d="m6.5 17-2.5 2.5 2.5 2.5"/></svg>`,
     spatial: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="7.5"/><ellipse cx="12" cy="12" rx="3.2" ry="7.5"/><path d="M4.5 12h15"/><path d="M6.2 7.8h11.6"/><path d="M6.2 16.2h11.6"/></svg>`,
+    /* AI 工坊：扳手 + 星芒（「自己做一个」的意思） */
+    studio: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a3.7 3.7 0 0 0 4.9 4.9l-9 9a2.4 2.4 0 0 1-3.4-3.4z"/><path d="M8.5 4.2 9.6 6.7l2.5 1.1-2.5 1.1L8.5 11.4 7.4 8.9 4.9 7.8l2.5-1.1z"/></svg>`,
     /* 小卡入口先隐藏：图标一起注释掉，恢复时整块取消注释。
        小卡：前后错开的两张卡片（前面一张画出山形照片，后面只露上边与右边）
     // holocard: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
@@ -194,12 +252,17 @@
 
   const toolsEsc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  /** 当前版本可见的工具：devOnly 的只在开发者版出现 */
+  function visibleToolbox() {
+    return TOOLBOX.filter((t) => !t.devOnly || stageEdition === 'dev');
+  }
   let toolsGridBound = false;
 
   /** 把 TOOLBOX 画成整页卡片。可重复调用：容器清了重画，委托只挂一次 */
   function paintToolsPage() {
     const grid = $('tools-grid');
-    grid.innerHTML = TOOLBOX.map((t, i) => `
+    const items = visibleToolbox();
+    grid.innerHTML = items.map((t, i) => `
       <button class="tools-page__card" type="button" data-tool="${toolsEsc(t.id)}">
         <span class="tools-page__top">
           <span class="tools-page__ico">${TOOL_ICONS[t.id] || ''}</span>
@@ -218,7 +281,7 @@
     grid.addEventListener('click', (e) => {
       const b = e.target.closest('[data-tool]');
       if (!b) return;
-      const t = TOOLBOX.find((v) => v.id === b.dataset.tool);
+      const t = visibleToolbox().find((v) => v.id === b.dataset.tool);
       if (t) t.act();
     });
   }
@@ -230,6 +293,12 @@
   let heroFlightCleanup = null;
 
   function show(next) {
+    /* 2026-11-16：设置页的进出统一在这里记账 ——
+       进（任意入口，包括大厅/形态页的齿轮）先拍一份设置快照；
+       出（顶栏返回、任何 lizi:show 切走）再把快照和当前值比一次，
+       只有真改过才软刷新（实现在下面「离开设置页的静默软刷新」段）。 */
+    if (next === 'settings' && view !== 'settings') snapshotSettingsState();
+    else if (view === 'settings' && next !== 'settings') softRefreshAfterSettings();
     view = next;
     if (next !== 'now') {
       document.body.classList.remove('from-track', 'is-cover-flying', 'is-hero-flying');
@@ -262,15 +331,13 @@
     el.viewAudio.classList.toggle('is-active', next === 'audio');
     el.viewSettings.classList.toggle('is-active', next === 'settings');   // 设置（整页）
     el.viewMyAlbums.classList.toggle('is-active', next === 'myalbums');   // 我的专辑（3D 陈列架）
+    el.viewLocal.classList.toggle('is-active', next === 'local');         // 本地音乐（自定义音源）
     el.viewTools.classList.toggle('is-active', next === 'tools');         // 工具箱（整页）
     el.viewForms.classList.toggle('is-active', next === 'forms');         // 形态长廊（整页 iframe）
     document.body.dataset.view = next;      // pages/nav.js 靠它记「来源页」
     /* 离开设置页：扫码轮询立刻停（面板时代是 closePanel 顺手做的，现在没有面板了） */
     if (next !== 'settings') pauseSettingsPolls();
     Pages.onShow(next);                     // 离开歌手/专辑页 → 访问栈作废
-    /* 离开实验室（大厅 / 搜索 / 播放页 / 形态页）时，自动过渡的演示音源要立刻停，
-       不能让它自己响完 —— 用户要的是「我走了就不该还有声音」。 */
-    if (next !== 'lab' && labStopXfade) labStopXfade();
     if (next === 'hall') Hall.mount();
     /* 离开大厅：吸底卡的 scroll 监听要立刻摘掉（见 Hall.leave） */
     else Hall.leave();
@@ -297,7 +364,8 @@
         : next === 'artist' ? el.viewArtist : next === 'album' ? el.viewAlbum
           : next === 'audio' ? el.viewAudio : next === 'settings' ? el.viewSettings
             : next === 'tools' ? el.viewTools
-              : next === 'myalbums' ? el.viewMyAlbums : null;
+              : next === 'myalbums' ? el.viewMyAlbums
+                : next === 'local' ? el.viewLocal : null;
       onScroll(sv ? sv.scrollTop : 0);
     }
     location.hash = next === 'now' ? 'now' : '';
@@ -314,10 +382,16 @@
         requestAnimationFrame(() => {
           alignArtToLyrics();
           LiquidGlass.refresh();
-          setTimeout(alignArtToLyrics, 700);
+          /* 歌词列在大厅里是不滚的（scrollLyricToEl 只在 view === 'now' 时干活），
+             所以一进页面就得硬落位到当前句，不然先看到第一句再"反应过来"跳过去 */
+          jumpLyricToActive();
+          setTimeout(() => { alignArtToLyrics(); jumpLyricToActive(); }, 700);
         });
       } else setLyricsOpen(false);
     }
+    /* 形态字幕：进形态时用 Player.state 兜底画一次（可能还没收到 lyric 事件）；
+       离开时 body.is-stage 已摘掉，这里调一次就会收起。 */
+    StageSubtitle.refresh();
     syncDock();
     if (next === 'now') startNowLoop(); else stopNowLoop();
   }
@@ -699,6 +773,7 @@
      因为 offsetParent 会随版式变化（现在 .shell.now 是 position:relative）。
      -------------------------------------------------------------------------- */
   let lyRaf = 0, lyFrom = 0, lyTo = 0, lyT0 = 0, lyUserAt = 0;
+  let lyJumpToken = 0;             // 硬落位重试链的代次：后一次调用作废前一次
   const LY_MS = 560;
   const lyEase = (t) => 1 - Math.pow(1 - t, 3);
 
@@ -731,6 +806,33 @@
       lyRaf = t < 1 ? requestAnimationFrame(step) : 0;
     };
     lyRaf = requestAnimationFrame(step);
+  }
+
+  /* 进播放页 / 歌词列刚重建时，直接把歌词列落位到当前句，不走 560ms 缓动。
+     为什么需要：在大厅时 scrollLyricToEl 因为 view !== 'now' 一直提前返回
+     （见上面那行判断），歌词列的 scrollTop 一直停在 0。点海报进播放页时，
+     用户先看到的是第一句，要等下一次换行才"反应过来"滑到当前句 ——
+     观感就是"闪一下第一句才跳到当前"。这里一次落准，中间不出现错位帧。 */
+  function jumpLyricToActive(until, token) {
+    if (token === undefined) token = ++lyJumpToken;
+    /* 被后一次调用顶掉了，或者已经离开播放页：这条重试链作废 */
+    if (token !== lyJumpToken || view !== 'now') return;
+    const box = el.lyrics;
+    const act = box && box.querySelector('.ly.is-active');
+    /* 面板还在做展开动画时 clientHeight 是 0，量出来是垃圾值：隔几帧再试 */
+    if (!box || !act || box.clientHeight < 80) {
+      const stop = until || performance.now() + 900;
+      if (performance.now() < stop) requestAnimationFrame(() => jumpLyricToActive(stop, token));
+      return;
+    }
+    if (lyRaf) { cancelAnimationFrame(lyRaf); lyRaf = 0; }   // 打断可能在跑的缓动
+    lyUserAt = 0;                                            // 进页面不算"用户刚滚过"
+    const boxR = box.getBoundingClientRect();
+    const curR = act.getBoundingClientRect();
+    const anchorY = boxR.top + boxR.height / 2;
+    const target = box.scrollTop + (curR.top - boxR.top) + curR.height / 2 - (anchorY - boxR.top);
+    const max = Math.max(0, box.scrollHeight - box.clientHeight);
+    box.scrollTop = Math.max(0, Math.min(max, target));
   }
   /* --------------------------------------------------------------------------
      封面服从歌词：把左列（封面 + 信息 + 传输 + 音量）整体下移，
@@ -795,7 +897,8 @@
       const t = Number(line.dataset.t);
       if (!Number.isFinite(t)) return;
       lyUserAt = 0;                 // 清掉"用户刚滚过"的抑制，让自动滚动跟到这一句
-      try { Player.seek(t); } catch { /* 播放器还没准备好就忽略 */ }
+      /* t 是整曲时间；试听片段（汽水 VIP 从高潮起播）要换算成片段内时间 */
+      try { (Player.seekSongTime || Player.seek).call(Player, t); } catch { /* 播放器还没准备好就忽略 */ }
       scrollLyricToEl(line);
     });
   }
@@ -814,9 +917,14 @@
     }
     el.peekHint.textContent = lyricsOpen ? '' : '上拉查看完整歌词';
 
+    /* 这一轮是不是刚重建了整列（换歌 / 歌词晚到）。重建后 scrollTop 归零，
+       所以下面定位当前句时要硬落位，不能让缓动从第一句一路滑下来。 */
+    let builtNow = false;
+
     if (el.lyrics.dataset.count !== String(lines.length)) {
       el.lyrics.dataset.count = String(lines.length);
       el.lyrics.innerHTML = '';
+      builtNow = true;
       /* 换歌时清掉上一首的滚动位置和正在跑的滚动动画：
          不清的话，新歌第一句会从上一首的 scrollTop 一路滑上来，
          看起来就是"进歌一下滑了好多行"。 */
@@ -887,8 +995,11 @@
             if (+n.dataset.i < active) n.classList.add('is-sung-line');
           });
         }
-        // 只在换行时滚动（逐字刷新时不滚，否则歌词会一直抖）；滚动本身走缓动
-        if (!wasActive) scrollLyricToEl(cur);
+        // 只在换行时滚动（逐字刷新时不滚，否则歌词会一直抖）。
+        // 刚重建的列直接落位（没有"从上一首的位置滑过来"这回事），其余情况走缓动
+        if (!wasActive) {
+          if (builtNow) jumpLyricToActive(); else scrollLyricToEl(cur);
+        }
       }
     }
   }
@@ -1049,6 +1160,9 @@
 
   Beat.on('frame', (st) => { beatUI.onFrame(st); StageHost.onLive(st); });
   Beat.on('beat', (b) => { beatUI.onBeat(b); StageHost.onBeat(b); });
+  /* 专用底鼓检测（kick.js）和 Beat 并存：只把触发转发给形态，新的 'kick'
+     消息由形态自愿订阅。shake 总闸只管 beat，这里保持 kick 原样。 */
+  if (window.LIZI_KICK) LIZI_KICK.on((k) => StageHost.onKick(k));
   // 元数据到了立刻显示，不用等下一帧（体感上"秒出"）
   Player.on('bpmsource', ({ bpm, source }) => {
     if (source === 'metadata' && bpm) {
@@ -1769,7 +1883,44 @@
     { id: '661', name: '流光帷幕', desc: '透明画布的流光形态：极光幕、21 条光丝与漂移光斑叠在壁纸之上，字按壁纸亮度自动在暖白与墨色间切换', url: 'stages/661-lumen-veil.html' },
     { id: '662', name: '光在页边', desc: '不对称的光边诗页：歌词在左侧阅读栏逐字从光里浮起，极光与光丝只活在右侧页边，光从字背后经过', url: 'stages/662-lumen-margin.html' },
     { id: '663', name: '弹簧诗行', desc: '每字一条独立弹簧，逐字错帧破土回弹，五组空间构图随句轮换，字缘微光与液态高光条贴在壁纸引擎背景上运行', url: 'stages/663-spring-verse.html' },
-    { id: '664', name: '深渊标本', desc: '一具标本压在纯黑深渊上，横切成切片、每片换成X光/热成像/全息边缘/负片，HUD锁定与引线标注，歌词是它的样本标签', url: 'stages/664-deep-specimen.html' },
+    { id: '664', name: '深渊标本', desc: '把歌曲封面当标本切开：纯黑白拼贴，切片在X光/负片/网点/线稿之间轮换，框、套准标记与浮尘压在整句歌词上', url: 'stages/664-deep-specimen.html' },
+    { id: '665', name: '彩色刊报', desc: '现代彩色刊志铺在案头：专辑封面化作网点海报与专色配比，歌词分栏排进一期页码，非线性运镜俯冲游走，一页读尽便翻向下一版', url: 'stages/665-color-gazette.html' },
+    { id: '666', name: '拼豆工坊', desc: '背景是专辑封面拼成的大幅拼豆钉板；每句歌词由漫天飞来的中空塑料小柱子落位拼出，唱完随机触发烘焙纸熨平定型或直接炸板散豆乱飞', url: 'stages/666-perler-beads.html' },
+    { id: '667', name: '已发送 · 测试2', desc: '504 移动端清晰度专项测试版：修复持续 JS transform 导致的重栅格化退化、消除小屏 .box 先缩后放与高 DPR 纹理超限，保持 WebGL 机身与经典纯白观感', url: 'stages/667-imessage-test2.html' },
+    { id: '668', name: '极性排版', desc: '纯正 AE 动力学排版舞台：25套持续动态分镜，支持一词/两词/三词分词与整句连贯切换，黑白频率（舒缓/适中/高频/极速）可调；默认封面取色一歌一色，快门闸门、透视网格、建筑方括号与斜切裂变', url: 'stages/668-polarity-terminal.html' },
+    { id: '669', name: '已发送 · iOS 26', desc: '全新重构 iOS 26 液态玻璃形态：高清实拍雨滴玻璃壁纸与 DIY 上传、WebGL 实时光学透镜折射顶栏/底栏与穿梭气泡、SF7 图标规范与发送弹射动效', url: 'stages/669-imessage-glass.html' },
+    { id: '670', name: '深夜灯箱', desc: '固定机位对着雨夜便利店，门店招牌把歌词一个字一个字亮出来', camera: true, url: 'stages/670-midnight-lightbox.html' },
+    { id: '671', name: '四季林径', desc: '3D像素风无限林径漫行：镜头向前推进穿过林间小路，随歌曲进度每1/4过渡春夏秋冬，两侧生长出体素树林并随四季变换嫩绿花影、浓翠光斑、秋枫红黄与冬雪银装，飘落樱瓣、萤火、枫叶与雪花，配以精细3D像素歌词', camera: true, url: 'stages/671-four-seasons-woods.html' },
+    { id: '672', name: '啵啵白纸', desc: '纯净留白画布上用Q弹圆润萌字体按YRC逐字弹出，每颗字带干净柔浮空投影', url: 'stages/672-bobo-pop.html' },
+    { id: '673', name: '错视十字街', desc: '400米长焦压扁整条日本十字街成双色插画，随节拍滑动变焦拉出3D纵深、街角转视角揭露侧面并在平视瞬间偷换行人阵型，歌词点亮街尾巨幕与商店街灯牌', camera: true, url: 'stages/673-perspective-illusion-crossing.html' },
+    { id: '674', name: '霓虹雨巷', desc: '第一人称撑伞沿着带老街霓虹的雨夜长街无限漫步，街灯店招与前方素净歌词倒映在脚下湿润积水路面', camera: true, url: 'stages/674-neon-alley-rain.html' },
+    { id: '675', name: '手翻书剧场', desc: '案头摊开一本素描手翻书，镜头缓缓推至满屏画稿；专辑封面以贪心暗度连续绕线一笔笔画出并常驻歌词上方，搭配手绘音频波浪条与 14fps 轻盈残影翻页手写歌词', url: 'stages/675-flipbook-sketch.html' },
+    { id: '676', name: '轨道舷窗 · 晨昏线', desc: '置身多维仪表与警示涂装环绕的太空飞船驾驶舱，经光学鱼眼广角镜头望向漫天银河星海与太阳系八大行星及日冕队列；歌词化作悬浮前窗的 3D 弧面全息投影面板，伴实时频谱微柱与 YRC 逐字全息扫描', url: 'stages/676-orbital-cupola-terminator.html' },
+    { id: '677', name: '太阳雨玻璃花房', desc: '盛夏太阳雨穿过维多利亚拱顶玻璃温室，3D 水雾光雕歌词悬于摇曳蕨叶与丁达尔金光柱之间，经主场景雨滴玻璃折射扭曲、YRC 逐字烘干点亮迸发 3D 花粉，并在湿润水洼映出波纹倒影', url: 'stages/677-sunshower-conservatory.html' },
+    { id: '678', name: '悬塑平衡术', desc: '考尔德×包豪斯 3D 动态雕塑舞台：歌词本身化作悬挂在黄铜平衡臂上的双面漆面金属字牌，逐字物理翻转正对镜头并倾斜力臂，在石膏展墙上实时投射出汉字笔画与几何配重交错的动态剪影', url: 'stages/678-calder-kinetic-mobile.html' },
+    { id: '679', name: '微距终端影院', desc: '纯黑空间中的实拍屏摄终端：支持一镜到底多字体混排连贯运镜与 20 套分镜切镜，逐字键入搭配浅景深虚化、拉焦呼吸、RGB 液晶微粒、光学色散、动态胶片颗粒、1px 坐标追踪框与封面取色', url: 'stages/679-macro-cli-cinema.html' },
+    { id: '680', name: 'FL 音轨台', desc: '仿 FL Studio Mobile 双轨编排页：上轨展示人声切片波条，下轨化作钢琴卷帘以 MIDI 音符横向拼出歌词笔画，随橙色 Playhead 扫过逐字点亮琴键与音符', url: 'stages/680-fl-mobile-playlist.html' },
+    { id: '681', name: '动能排版', desc: '纯正 AE 动力学排版贴片舞台：纯黑与绿幕可切换，默认封面取色主色调并支持自定义色板，支持一词/两词/三词/整句分词切换、全镜 YRC 逐字动效与弹簧连续运镜退场；保留原版 8 段核心分镜神韵并升级 20 套几何动态镜头（共 28 套分镜）', url: 'stages/681-star-kinetic.html' },
+    { id: '682', name: '千禧拉伸', desc: '千禧云底竖屏海报：歌词按词切成一行一词，单词进场在扁与长之间过冲回弹，封面色铺成云层与电光颗粒网点', url: 'stages/682-y2k-stretch.html' },
+    { id: '683', name: '凸镜剧场', desc: '黑色剧场里一面凸面玻璃镜，一镜一两词；镜头跟着词走弧线，带曲线变速、手持摇晃与动态模糊，低频重时银灰转炽橙', url: 'stages/683-convex-mirror.html' },
+    { id: '684', name: '动能建筑', desc: '3D 长廊里每句词是一组混凝土建筑：立柱、悬挑、门洞与台阶四套原型，镜头沿 Z 轴推进，逐词点亮、深度雾与节拍光环', url: 'stages/684-kinetic-architecture.html' },
+    { id: '685', name: '瑞士拼贴', desc: '12×8 瑞士网格上的编辑拼贴：每句按非对称蓝图重排，hero 巨字、竖排词与封面切片交错，节拍硬切反相、快门条与印刷颗粒', url: 'stages/685-swiss-collage.html' },
+    { id: '686', name: '光学狭缝', desc: '整屏是一台光学狭缝相机：排版帧在 10 帧历史里被狭缝扫描、透镜折射和 RGB 色散撕开，强调词触发冲击波，节拍推动镜头与扫描频率', url: 'stages/686-slit-scan.html' },
+    { id: '687', name: '动能镜头', desc: '一句词一个世界坐标镜头：五套排字镜头轮转，相机弹簧甩镜、旧镜头留在世界里变成描边遗迹，节拍触发反相闪与色散重影', url: 'stages/687-camera-stage.html' },
+    { id: '688', name: '放心', desc: '暖纸雾灰 16mm 胶片海报：瘦高字体逐字 YRC 点亮，支持多套调色板与自定义取色、字尾变色，以及仅沉重底鼓触发中心震动', url: 'stages/688-fangxin-poster.html' },
+    { id: '689', name: '全息投影', desc: '梯形全息台 + 向上扩散的体积光锥，文字是多层错位描边合成的 RGB 分离线框，横向扫描干涉带持续掠过，信号崩解时整句被纵向切条错位；四套构图（正面远景 / 侧 35° 近景 / 俯视发射源 / 信号崩解铺满屏）按句轮换，前两句留在远处当描边残影', url: 'stages/689-hologram-projection.html' },
+    { id: '690', name: '达达剪贴', desc: '牛皮纸底上的定格剪纸拼贴：8fps 抽帧手持微抖，每句话被切成锯齿撕边的纸片贴上来，半透明胶带压角、层偏移投影，逐字按印刷渗透点亮；四套版式（拼贴墙 / 巨字块 / 斜向撕裂 / 层叠堆栈）轮换，上一句留成远处的撕纸条残片', url: 'stages/690-dada-paper-collage.html' },
+    { id: '692', name: '热浪折射', desc: '长焦低机位望向一片灼热空气：画面下半部按行切片持续升腾位移，文字被热浪撕开成多层错位重影，暖色条带与地平线剪影随低频呼吸；四套构图（低机位远景 / 热浪撕开的特写 / 地平线 / 只剩边缘的全屏）按句轮换', url: 'stages/692-heat-haze-mirage.html' },
+    { id: '691', name: '狭缝扫描', desc: '横向推轨的时间置换：文字在进入画面中心前被拉成纤细的彩色丝线，抵达基准线瞬间收束还原为清晰字体；每根纵列从不同历史帧取样，基准线扫过时触发横向位移与红蓝色散，四套构图（推轨全景 / 丝线中景 / 基准线特写 / 收束铺满）按句轮换', url: 'stages/691-slit-scan-warp.html' },
+    { id: '693', name: '水银液面', desc: '微距贴着液面掠过的镀铬质感：每个字形由大量圆形液滴在网格采样点上聚集而成，重叠处靠径向渐变自然融合，亮面在左上、暗面统一压在右下；断句时整串崩解成水银珠再重聚，四套构图（液面俯瞰 / 贴面掠影 / 单字液滴特写 / 全屏崩解成珠）按句轮换', url: 'stages/693-liquid-mercury.html' },
+    { id: '695', name: '铅字社论', desc: '一句词就是一页独立的社论跨页，20 套版式（巨幅出血、90° 正交横梁、黑白对切、联系表网格、空心回声、竖排书写、巨字当前词、阶梯、竖条、椭圆轨道、镜面倒影、幽灵数字、窄栏、色块、斜切、极坐标、字号楔形、溢窗、脚注、8×6 网格）按种子轮换，镜头带弹簧沿 2.5D 纵深一页页穿过去；开启「快节奏逐词换镜」后用 LIZI 分词一页一词；逐字按真实 YRC 点亮，封面取色成为纸/墨/强调色，鼓点只触发字形色散与版面闪光、不震镜头，前两句留成远处残影', url: 'stages/695-swiss-editorial.html' },
+    { id: '696', name: '和纸诗镜', desc: '无边暖调和纸上的诗意运镜 PV：非对称墨迹延展、微缩竖排、90° 交叉、水滴斜阶梯、呼吸字距与两栏古诗六套构图轮换，临界阻尼弹簧相机沿游丝穿梭，旧句淡墨残影、封面化作水彩底色', url: 'stages/696-washi-poetry-rig.html' },
+    { id: '698', name: '丝绒建筑', desc: '编辑级排字建筑：一句词一套构图（巨字出血 / 90° 正交横梁 / 黑白对切 / 联系表网格 / 空心回声隧道 / 百叶快门）按种子轮换，弹簧相机沿 3D 走廊甩切推拉，鼓点触发色散与冲镜，前两句留成远处线框残影；中文默认 2–3 字词块，可切逐字/整句', url: 'stages/698-velvet-architecture.html' },
+    { id: '697', name: '流光表情堆', desc: '经典透明底流光字表情瀑布：内置 10 套 8 帧高细节流光字效（紫绶金章/炫彩星芒/裂纹闪光/3D立体彩虹/彩虹细闪等）与 10 种字体造型，支持十全混贴、0.1秒/0.2秒跳闪与丝滑流光、纯白底/微信灰/浅粉底切换、微信刷屏向上堆叠、YRC 逐字扫亮及底鼓 Q 弹', url: 'stages/697-glitter-meme-stack.html' },
+    { id: '699', name: '断时巨刃', desc: '高反差 AE 工业机械 3D 动力学排字舞台：自研 3D 欧拉相机与 10–14 层实体挤出字形深度排序，七套独立分镜导演（液压巨颚 / 钟楼深井 / 擒纵涡轮 / 快门计时墙 / 高架漂移 / 棱镜穹顶 / 零点递归门）按种子轮换与 Cut Gate 硬切，支持封面取色三色调、极性频闪反相、运动残影与 RGB 色散扫描线', url: 'stages/699-chrono-guillotine.html' },
+    { id: '700', name: '失重建筑', desc: '高反差瑞士粗野主义 3D 动力学排字舞台：20 套立体建筑导演（裁切印刷机 / 六格联系表 / 折纸铰链墙 / 柱廊追逐 / 重力翻转摆 / 光圈快门锁 / 电梯深井 / 涡轮螺旋 / 百叶斜切 / 悬臂阶梯 / 递归门框 / 液压巨颚 / 棱镜穹顶 / 抽屉矩阵 / 图腾环绕 / 巨碑骨牌 / 碎裂玻璃 / 传送矩阵 / 监视器阵列 / 径向爆破），支持一镜到底无缝转场（锚点穿镜 / 运镜直飞）与逐词跟唱立体排字，搭配丝滑零震切换与封面四色调取色', url: 'stages/700-zero-gravity-brutalist.html' },
+    { id: '701', name: '声轨锁镜', desc: '参考 mrsarac 的开源项目 ff-unmute：扁平单色 DAW 六轨时间轴（YRC 歌词切片、真实底鼓/拍手/贝斯/全曲峰值主波形与 48 段对数频谱）经 WebGL 透视景深、色散、LED 子像素网格与鼓点行撕裂成像，叠加相机空间锐利追踪连线、锁定红框括弧、12 帧连续飞行运镜及尾奏全轨拉远', url: 'stages/701-daw-tracker-lens.html' },
+    { id: '702', name: '像素奇旅', desc: '3D 像素马里奥立体盒景舞台：全纵深稳固地形与跨峡谷流水、360° 自动环绕与拖拽缩放运镜、白昼/黄昏/星夜/晨曦与晴雨雪雷暴天气实时过渡，搭配随马里奥同行的 3D 像素歌词牌匾与 YRC 逐字金色点亮', camera: true, url: 'stages/702-mario-voxel-odyssey.html' },
   ];
 
   /* ================= 形态版本 / 用户版保留清单（2026-11-08） =================
@@ -1791,6 +1942,52 @@
     '505', '506', '508', '509', '510', '517', '518', '520', '521', '522', '524',
     '525', '540', '542', '552', '557', '559', '561', '563', '571', '572', '580', '582', '588',
     '590', '603', '604', '614', '617', '621', '627', '628', '629', '631', '663',
+    '660', /* 2026-11-12 完工，追加在基准末尾 → 展示时排 504、519 之后 */
+    '620', /* 2026-11-12 完工（花火摩天轮），下一版本上架；比 660 更新 → 排在它前面 */
+    '581', /* 2026-11-12 20:58 完工（空间玻璃视窗） */
+    '570', /* 2026-11-12 21:20 完工（血月鸦群） */
+    '664', /* 2026-11-12 21:40 完工（深渊标本） */
+    '665', /* 2026-11-14 03:31 完工（彩色刊报） */
+    '666', /* 2026-11-14 04:07 完工（拼豆工坊） */
+    /* 2026-11-16：用户点名上架用户版，11 个一起追加。
+       按编号升序写在末尾 —— stageDisplayOrder 会把 rest 整体倒序，
+       所以实际展示是 681、680、679…668（越新越靠前）。
+       670 / 673 / 677 文件都在，用户这次有意不加。
+       STAGE_CATS 这次一个字没动：用户说「分类都错了，我到时候重新分类一遍」，
+       所以这 11 个会落在选择器的「未分类」页签里，等他自己重排。 */
+    /* 2026-11-21：676 轨道舷窗 · 晨昏线 用户点名从用户版去掉，只在开发者版可见。
+       文件与 STAGES 条目都保留，StageHost 仍可按 id 加载。 */
+    '668', '669', '671', '672', '674', '675', '678', '679', '680', '681',
+    /* 2026-11-18：683 凸镜剧场用户验收合格，直接上用户版。
+       写在末尾；stageDisplayOrder 会把 rest 整体倒序，所以实际排在 681 前面。 */
+    '683',
+    /* 2026-11-18：686 光学狭缝用户验收合格，直接上用户版。
+       同样写在末尾，倒序后排在 683 前面。 */
+    '686',
+    /* 2026-11-19：收录用户自创形态「放心」（688）并直接上用户版。
+       2026-11-22：用户点名先从用户版撤下，只在开发者版（edition=dev）可见。
+       文件与 STAGES 条目保留，StageHost 仍可按 id 加载。 */
+    /* 2026-11-19 夜间流水线：690 达达剪贴。倒序后排在 688 前面。 */
+    '690',
+    /* 2026-11-19 夜间流水线：693 水银液面 曾在这里；2026-11-20 用户点名从用户版
+       去掉（「水银页面」），只在开发者版（edition=dev）可见。文件保留，
+       StageHost 仍可按 id 加载。 */
+    /* 2026-11-20：用户点名上架用户版 —— 失重建筑（700）、断石巨刃（699，库里现名
+       「断时巨刃」）、流光表情堆（697）、和纸诗镜（696）、瑞士拼贴（685）。
+       按编号升序写在末尾；stageDisplayOrder 会把 rest 整体倒序，所以实际展示是
+       700、699、697、696、685。 */
+    '685', '696', '697', '699', '700',
+    /* 2026-11-20：用户点名再加三个 —— 暗房显影（564）、重工电锯火花（568）、重字（514）。
+       同样按编号升序写在末尾；倒序后实际展示是 568、564、514，排在上一条的 700 前面。 */
+    '514', '564', '568',
+    /* 2026-11-19：689 全息投影 / 692 热浪折射 / 691 狭缝扫描 从用户版下架，
+       只在开发者版（edition=dev）可见。文件保留，StageHost 仍可按 id 加载。 */
+    /* 2026-11-22：701 声轨锁镜用户点名进用户版。写在末尾；stageDisplayOrder
+       会把 rest 整体倒序，所以实际展示排在 504、519 之后、其它形态之前。 */
+    '701',
+    /* 2026-11-22：558「98磁带记忆」用户点名进用户版。同样写在末尾；
+       rest 倒序后实际排在 701 前面，仍在 504、519 之后。 */
+    '558',
   ];
   const STAGE_RELEASE_IDS = new Set(STAGE_RELEASE_ORDER);
   const STAGE_RELEASE_RANK = new Map(STAGE_RELEASE_ORDER.map((id, i) => [id, i]));
@@ -1807,7 +2004,10 @@
       if (saved === 'dev' || saved === 'release') stageEdition = saved;
     }
   } catch { /* 隐私模式 / 无 location：用默认发行版 */ }
-  const stageAllows = (id) => (stageEdition === 'dev' ? true : STAGE_RELEASE_IDS.has(id));
+  /* 用户自己做的形态（AI 工坊）：id 前缀 user:，不进发行版白名单也要能选到 ——
+     它们是本地 IndexedDB 里的东西，和白名单那套「内置形态分级」没关系。 */
+  const isUserStageId = (id) => /^user:/.test(String(id || ''));
+  const stageAllows = (id) => (stageEdition === 'dev' ? true : (STAGE_RELEASE_IDS.has(id) || isUserStageId(id)));
   const stageListed = (s) => !!s && (s.id === 'classic' || stageAllows(s.id));
   /** 保留清单全集 → 原 STAGES 下标；未进清单的排后面，开发者版才看得到 */
   const stageRankOf = (s) => {
@@ -1821,16 +2021,23 @@
     const head = [];
     const classic = list.find((s) => s.id === 'classic');
     if (classic) head.push(classic);
+    /* 自己做的形态紧跟传统播放器（2026-11-15 AI 工坊）：用户做完总要找得到，
+       埋在 600 多个内置形态里等于白做。倒序保持列表里后面的更新。 */
+    list.filter((s) => s.user).reverse().forEach((s) => head.push(s));
     ['504', '519'].forEach((id) => {
       const s = list.find((x) => x.id === id);
       if (s) head.push(s);
     });
-    const rest = list.filter((s) => s.id !== 'classic' && s.id !== '504' && s.id !== '519').reverse();
+    const rest = list.filter((s) => s.id !== 'classic' && !s.user && s.id !== '504' && s.id !== '519').reverse();
     return head.concat(rest);
   }
   /** includeClassic=true 时 classic 永远排第一；其余按保留清单顺序，再按原顺序 */
   function stageMenuList(includeClassic) {
-    const list = STAGES.filter((s) => (s.url ? stageAllows(s.id) : (includeClassic && s.id === 'classic')));
+    /* 用户形态没有 url（内容是 srcdoc），不能按「有没有 url」判是不是形态 */
+    const list = STAGES.filter((s) => {
+      if (s.user) return stageAllows(s.id);
+      return s.url ? stageAllows(s.id) : (includeClassic && s.id === 'classic');
+    });
     return stageDisplayOrder(list.sort((a, b) => {
       if (!a.url !== !b.url) return a.url ? 1 : -1;
       return stageRankOf(a) - stageRankOf(b);
@@ -1852,6 +2059,911 @@
     return stageEdition;
   };
 
+  /* ================= 形态分类目录（2026-11-16 重做） =================
+     旧的六个预设分类（粒子 / 空间 / 自然 / 复古 / 排版 / 卡点）连同「未分类」
+     页签一起删掉：用户说「分类都错了，我到时候重新分类一遍」，旧归属一律作废。
+     新模型只有两类来源：
+       · 计算型页签（4 个，固定顺序）：全部 / 我用过的 / 推荐 / 收藏
+         —— 由代码和本地记录实时算出来，不写进「归属」表
+       · 自建分类：用户点页签行末尾的 ＋ 新建，长按形态拖到页签上归类
+     一个形态最多属于一个自建分类；不属于任何自建分类的形态只出现在「全部」，
+     不再有「未分类」页签 —— 用户不用再去清一个系统兜底类。
+     存储一律 localStorage + lizi. 前缀，读写全部 try/catch：隐私模式下不能抛错。
+       lizi.stage.cats.v1    [{ id, name }]          自建分类
+       lizi.stage.catmap.v1  { [stageId]: catId }    形态 → 自建分类（单一归属）
+       lizi.stage.favs.v1    ['681', ...]            收藏，最新在前
+       lizi.stage.history.v1 ['681', ...]            用过的，最近在前，有上限 */
+  const STAGE_CATS_KEY = 'lizi.stage.cats.v1';
+  const STAGE_CATMAP_KEY = 'lizi.stage.catmap.v1';
+  const STAGE_FAVS_KEY = 'lizi.stage.favs.v1';
+  const STAGE_HISTORY_KEY = 'lizi.stage.history.v1';
+  const STAGE_HISTORY_MAX = 60;
+  /* 计算型页签：key 固定，自建分类 id 用 cat- 前缀，永远不会撞上这四个。 */
+  const STAGE_FIXED_CATS = [
+    { key: 'all', name: '全部' },
+    { key: 'used', name: '我用过的' },
+    { key: 'rec', name: '推荐' },
+    { key: 'fav', name: '收藏' },
+  ];
+  const stageIsFixedCat = (key) => STAGE_FIXED_CATS.some((c) => c.key === key);
+  /* 「推荐」= 代码里维护的固定手挑清单（用户选定的方案，不给编辑入口）。
+     用户可随时改这个数组：写 STAGES 里的形态编号，数组顺序就是「推荐」里的
+     展示顺序；当前版本里找不到的 id 会自动忽略，不会留下空洞。 */
+  const STAGE_RECOMMENDED = [
+    '504', '519', '681', '660', '620', '581', '570', '664', '665', '666',
+    '001', '008', '099', '002', '020', '048', '506', '510', '518', '522',
+    '540', '561', '580', '588', '603', '617', '627', '631', '663', '383',
+  ];
+
+  function stageStoreGet(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      const v = JSON.parse(raw);
+      return v == null ? fallback : v;
+    } catch { return fallback; }
+  }
+  function stageStoreSet(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); return true; }
+    catch { return false; }
+  }
+  /* 内存缓存：paint() 会为 600 多个形态逐个查归属，不能每次都去 parse localStorage。
+     本页自己写入时同步更新缓存；别的标签页改了要刷新才生效（这里没有 storage 监听）。 */
+  let stageCatsCache = null;
+  let stageCatMapCache = null;
+  let stageFavsCache = null;
+  let stageHistoryCache = null;
+  /* 数据版本号：两个宿主（形态页下拉 / 播放页抽屉）各有自己的页签和列表，
+     任何一次写入都 +1。打开某一个宿主时发现版本对不上就整份重画，
+     否则在抽屉里收藏的形态，形态页下拉里要等下次刷新才出现。 */
+  let stageDataRev = 0;
+
+  function stageCatsLoad() {
+    if (stageCatsCache) return stageCatsCache;
+    const rows = stageStoreGet(STAGE_CATS_KEY, []);
+    const out = [];
+    const seen = new Set(STAGE_FIXED_CATS.map((c) => c.key));
+    if (Array.isArray(rows)) rows.forEach((r) => {
+      const id = r && typeof r.id === 'string' ? r.id.trim() : '';
+      const name = r && typeof r.name === 'string' ? r.name.trim() : '';
+      if (!id || !name || seen.has(id)) return;
+      seen.add(id);
+      out.push({ id, name });
+    });
+    stageCatsCache = out;
+    return out;
+  }
+  function stageCatsSave(list) {
+    stageCatsCache = list.slice();
+    stageDataRev++;
+    return stageStoreSet(STAGE_CATS_KEY, stageCatsCache);
+  }
+  function stageCatMapLoad() {
+    if (stageCatMapCache) return stageCatMapCache;
+    const raw = stageStoreGet(STAGE_CATMAP_KEY, {});
+    const out = {};
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      Object.keys(raw).forEach((id) => {
+        if (typeof raw[id] === 'string') out[id] = raw[id];
+      });
+    }
+    stageCatMapCache = out;
+    return out;
+  }
+  function stageCatMapSet(stageId, catId) {
+    const map = Object.assign({}, stageCatMapLoad());
+    if (catId) map[stageId] = catId; else delete map[stageId];
+    stageCatMapCache = map;
+    stageDataRev++;
+    return stageStoreSet(STAGE_CATMAP_KEY, map);
+  }
+  function stageIdListLoad(key) {
+    const rows = stageStoreGet(key, []);
+    const out = [];
+    if (Array.isArray(rows)) rows.forEach((id) => {
+      if (typeof id === 'string' && id && !out.includes(id)) out.push(id);
+    });
+    return out;
+  }
+  function stageFavsLoad() {
+    if (!stageFavsCache) stageFavsCache = stageIdListLoad(STAGE_FAVS_KEY);
+    return stageFavsCache;
+  }
+  function stageHistoryLoad() {
+    if (!stageHistoryCache) {
+      stageHistoryCache = stageIdListLoad(STAGE_HISTORY_KEY).slice(0, STAGE_HISTORY_MAX);
+    }
+    return stageHistoryCache;
+  }
+  /** 记录「我用过的」：最近在前，同一个形态去重后提到最前，长度封顶 60 */
+  function stageHistoryPush(id) {
+    if (!id || id === 'classic') return;
+    const list = stageHistoryLoad().filter((x) => x !== id);
+    list.unshift(id);
+    if (list.length > STAGE_HISTORY_MAX) list.length = STAGE_HISTORY_MAX;
+    stageHistoryCache = list;
+    stageDataRev++;
+    stageStoreSet(STAGE_HISTORY_KEY, list);
+  }
+  /** 收藏开关，返回切换后的状态；新收藏放最前，和「最近收藏」的顺序一致 */
+  function stageFavToggle(id) {
+    const was = stageFavsLoad().includes(id);
+    const list = stageFavsLoad().filter((x) => x !== id);
+    if (!was) list.unshift(id);
+    stageFavsCache = list;
+    stageDataRev++;
+    stageStoreSet(STAGE_FAVS_KEY, list);
+    return !was;
+  }
+  /** 形态所属的自建分类 id；没归类返回 ''。
+     计算型页签（推荐 / 收藏 / 我用过的）不写进 catmap —— 一个形态可以同时
+     出现在「推荐」和「收藏」里，归属表只表示用户手工划的那一类。 */
+  function stageCatOfId(id) {
+    const catId = stageCatMapLoad()[id];
+    if (!catId) return '';
+    return stageCatsLoad().some((c) => c.id === catId) ? catId : '';
+  }
+  const stageCatOf = (s) => (s && s.id ? stageCatOfId(s.id) : '');
+
+  /* 2026-11-16：抽屉和形态页下拉是两个独立实例，但「用户最后手选过哪个分类」
+     必须是共享的一份。否则在一个宿主里选「全部」，另一个同步时仍会把分类
+     拉回当前形态所属类别。null = 从没手选过，此时跟随当前形态。 */
+  let stageCatChoice = null;
+
+  /** 轻提示：长按归类的成功 / 拒绝 / 取消反馈。挂在 body，避免被列表虚化带走。 */
+  function stageTip(text, ms) {
+    if (!text) return;
+    let el = document.querySelector('.stage-holdtip');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'stage-holdtip';
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('is-on');
+    clearTimeout(stageTip._t);
+    stageTip._t = setTimeout(() => {
+      el.classList.remove('is-on');
+      setTimeout(() => { if (el.isConnected && !el.classList.contains('is-on')) el.remove(); }, 240);
+    }, ms || 1600);
+  }
+
+  function createStagePicker(root, { searchId, onPick }) {
+    let cat = 'all';
+    let catNames = {};
+    let catOrder = [];
+    /* 页签 key ↔ 顺序，和 Rubber Segment 按钮的 data-rs-index 一一对应；
+       拖动归类时靠它把手指下的按钮翻译回分类 key。 */
+    let catMeta = [];
+    /* 每个页签包含哪些形态 id。计算型页签有重叠（一个形态可以同时在推荐和
+       收藏里），所以不能用「形态的 data-cat = 当前页签」这种单一归属来判断。 */
+    let catSets = {};
+    /* 全局展示顺序（stageMenuList 的顺序）；从「我用过的」切回「全部」时靠它复位 */
+    let globalIndex = new Map();
+    let qInput = null;
+    let items = [];
+    /* 本实例画的是哪个数据版本：另一个宿主改了收藏 / 分类 / 历史后，
+       sync() 打开时发现版本变了就先重画，保证两边看到的是同一份数据。 */
+    let paintedRev = -1;
+    /* 分类页签的 Rubber Segment 实例（2026-11-16）：paint() 每次重建 nav，
+       所以这里要留住句柄，重画前先 destroy，避免旧实例的 rAF / 监听泄漏。 */
+    let picker = null;
+
+    /* 长按 / 拖动归类（2026-11-16）的临时状态。用 Pointer Events 统一鼠标和触摸：
+       pointerdown 起 520ms 计时，期间移动超过 8px 取消；长按成立后进入归类态，
+       列表虚化、页签保持清晰，跟手卡片 + 收藏菜单。
+       —— 为什么是 520ms 而不是 500：留给移动端 contextmenu 之前一点点余量，
+          官方没有「长按」事件，只能自己计时。 */
+    let press = null;          /* 等待中的长按 */
+    let pressTimer = 0;
+    let hold = null;           /* 已经进入的归类态 */
+    let swallowUntil = 0;      /* 长按后那一次 click 必须吞掉，否则会误选形态 */
+    let newCatPanel = null;    /* ＋ 输入浮层（挂 body，避免被 paint 冲掉） */
+
+    function animateSwap(dx) {
+      const pane = root.querySelector('.dstages__pane');
+      if (!pane) return;
+      pane.style.setProperty('--swap-x', `${dx}px`);
+      [pane.querySelector('.dstages__grid'), pane.querySelector('.dstages__empty')].forEach((el) => {
+        if (!el || el.hidden) return;
+        el.classList.remove('is-swap');
+        void el.offsetWidth;
+        el.classList.add('is-swap');
+      });
+    }
+
+    /** 当前页签没有内容时给一句能指导下一步的空状态文案（未分类页签已经删了） */
+    function emptyText(needle) {
+      if (needle) return '没有匹配的形态';
+      if (cat === 'used') return '还没有用过的形态：挑一个形态进入后，它会出现在这里';
+      if (cat === 'rec') return '推荐清单里的形态暂时不在当前版本';
+      if (cat === 'fav') return '还没有收藏：长按一个形态，在菜单里点「收藏」';
+      const custom = catMeta.find((c) => c.key === cat);
+      if (custom) return `「${custom.name}」还是空的：长按一个形态，拖到上方这个页签上`;
+      return '没有匹配的形态';
+    }
+
+    /** 页签自己的排序：我用过的按 history、推荐按清单、收藏按收藏时间；
+        其余（全部 / 自建分类 / 搜索）用全局展示顺序。DOM 顺序靠 appendChild 重排。 */
+    function orderItems(visible, key) {
+      const grid = root.querySelector('.dstages__grid');
+      if (!grid || !visible.length) return;
+      let rank = null;
+      if (key === 'used') rank = new Map(stageHistoryLoad().map((id, i) => [id, i]));
+      else if (key === 'rec') rank = new Map(STAGE_RECOMMENDED.map((id, i) => [id, i]));
+      else if (key === 'fav') rank = new Map(stageFavsLoad().map((id, i) => [id, i]));
+      const rankOf = (b) => {
+        const id = b.dataset.id;
+        if (rank) {
+          const i = rank.get(id);
+          return i === undefined ? 1e9 : i;
+        }
+        const i = globalIndex.get(id);
+        return i === undefined ? 1e9 : i;
+      };
+      visible.slice().sort((a, b) => rankOf(a) - rankOf(b)).forEach((b) => grid.appendChild(b));
+    }
+
+    function filter(q) {
+      const needle = String(q || '').trim().toLowerCase();
+      const set = needle ? null : catSets[cat];
+      let shown = 0;
+      const hits = [];
+      /* 有搜索词时跨全部分类搜；清空后回到当前选中的那一类 */
+      items.forEach((b) => {
+        const hit = needle
+          ? (b.dataset.search || '').includes(needle)
+          : !!(set && set.has(b.dataset.id));
+        b.hidden = !hit;
+        if (hit) { shown++; hits.push(b); }
+      });
+      orderItems(hits, needle ? '' : cat);
+      /* 2026-11-16：分类页签的选中态归 Rubber Segment 组件所有，
+         这里不再切 .dstages__cat 的 is-on / aria-selected。 */
+      const countEl = root.querySelector('.dstages__count');
+      if (countEl) countEl.textContent = needle ? `匹配 ${shown} 个` : `${catNames[cat] || '全部'} · ${shown}`;
+      const grid = root.querySelector('.dstages__grid');
+      const empty = root.querySelector('.dstages__empty');
+      if (grid) grid.hidden = shown === 0;
+      if (empty) {
+        empty.hidden = shown > 0;
+        empty.textContent = emptyText(needle);
+      }
+    }
+
+    /* 分类切换后的统一后续动作（2026-11-16）：和旧点击委托逐条一致。
+       选中态由 Rubber Segment 组件维护，这里只负责业务状态与列表动效。 */
+    function applyCat(next) {
+      /* 归类态里点页签（不是拖动，就是普通点击）：先撤虚化和菜单再切。
+         这里不能用 finishHold()：它可能在收藏改动后重画并重建 nav，
+         接着下面的切分类逻辑就会和新建的滑块不同步。 */
+      let dirtyHold = false;
+      if (hold) { dirtyHold = hold.dirty; teardownHold(); }
+      else if (press) cancelPress();
+      const prevIdx = catOrder.indexOf(cat);
+      const nextIdx = catOrder.indexOf(next);
+      const dx = nextIdx === prevIdx ? 0 : (nextIdx > prevIdx ? 10 : -10);
+      cat = next;
+      stageCatChoice = next;  /* 两个宿主共享这一次手选 */
+      if (qInput) qInput.value = '';
+      if (dirtyHold) {
+        /* 收藏状态变了：整份重画（paint 会按新 cat 建滑块，不会错位） */
+        paint();
+        return;
+      }
+      filter('');
+      const pane = root.querySelector('.dstages__pane');
+      if (pane) pane.scrollTop = 0;
+      animateSwap(dx);
+    }
+
+    function paint() {
+      /* 临时浮层 / 归类态都依赖旧的 DOM，重画前先收掉，别留下悬空节点 */
+      teardownHold();
+      closeNewCatPanel();
+      /* 旧 nav 马上要被 innerHTML 换掉：先拆掉组件，别让 rAF / observer 挂空节点 */
+      if (picker) {
+        try { picker.destroy(); } catch { /* 旧节点可能已脱离文档 */ }
+        picker = null;
+      }
+      const list = stageMenuList(true);
+      /* 页签 = 4 个计算型 + 全部自建分类。
+         自建分类即使为空也显示：它是长按拖动的投放目标，藏起来就没法放东西。 */
+      const cats = STAGE_FIXED_CATS.map((c) => ({ key: c.key, name: c.name }));
+      stageCatsLoad().forEach((c) => cats.push({ key: c.id, name: c.name }));
+      catMeta = cats;
+      catNames = {};
+      catOrder = cats.map((c) => c.key);
+      cats.forEach((c) => { catNames[c.key] = c.name; });
+
+      const ids = new Set(list.map((s) => s.id));
+      const used = stageHistoryLoad().filter((id) => ids.has(id));
+      const rec = STAGE_RECOMMENDED.filter((id) => ids.has(id));
+      const favs = stageFavsLoad().filter((id) => ids.has(id));
+      const favSet = new Set(favs);
+      catSets = {
+        all: ids,
+        used: new Set(used),
+        rec: new Set(rec),
+        fav: new Set(favs),
+      };
+      stageCatsLoad().forEach((c) => {
+        const set = new Set();
+        list.forEach((s) => { if (stageCatOfId(s.id) === c.id) set.add(s.id); });
+        catSets[c.id] = set;
+      });
+      globalIndex = new Map(list.map((s, i) => [s.id, i]));
+
+      /* 2026-11-16：重画时先校验共享的手选分类还在不在；不在了就丢掉，
+         回到跟随当前形态，避免停在一个已经消失的页签上。 */
+      if (stageCatChoice && !catNames[stageCatChoice]) stageCatChoice = null;
+      if (stageCatChoice) cat = stageCatChoice;
+      else if (!catNames[cat]) cat = 'all';
+      const itemHtml = list.map((s) => `
+        <button class="stage-item${favSet.has(s.id) ? ' is-fav' : ''}" data-id="${toolsEsc(s.id)}" data-cat="${toolsEsc(stageCatOf(s))}" data-name="${toolsEsc(s.name)}" data-search="${toolsEsc(s.name.toLowerCase())}" title="${toolsEsc(s.desc || s.name)}" role="option" aria-selected="false">
+          ${stageEdition === 'dev' ? `<span class="stage-item__id">${s.id === 'classic' ? '—' : toolsEsc(s.id)}</span>` : ''}
+          <span class="stage-item__name">${toolsEsc(s.name)}</span>
+          <span class="stage-item__fav" aria-hidden="true">★</span>
+          <svg class="dstages__ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L20 7"/></svg>
+        </button>`).join('');
+      root.innerHTML = `
+        <div class="dstages__top">
+          <div class="dstages__search">
+            <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
+            <input id="${searchId}" type="search" placeholder="搜索形态" aria-label="搜索形态" autocomplete="off" spellcheck="false">
+            <span class="dstages__count" aria-live="polite"></span>
+          </div>
+          <div class="dstages__tabbar">
+            <nav class="dstages__cats" role="tablist" aria-label="形态分类"></nav>
+            <button type="button" class="dstages__random" title="随机进入一个形态" aria-label="随机进入一个形态">随机</button>
+            <button type="button" class="dstages__add" title="新建分类" aria-label="新建分类">＋</button>
+          </div>
+        </div>
+        <div class="dstages__pane">
+          <div class="dstages__grid dstages__grid--c" role="listbox" aria-label="选择形态">${itemHtml}</div>
+          <p class="dstages__empty" hidden>没有匹配的形态</p>
+        </div>
+        <div class="dstages__veil" aria-hidden="true"></div>`;
+      qInput = document.getElementById(searchId);
+      items = Array.from(root.querySelectorAll('.stage-item'));
+      if (qInput) {
+        qInput.addEventListener('input', () => filter(qInput.value));
+        qInput.value = '';
+      }
+      /* 分类页签换成 Rubber Segment（2026-11-16）：不再手拼 .dstages__cat，
+         选中态 / 拖拽 / 键盘全部交给组件；这里只给 items 和切换后的业务动作。
+         滑块里只放分类页签；＋ 和 随机 是页签行末端的两个独立按钮。 */
+      const catNav = root.querySelector('.dstages__cats');
+      if (catNav && window.LIZI_RUBBER && typeof window.LIZI_RUBBER.create === 'function') {
+        picker = window.LIZI_RUBBER.create({
+          root: catNav,
+          items: cats.map((c) => ({ value: c.key, label: c.name })),
+          value: cat,
+          ariaLabel: '形态分类',
+          orientation: 'horizontal',
+          size: 'sm',
+          equalSlots: false,     /* 页签长短不一，等宽会挤 */
+          radius: 8,
+          inset: 2,
+          stretch: 100,
+          squash: 3,
+          speed: 1,
+          glide: 75,
+          draggable: true,
+          /* 深色抽屉里不硬套组件默认的纯黑纯白：轨道取搜索框同款淡色，
+             滑块保持一块实心浅色（Rubber Segment 的识别特征）。 */
+          trackColor: 'var(--dstages-rs-track, rgba(255, 255, 255, 0.055))',
+          thumbColor: 'var(--dstages-rs-thumb, #f2f3f5)',
+          textColor: 'var(--dstages-rs-text, rgba(255, 255, 255, 0.46))',
+          activeTextColor: 'var(--dstages-rs-active, #17181c)',
+          onChange: applyCat,
+        });
+      } else if (catNav) {
+        console.warn('[stage-picker] Rubber Segment 模块未加载，分类页签为空');
+      }
+      paintedRev = stageDataRev;
+      filter('');
+    }
+
+    function sync(scrollToActive) {
+      /* 另一个宿主改过数据（收藏 / 自建分类 / 历史）：先重画再同步 */
+      if (paintedRev !== stageDataRev) paint();
+      if (qInput) qInput.value = '';
+      const curId = StageHost.current ? StageHost.current.id : 'classic';
+      const curStage = STAGES.find((s) => s.id === curId);
+      const curCat = curStage ? stageCatOf(curStage) : '';
+      /* 2026-11-16：共享的手选分类优先。以前这里无条件用当前形态所属分类
+         覆盖，导致「选全部进入 A 形态，退出后被拉回 A 的分类」。只有从没
+         手选过时才跟随当前形态。手选的分类已经不在了（被删 / 另一个宿主
+         还没同步）就清掉，回落到「全部」。 */
+      if (stageCatChoice && catNames[stageCatChoice]) cat = stageCatChoice;
+      else {
+        if (stageCatChoice) stageCatChoice = null;
+        cat = (curCat && catNames[curCat]) ? curCat : 'all';
+      }
+      /* 外部同步分类时只更新组件表现，不触发 onChange（否则会回头清搜索 /
+         重新 filter / 再滚一次列表，打开抽屉时白做三遍）。 */
+      if (picker) picker.setValue(cat);
+      filter('');
+      items.forEach((b) => {
+        const on = b.dataset.id === curId;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-selected', String(on));
+      });
+      if (scrollToActive) {
+        const pane = root.querySelector('.dstages__pane');
+        const cur = root.querySelector('.stage-item.is-on');
+        if (pane) pane.scrollTop = cur ? Math.max(0, cur.offsetTop - pane.clientHeight / 2) : 0;
+      }
+    }
+
+    /* ================= 长按 → 收藏 / 拖动归类（2026-11-16） =================
+       交互拆成两段：
+         1) 等长按（520ms，移动 > 8px 取消）—— 这一段绝不拦截点击，正常点选形态；
+         2) 长按成立进入「归类态」：列表虚化 + 页签清晰 + 跟手卡片 + 收藏菜单。
+       松手判定：
+         自建分类页签 → 写 catmap 并切过去；计算型页签 → 只闪一下提示，不改数据；
+         小菜单上 → 执行收藏开关，菜单保留（这样长按后原地松手也能点收藏）；
+         原形态自己身上 → 保留菜单；其它空白 → 取消，什么都不改。
+       长按成立后浏览器仍会补一次 click，必须吞掉，否则会误选形态。 */
+    function moveCard(x, y) {
+      if (!hold || !hold.card) return;
+      hold.card.style.transform = `translate3d(${Math.round(x + 14)}px, ${Math.round(y + 14)}px, 0)`;
+    }
+
+    function cancelPress() {
+      if (!press) return;
+      const p = press;
+      press = null;
+      clearTimeout(pressTimer);
+      pressTimer = 0;
+      document.removeEventListener('pointermove', p.onMove, true);
+      document.removeEventListener('pointerup', p.onUp, true);
+      document.removeEventListener('pointercancel', p.onCancel, true);
+    }
+
+    function onRootPointerDown(e) {
+      if (hold || press) return;
+      if (e.button !== undefined && e.button !== 0) return;
+      const item = e.target && e.target.closest ? e.target.closest('.stage-item') : null;
+      if (!item || !root.contains(item)) return;
+      const p = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, item,
+        onMove: null, onUp: null, onCancel: null,
+      };
+      p.onMove = (ev) => {
+        if (ev.pointerId !== p.id) return;
+        if (Math.hypot(ev.clientX - p.x, ev.clientY - p.y) > 8) cancelPress();
+      };
+      p.onUp = (ev) => { if (ev.pointerId === p.id) cancelPress(); };
+      p.onCancel = (ev) => { if (ev.pointerId === p.id) cancelPress(); };
+      press = p;
+      document.addEventListener('pointermove', p.onMove, true);
+      document.addEventListener('pointerup', p.onUp, true);
+      document.addEventListener('pointercancel', p.onCancel, true);
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(() => beginHold(p), 520);
+    }
+
+    function beginHold(p) {
+      if (press !== p) return;
+      const item = p.item;
+      if (!item || !item.isConnected) { cancelPress(); return; }
+      clearTimeout(pressTimer);
+      pressTimer = 0;
+      document.removeEventListener('pointermove', p.onMove, true);
+      document.removeEventListener('pointerup', p.onUp, true);
+      document.removeEventListener('pointercancel', p.onCancel, true);
+      press = null;
+      /* 从现在起这一次按压产生的 click 一律吞掉 */
+      swallowUntil = performance.now() + 1200;
+      const s = STAGES.find((x) => x.id === item.dataset.id);
+      hold = {
+        id: p.id,
+        stageId: item.dataset.id,
+        name: (s && s.name) || item.dataset.name || '形态',
+        dirty: false,
+        card: null,
+        menu: null,
+        dropKey: null,
+        onMove: null, onUp: null, onCancel: null, onTouch: null, onKey: null, onDocClick: null,
+      };
+      const h = hold;
+      const card = document.createElement('div');
+      card.className = 'stage-dragcard';
+      card.textContent = h.name;
+      document.body.appendChild(card);
+      h.card = card;
+      moveCard(p.x, p.y);
+
+      h.menu = buildHoldMenu();
+      placeFixed(h.menu, p.x, p.y);
+
+      root.classList.add('is-holdmode');
+      try { item.setPointerCapture(p.id); } catch { /* 指针已经抬起，忽略 */ }
+
+      h.onMove = (ev) => {
+        if (!hold || ev.pointerId !== hold.id) return;
+        moveCard(ev.clientX, ev.clientY);
+        setDropHint(tabKeyAt(ev.clientX, ev.clientY));
+      };
+      h.onUp = (ev) => {
+        if (!hold || ev.pointerId !== hold.id) return;
+        swallowUntil = performance.now() + 400;
+        releaseHoldAt(ev.clientX, ev.clientY);
+      };
+      h.onCancel = () => {
+        if (!hold) return;
+        swallowUntil = performance.now() + 400;
+        finishHold({ dirty: hold.dirty });
+      };
+      h.onTouch = (ev) => {
+        /* 长按成立后这串触摸手势属于拖拽。Chrome 里 pointermove 的
+           preventDefault 拦不住滚动，只有非 passive 的 touchmove 可以。 */
+        if (hold && ev.cancelable) ev.preventDefault();
+      };
+      h.onKey = (ev) => {
+        if (ev.key !== 'Escape') return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        /* Esc 之后手指 / 鼠标可能还按着，松手那一下的 click 也要吞掉 */
+        swallowUntil = performance.now() + 400;
+        finishHold({ dirty: hold ? hold.dirty : false });
+      };
+      h.onDocClick = (ev) => {
+        if (!hold) return;
+        const t = ev.target;
+        if (hold.menu && t && hold.menu.contains(t)) return;
+        /* 列表 / 页签里的点击交给各自处理器；只有点到外面才当作取消 */
+        if (t && root.contains(t)) return;
+        finishHold({ dirty: hold.dirty });
+      };
+      document.addEventListener('pointermove', h.onMove, true);
+      document.addEventListener('pointerup', h.onUp, true);
+      document.addEventListener('pointercancel', h.onCancel, true);
+      document.addEventListener('touchmove', h.onTouch, { passive: false });
+      window.addEventListener('keydown', h.onKey, true);
+      document.addEventListener('click', h.onDocClick, true);
+    }
+
+    /** 页签命中：直接量按钮矩形，不走 elementFromPoint —— 当前槽位的滑块
+        （.rubber-segment__thumb）盖在按钮上面，命中会返回 thumb 而不是按钮。 */
+    function tabKeyAt(x, y) {
+      if (!hold) return '';
+      const btns = root.querySelectorAll('.rubber-segment__item[data-rs-index]');
+      for (let i = 0; i < btns.length; i++) {
+        const r = btns[i].getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+          const idx = Number(btns[i].getAttribute('data-rs-index'));
+          return catMeta[idx] ? catMeta[idx].key : '';
+        }
+      }
+      return '';
+    }
+
+    function dropButton(key) {
+      const idx = catMeta.findIndex((c) => c.key === key);
+      if (idx < 0) return null;
+      return root.querySelector(`.rubber-segment__item[data-rs-index="${idx}"]`);
+    }
+
+    function setDropHint(key) {
+      if (!hold) return;
+      const next = key || '';
+      if (hold.dropKey === next) return;
+      hold.dropKey = next;
+      root.querySelectorAll('.rubber-segment__item.is-drop').forEach((b) => b.classList.remove('is-drop'));
+      const btn = dropButton(next);
+      if (btn) btn.classList.add('is-drop');
+    }
+
+    function clearDropHint() {
+      root.querySelectorAll('.rubber-segment__item.is-drop').forEach((b) => b.classList.remove('is-drop'));
+      if (hold) hold.dropKey = null;
+    }
+
+    /** 落在「全部 / 我用过的 / 推荐 / 收藏」上：不改归属，只闪一下 + 轻提示，
+        免得用户以为归类成功了 */
+    function denyDrop(key) {
+      const btn = dropButton(key);
+      if (btn) {
+        btn.classList.remove('is-drop-deny');
+        void btn.offsetWidth;
+        btn.classList.add('is-drop-deny');
+        setTimeout(() => { if (btn.isConnected) btn.classList.remove('is-drop-deny'); }, 460);
+      }
+      stageTip(`「${catNames[key] || '这个页签'}」是自动分类，不能手动归类`);
+    }
+
+    function buildHoldMenu() {
+      const menu = document.createElement('div');
+      menu.className = 'stage-holdmenu';
+      const fav = stageFavsLoad().includes(hold.stageId);
+      menu.innerHTML = `
+        <p class="stage-holdmenu__t">${toolsEsc(hold.name)}</p>
+        <button type="button" class="stage-holdmenu__btn" data-act="fav">${fav ? '取消收藏' : '收藏'}</button>
+        <p class="stage-holdmenu__hint">拖到上方自建分类可归类</p>`;
+      menu.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+      menu.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const btn = e.target.closest('[data-act]');
+        if (btn) holdMenuAction(btn.dataset.act, btn);
+      });
+      document.body.appendChild(menu);
+      return menu;
+    }
+
+    function holdMenuAction(act, btn) {
+      if (!hold || act !== 'fav') return;
+      const on = stageFavToggle(hold.stageId);
+      hold.dirty = true;
+      if (btn) btn.textContent = on ? '取消收藏' : '收藏';
+      const item = items.find((b) => b.dataset.id === hold.stageId);
+      if (item) item.classList.toggle('is-fav', on);
+      stageTip(on ? '已收藏' : '已取消收藏');
+    }
+
+    /** 松手判定（坐标是 client 坐标） */
+    function releaseHoldAt(x, y) {
+      if (!hold) return;
+      const h = hold;
+      let el = null;
+      try { el = document.elementFromPoint(x, y); } catch { el = null; }
+
+      /* ① 落在小菜单上：保留菜单（不在这里执行动作）。
+         松手后浏览器可能还会补一次 click，直接执行会和菜单自己的 click 各跑一次，
+         收藏就被切回原状；统一交给菜单的 click 处理。 */
+      if (h.menu && el && h.menu.contains(el)) {
+        keepHoldNoDrag();
+        return;
+      }
+      /* ② 落在页签上 */
+      const key = tabKeyAt(x, y);
+      if (key) {
+        clearDropHint();
+        if (stageIsFixedCat(key)) {
+          denyDrop(key);
+          finishHold({ dirty: h.dirty });
+        } else {
+          stageCatMapSet(h.stageId, key);
+          const name = catNames[key] || '分类';
+          finishHold({ dirty: true, catKey: key });
+          stageTip(`已移到「${name}」`);
+        }
+        return;
+      }
+      /* ③ 原地松手：菜单留着（长按后想点收藏的常见手势） */
+      const self = el && el.closest ? el.closest('.stage-item') : null;
+      if (self && self.dataset.id === h.stageId) {
+        keepHoldNoDrag();
+        return;
+      }
+      /* ④ 空白处松手 = 取消，什么都不改 */
+      finishHold({ dirty: h.dirty });
+    }
+
+    /** 松手后留在归类态（菜单可点），只把跟手卡片和拖动监听收掉 */
+    function keepHoldNoDrag() {
+      if (!hold) return;
+      const h = hold;
+      document.removeEventListener('pointermove', h.onMove, true);
+      document.removeEventListener('pointerup', h.onUp, true);
+      document.removeEventListener('pointercancel', h.onCancel, true);
+      if (h.onTouch) document.removeEventListener('touchmove', h.onTouch);
+      h.onTouch = null;
+      if (h.card) { h.card.remove(); h.card = null; }
+      clearDropHint();
+    }
+
+    /** 只拆 DOM / 监听，不重画；paint() 也会调它 */
+    function teardownHold() {
+      cancelPress();
+      if (!hold) return;
+      const h = hold;
+      hold = null;
+      document.removeEventListener('pointermove', h.onMove, true);
+      document.removeEventListener('pointerup', h.onUp, true);
+      document.removeEventListener('pointercancel', h.onCancel, true);
+      if (h.onTouch) document.removeEventListener('touchmove', h.onTouch);
+      if (h.onKey) window.removeEventListener('keydown', h.onKey, true);
+      if (h.onDocClick) document.removeEventListener('click', h.onDocClick, true);
+      if (h.card) h.card.remove();
+      if (h.menu) h.menu.remove();
+      root.classList.remove('is-holdmode');
+      clearDropHint();
+    }
+
+    /** 退出归类态；catKey 只给「投进自建分类」用（切过去作为确认） */
+    function finishHold(opts) {
+      const dirty = hold ? hold.dirty : false;
+      teardownHold();
+      if (opts && opts.catKey && catNames[opts.catKey]) {
+        stageCatChoice = opts.catKey;
+        cat = opts.catKey;
+      }
+      if (dirty || (opts && opts.catKey)) paint();
+    }
+
+    function placeFixed(el, x, y) {
+      if (!el) return;
+      const w = el.offsetWidth || 190;
+      const h = el.offsetHeight || 96;
+      let left = x + 14;
+      let top = y + 16;
+      if (left + w > window.innerWidth - 10) left = window.innerWidth - w - 10;
+      if (left < 10) left = 10;
+      if (top + h > window.innerHeight - 10) top = Math.max(10, y - h - 16);
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+    }
+
+    /* ---------- ＋ 新建分类（输入浮层挂在 body，paint 不会冲掉它） ---------- */
+    function closeNewCatPanel() {
+      if (!newCatPanel) return;
+      const el = newCatPanel;
+      newCatPanel = null;
+      if (el.__outside) document.removeEventListener('pointerdown', el.__outside, true);
+      if (el.__key) window.removeEventListener('keydown', el.__key, true);
+      el.remove();
+    }
+
+    function openNewCatPanel(anchor) {
+      if (newCatPanel) { closeNewCatPanel(); return; }
+      if (hold) teardownHold();
+      const el = document.createElement('form');
+      el.className = 'stage-newcat';
+      el.innerHTML = `
+        <p class="stage-newcat__t">新建分类</p>
+        <input class="stage-newcat__i" type="text" maxlength="12" placeholder="分类名称" autocomplete="off" spellcheck="false" aria-label="分类名称">
+        <p class="stage-newcat__err" hidden></p>
+        <div class="stage-newcat__acts">
+          <button type="button" class="stage-newcat__btn" data-act="cancel">取消</button>
+          <button type="submit" class="stage-newcat__btn stage-newcat__btn--ok">确定</button>
+        </div>`;
+      document.body.appendChild(el);
+      newCatPanel = el;
+      /* 贴着 ＋ 下方；下方放不下就翻到按钮上方，左右都夹在视口里 */
+      const r = anchor.getBoundingClientRect();
+      const w = el.offsetWidth;
+      const h = el.offsetHeight;
+      let left = Math.min(r.right - w, window.innerWidth - w - 10);
+      if (left < 10) left = 10;
+      let top = r.bottom + 8;
+      if (top + h > window.innerHeight - 10) top = Math.max(10, r.top - h - 8);
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+
+      const input = el.querySelector('input');
+      const err = el.querySelector('.stage-newcat__err');
+      const showErr = (msg) => {
+        err.textContent = msg;
+        err.hidden = false;
+        try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+      };
+      el.addEventListener('pointerdown', (e) => e.stopPropagation());
+      el.addEventListener('click', (e) => e.stopPropagation());
+      el.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const name = String(input.value || '').trim().replace(/\s+/g, ' ');
+        if (!name) { showErr('分类名不能为空'); return; }
+        if (name.length > 12) { showErr('最多 12 个字'); return; }
+        const lower = name.toLowerCase();
+        const exists = STAGE_FIXED_CATS.some((c) => c.name.toLowerCase() === lower)
+          || stageCatsLoad().some((c) => c.name.toLowerCase() === lower);
+        if (exists) { showErr('已经有同名分类了'); return; }
+        let catId = '';
+        do {
+          catId = `cat-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+        } while (stageCatsLoad().some((c) => c.id === catId));
+        const next = stageCatsLoad().slice();
+        next.push({ id: catId, name });
+        stageCatsSave(next);
+        /* 新建后直接切到新分类（空列表会提示把形态拖进来） */
+        stageCatChoice = catId;
+        cat = catId;
+        closeNewCatPanel();
+        paint();
+        stageTip(`已新建分类「${name}」`);
+      });
+      el.querySelector('[data-act="cancel"]').addEventListener('click', () => closeNewCatPanel());
+      el.__outside = (ev) => {
+        if (!newCatPanel) return;
+        const t = ev.target;
+        if (newCatPanel.contains(t) || (t && t.closest && t.closest('.dstages__add'))) return;
+        closeNewCatPanel();
+      };
+      el.__key = (ev) => {
+        if (ev.key !== 'Escape') return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeNewCatPanel();
+      };
+      document.addEventListener('pointerdown', el.__outside, true);
+      window.addEventListener('keydown', el.__key, true);
+      setTimeout(() => {
+        try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+      }, 0);
+    }
+
+    /** 随机：从「当前可见」的形态里挑一个直接进入；至少 2 个才随机 */
+    function pickRandom() {
+      const visible = items.filter((b) => !b.hidden);
+      if (!visible.length) { stageTip('当前分类里没有形态'); return; }
+      if (visible.length === 1) { onPick(visible[0], visible[0].dataset.id); return; }
+      const curId = StageHost.current ? StageHost.current.id : '';
+      const pool = visible.filter((b) => b.dataset.id !== curId);
+      const use = pool.length ? pool : visible;
+      const el = use[Math.floor(Math.random() * use.length)];
+      onPick(el, el.dataset.id);
+    }
+
+    if (root.dataset.pickerBound !== '1') {
+      root.dataset.pickerBound = '1';
+      root.addEventListener('click', (e) => {
+        /* 长按成立后浏览器补的那一次 click 要吞掉，否则会误选形态 */
+        if (performance.now() < swallowUntil) {
+          swallowUntil = 0;
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
+        /* 归类态里点到列表 / ＋ / 随机：先收掉归类态，点击不再穿透 */
+        if (hold && !(e.target.closest && e.target.closest('.rubber-segment__item'))) {
+          finishHold({ dirty: hold.dirty });
+          e.preventDefault();
+          return;
+        }
+        const add = e.target.closest('.dstages__add');
+        if (add) { openNewCatPanel(add); return; }
+        const rand = e.target.closest('.dstages__random');
+        if (rand) { pickRandom(); return; }
+        /* 2026-11-16：分类页签的点击由 Rubber Segment 自己处理（它有自己的
+           pointerdown/up，不能在这里再切一次，否则一次点击会跑两遍）。 */
+        const item = e.target.closest('.stage-item');
+        if (item) onPick(item, item.dataset.id);
+      });
+      root.addEventListener('pointerdown', onRootPointerDown);
+      /* 手机上长按会弹系统菜单 / 选中文字，形态按钮上要压住 */
+      root.addEventListener('contextmenu', (e) => {
+        if (e.target.closest && e.target.closest('.stage-item')) e.preventDefault();
+      });
+    }
+
+    return { paint, sync };
+  }
+
+  /* ================= 用户自建形态（AI 自定义工坊，2026-11-15） =================
+     形状：{ id: 'user:<key>', name, desc, url: null, user: true, html }
+     - 没有 url：内容是 srcdoc，StageHost.load() 里有一条专门的加载分支
+     - 存在 IndexedDB 的 lizi-studio 库里（读写全在 public/studio/studio.js）
+     - 读是异步的，读到后重建 STAGES 的表尾，再发 lizi:stages-refresh 让菜单重画
+     读不到（隐私模式 / 老内核没有 IndexedDB / 一个都没做）就当没有，
+     内置形态完全不受影响 —— 这条路径绝不能让 600 多个形态跟着一起出问题。 */
+  function loadUserStages() {
+    const S = window.LIZI_STUDIO;
+    if (!S || typeof S.list !== 'function') return false;
+    S.list().then((rows) => {
+      const keep = STAGES.filter((s) => !s.user);
+      /* 库里按时间倒序存，push 时反转回来：stageDisplayOrder 再倒一次 = 最新的在最前 */
+      const mine = (Array.isArray(rows) ? rows : []).slice().reverse().map((r) => S.toStage(r));
+      STAGES.length = 0;
+      keep.forEach((s) => STAGES.push(s));
+      mine.forEach((s) => STAGES.push(s));
+      try { document.dispatchEvent(new CustomEvent('lizi:stages-refresh')); } catch { /* 老环境 */ }
+    }).catch(() => { /* 读不到就当没做，别影响内置形态 */ });
+    return true;
+  }
+  /* 工坊里保存 / 删除了形态：重读一遍（studio.js 会发 lizi:studio） */
+  document.addEventListener('lizi:studio', () => { loadUserStages(); });
+  /* app.js 比 studio.js 先加载（脚本顺序如此），所以推迟到 DOMContentLoaded 再读 */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      if (!loadUserStages()) window.addEventListener('load', loadUserStages, { once: true });
+    }, { once: true });
+  } else if (!loadUserStages()) {
+    window.addEventListener('load', loadUserStages, { once: true });
+  }
+
   /* 触屏宿主（安卓壳标记 / 粗指针）：没有 hover，形态页迷你播放器没法靠
      pointerenter 保持展开。TOUCH_HUD 为真时改由 wake() 默认带 is-near；
      桌面端恒为 false，下面所有触屏分支都不执行。 */
@@ -1863,11 +2975,232 @@
     try { document.body.classList.add('touch-ui'); } catch { /* 文档未就绪 */ }
   }
 
+  /* WebGL 兜底探测（vivo Y27t / Mali-G52 这类低端 GPU）：
+     铺色态的流色是锦上添花，不能成为内容可见的前提。拿不到上下文时给 body
+     挂 .no-webgl，app.css 据此撤掉大面积背景模糊、改用平台纯色/深色底。
+     只探测一次、只建一个 1×1 上下文；失败也不抛，绝不影响后面的启动流程。 */
+  const GL_OK = (() => {
+    try {
+      const probe = document.createElement('canvas');
+      probe.width = probe.height = 1;
+      const gl = probe.getContext('webgl2') || probe.getContext('webgl')
+        || probe.getContext('experimental-webgl');
+      if (!gl) return false;
+      try {
+        const lose = gl.getExtension('WEBGL_lose_context');
+        if (lose) lose.loseContext();
+      } catch { /* 忽略 */ }
+      return true;
+    } catch { return false; }
+  })();
+  if (!GL_OK) {
+    try { document.body.classList.add('no-webgl'); } catch { /* 文档未就绪 */ }
+  }
+
+  /* ---- 形态歌词：原文 / 双文 / 译文（2026-11-14）----
+     只影响形态（stages/*.html）里显示的字；播放页歌词、桌面歌词都不动。
+     译文来自歌词接口的 tlyric，player.js 解析时每行带 tr（没有译文就是空串）。
+     存 localStorage['lizi.stage.lyricMode']，默认 'orig'（只显示原文）。 */
+  const STAGE_LYRIC_KEY = 'lizi.stage.lyricMode';
+  function stageLyricMode() {
+    try {
+      const v = localStorage.getItem(STAGE_LYRIC_KEY);
+      return (v === 'both' || v === 'trans') ? v : 'orig';
+    } catch { return 'orig'; }
+  }
+
+  /* ---- 形态底部电影字幕（2026-11-19）----
+     「翻译 → 形态字幕」打开后，在形态页（body.is-stage）底部像电影字幕一样
+     显示当前歌词：优先用平台给的译文（player.js 解析出的每行 tr），这一句
+     没有译文就显示原文。只影响形态页；播放页歌词 / 桌面歌词 / 各形态 iframe
+     内部都不动（字幕层是宿主自己盖在 #view-stage 上的一层）。
+     两个设置：
+       localStorage['lizi.stage.subtitle']     '1' / '0'，默认 '0'
+       localStorage['lizi.stage.subtitleMode'] 'trans'（单语：只显示译文，
+                                                没译文显示原文）
+                                               / 'both'（双语：原文上、译文下），默认 'both'
+     当前行取 Player 的 lyric 事件 payload.active；刚进形态没收到事件时用
+     Player.state.lyric + lyricIndex 兜底，还拿不到就隐藏。 */
+  const STAGE_SUBTITLE_KEY = 'lizi.stage.subtitle';
+  const STAGE_SUBTITLE_MODE_KEY = 'lizi.stage.subtitleMode';
+  function stageSubtitleOn() {
+    try { return localStorage.getItem(STAGE_SUBTITLE_KEY) === '1'; } catch { return false; }
+  }
+  function stageSubtitleMode() {
+    try { return localStorage.getItem(STAGE_SUBTITLE_MODE_KEY) === 'trans' ? 'trans' : 'both'; } catch { return 'both'; }
+  }
+
+  const StageSubtitle = (() => {
+    const view = document.getElementById('view-stage');
+    let root = null;
+    let origEl = null;
+    let trEl = null;
+    let lastSig = '';
+
+    function ensure() {
+      if (root) return root;
+      if (!view || !document.createElement) return null;
+      root = document.createElement('div');
+      root.className = 'stage-sub';
+      root.id = 'stage-sub';
+      root.setAttribute('aria-hidden', 'true');
+      origEl = document.createElement('p');
+      origEl.className = 'stage-sub__line stage-sub__line--orig';
+      trEl = document.createElement('p');
+      trEl.className = 'stage-sub__line stage-sub__line--tr';
+      root.appendChild(origEl);
+      root.appendChild(trEl);
+      view.appendChild(root);
+      return root;
+    }
+
+    function allowed() {
+      return stageSubtitleOn() && !!document.body
+        && document.body.classList.contains('is-stage');
+    }
+
+    function hide() {
+      lastSig = '';
+      if (root && root.classList) root.classList.remove('is-on');
+    }
+
+    /* 换歌时用：清掉上一首的字并收起，避免新歌开头先闪一下旧句子 */
+    function clear() {
+      ensure();
+      lastSig = '';
+      if (origEl) origEl.textContent = '';
+      if (trEl) trEl.textContent = '';
+      if (root && root.classList) root.classList.remove('is-on');
+    }
+
+    function paint(line) {
+      if (!ensure()) { hide(); return; }
+      if (!allowed() || !line) { hide(); return; }
+      const text = line.text ? String(line.text) : '';
+      const tr = line.tr ? String(line.tr) : '';
+      const single = stageSubtitleMode() === 'trans';
+      const only = tr || text;
+      if (!only) { hide(); return; }
+
+      /* 逐字高亮会按 charIndex 反复发同一个 active，签名相同就不重写 DOM */
+      const sig = `${single ? 'trans' : 'both'}|${single ? only : text}|${single ? '' : tr}`;
+      if (sig === lastSig && root && root.classList.contains('is-on')) return;
+      lastSig = sig;
+
+      if (single) {
+        /* 单语：只显示一行，优先译文；这一句没译文就显示原文 */
+        origEl.hidden = true;
+        origEl.textContent = '';
+        trEl.hidden = false;
+        trEl.textContent = only;
+      } else {
+        /* 双语：原文在上、译文在下；没译文就只留原文 */
+        origEl.hidden = !text;
+        origEl.textContent = text;
+        trEl.hidden = !tr;
+        trEl.textContent = tr;
+      }
+      root.classList.add('is-on');
+    }
+
+    /* 按当前状态重画：切设置、进形态、切歌后歌词到位都走这里 */
+    function refresh() {
+      if (!ensure()) return;
+      if (!allowed()) { hide(); return; }
+      const st = Player && Player.state;
+      if (!st) { hide(); return; }
+      const lines = Array.isArray(st.lyric) ? st.lyric : [];
+      let idx = Number.isInteger(st.lyricIndex) ? st.lyricIndex : -1;
+      /* 刚进形态 / 刚恢复播放时可能还没收到带 active 的 lyric 事件：
+         按当前播放时间补算一次（player.js 会顺手更新 state.lyricIndex）。 */
+      if (idx < 0 && lines.length) {
+        try { idx = Player.lyricAt(Player.audio.currentTime || 0).index; } catch { idx = -1; }
+      }
+      if (idx < 0 || !lines[idx]) { hide(); return; }
+      paint(lines[idx]);
+    }
+
+    Player.on('lyric', (payload) => {
+      const lines = payload && Array.isArray(payload.lines) ? payload.lines : [];
+      const active = payload ? payload.active : -1;
+      if (active < 0 || !lines[active]) { hide(); return; }
+      paint(lines[active]);
+    });
+    /* trackchange 在 player.js 里早于「清空歌词」发出，这里必须先主动清掉，
+       否则 state.lyric 还是上一首的，新歌前奏会先显示旧句子。 */
+    Player.on('trackchange', () => { clear(); });
+
+    /* 初始化时先按恢复出来的歌词读一次（不在形态页时这一步只会建好 DOM 并保持隐藏） */
+    refresh();
+
+    return { refresh, clear };
+  })();
+
+  /* ---- 形态页顶栏按钮大小（2026-11-17）----
+     只缩放形态页顶栏那三个胶囊（返回 / 设置 / 形态），不碰歌曲胶囊里的
+     上一首 / 播放 / 下一首，也不碰队列倒三角和形态下拉条目。
+     为什么不直接 transform: scale()：命中区、lg-surface 的液体玻璃底、
+     相邻按钮的间距都会和放大后的视觉对不上，data-liquid-glass 的
+     autoScale / scaleRef 也是按元素真实尺寸算的。
+     做法：把倍数写到 #view-stage 的 --stage-btn-scale，app.css 用 calc()
+     从现有尺寸推算高度 / 内边距 / 字号；图标 .ico 是 1.05em，自动跟着字号走；
+     液体玻璃的 ResizeObserver 盯的是 border-box，尺寸一变会自己重建位移贴图。
+     存 localStorage['lizi.stage.btnsize']，值就是倍数本身，默认 '1'。 */
+  const STAGE_BTNSIZE_KEY = 'lizi.stage.btnsize';
+  const STAGE_BTNSIZES = [0.8, 1, 1.25, 1.5, 2];
+  function stageBtnSize() {
+    try {
+      const n = parseFloat(localStorage.getItem(STAGE_BTNSIZE_KEY));
+      return STAGE_BTNSIZES.includes(n) ? n : 1;
+    } catch { return 1; }
+  }
+  function applyStageBtnSize() {
+    const view = document.getElementById('view-stage');
+    if (!view) return;
+    /* 只写一个 CSS 变量；两个页面（/ 和 /m）共用同一份 app.css，各改各的 #view-stage。 */
+    view.style.setProperty('--stage-btn-scale', String(stageBtnSize()));
+  }
+  applyStageBtnSize();
+
+  /* ---- 陀螺仪转视角：给 StageHost 用的转接（2026-11-17）----
+     StageHost 比下面的 StageGyro 先求值，直接引用 const 会撞 TDZ。
+     这里用函数声明 + 可空变量：StageGyro 还没挂上时静默跳过，挂上后自动生效。 */
+  let StageGyro = null;
+  function stageGyroOnEnter() { if (StageGyro) StageGyro.onEnter(); }
+  function stageGyroOnLeave() { if (StageGyro) StageGyro.onLeave(); }
+  function stageGyroOnStageChange(id) { if (StageGyro) StageGyro.onStageChange(id); }
+
   const StageHost = (() => {
     const frame = $('stage-frame');
     const hud = $('stage-hud');
     const stageView = $('view-stage');
     const tapLayer = $('stage-tap');
+    const poster = $('stage-poster');
+    /* 进场海报：内置形态有预览图（forms-labs/previews/<id>.jpg），用户形态没有。
+       loading 期间把 iframe 黑底放开、海报亮起；ready / 离开时淡出。
+       目的：切横屏进形态时不再先闪一块 #05060a 的黑板。 */
+    function showStagePoster(s) {
+      if (!poster) return;
+      const id = s && s.id;
+      const img = s && s.url && /^\d+$/.test(String(id))
+        ? `forms-labs/previews/${id}.jpg` : '';
+      if (img) {
+        poster.style.backgroundImage = `url("${img}")`;
+        poster.classList.add('is-on');
+        if (document.body) document.body.classList.add('is-stage-loading');
+      } else {
+        poster.classList.remove('is-on');
+        if (document.body) document.body.classList.remove('is-stage-loading');
+      }
+    }
+    function hideStagePoster() {
+      if (!poster) return;
+      poster.classList.remove('is-on');
+      if (document.body) document.body.classList.remove('is-stage-loading');
+      setTimeout(() => {
+        if (!poster.classList.contains('is-on')) poster.style.backgroundImage = '';
+      }, 320);
+    }
     /* 桌面鼠标 hover 时才保持浮层常驻；触屏的 :hover 会“粘住”，
        不区分的话手机上浮层永远等不到自动消失。 */
     const hoverCapable = typeof window.matchMedia === 'function'
@@ -1884,6 +3217,11 @@
        ready 就能用对样式；老形态不发这个字段，一切照旧。 */
     let cameraStage = false;
     const cameraStageIds = new Set();
+    /* iframe 文档可读（内置形态同源）时为 true。可读就不再盖「点击层」：
+       手指一按下就能直接派发给形态，自由视角 / 拖动类作品的第一下不会被吃掉；
+       唤出浮层改由注入到 iframe 里的 pointerdown 处理（见 hookStageTap）。
+       用户自建 / 不透明文档读不到，继续用点击层兜底。 */
+    let stageDocOpen = false;
     const CINEMA_IDLE_MS = 2000;
     /* 桌面「看片模式」：指针静止后连窗口三键和光标一起退场。
        hudHeld = 真的按着浮层上的控件（拖进度条 / 长按按钮），只有这时
@@ -1896,6 +3234,28 @@
       if (!frame || !frame.contentWindow) return;
       try { frame.contentWindow.postMessage({ __c100: 1, type, payload }, '*'); } catch { /* 忽略 */ }
     };
+
+    /* 往 iframe 里装一个形态。两条路，区别只在「可不可信」：
+       - 内置形态（有 url）：我们自己的代码，维持同源。有些形态要靠宿主注入
+         光标样式、反色采样也依赖 contentDocument，跨域就做不到了。
+       - 用户自建形态（s.user，AI 工坊粘回来的）：**不可信代码**，一律
+         srcdoc + sandbox="allow-scripts"（不透明源）。这样它读不到宿主的
+         localStorage / cookie，也拿不到同源 API；通信只剩 postMessage。
+         srcdoc 会额外注入 CSP 和错误转发（见 studio.js 的 buildSrcdoc）。 */
+    function loadIntoFrame(s) {
+      if (!frame) return;
+      if (s && s.user) {
+        const S = window.LIZI_STUDIO;
+        frame.setAttribute('sandbox', 'allow-scripts');
+        frame.removeAttribute('src');
+        frame.srcdoc = (S && typeof S.srcdoc === 'function') ? S.srcdoc(s.html) : String(s.html || '');
+      } else {
+        frame.removeAttribute('srcdoc');
+        frame.removeAttribute('sandbox');
+        if (s && s.url) frame.src = s.url;
+        else frame.removeAttribute('src');
+      }
+    }
 
     /* 「震动」总闸（宿主侧，一处管全部形态）：
        形态设置里的 shake 关掉后，beat 消息照发（index 不变，逐句推进不受影响），
@@ -1917,12 +3277,26 @@
      *  chars 是 YRC 的逐字时间（登录后才有）；没有就让舞台按句长自己均分。 */
     function lyricSchedule() {
       const ls = Player.state.lyric || [];
-      return ls.map((l, i) => ({
-        t: l.t,
-        dur: l.dur || (ls[i + 1] ? Math.max(0.4, ls[i + 1].t - l.t) : 6),
-        text: l.text,
-        chars: l.chars ? l.chars.map((c) => ({ c: c.c, t: c.t })) : null,
-      }));
+      const mode = stageLyricMode();
+      return ls.map((l, i) => {
+        /* 译文模式：有译文就用译文，没有译文的那几句照旧显示原文（不会空着）。
+           双文模式：一行里用「｜」隔开 —— 形态都是一句一个字符串，换行会被当成
+           普通字符塞进粒子排版里，只能同排。
+           译文和原文的字数不一样，逐字时间戳对不上，这两种模式一律不带 chars，
+           让形态按句长自己均分。 */
+        let text = l.text;
+        let chars = l.chars;
+        if (l.tr) {
+          if (mode === 'trans') { text = l.tr; chars = null; }
+          else if (mode === 'both') { text = l.text + ' ｜ ' + l.tr; chars = null; }
+        }
+        return {
+          t: l.t,
+          dur: l.dur || (ls[i + 1] ? Math.max(0.4, ls[i + 1].t - l.t) : 6),
+          text,
+          chars: chars ? chars.map((c) => ({ c: c.c, t: c.t })) : null,
+        };
+      });
     }
 
     /* init 去重。歌词到位、封面取色完成、切歌三处都会触发 pushInit，
@@ -2020,8 +3394,10 @@
         hud.classList.add('is-idle');
         /* 浮层已经看不见了：在 iframe 上盖一层点击层，手机点屏幕先弹浮层。
            相机形态不盖 —— 点击层会把拖动的第一下吃掉；唤出浮层改由
-           iframe 内的 pointerdown/up 判定（见 hookStageTap）。 */
-        if (stageView && !cameraStage) stageView.classList.add('is-hud-armed');
+           iframe 内的 pointerdown/up 判定（见 hookStageTap）。
+           2026-11-21：同源的内置形态也不盖 —— 一样会吃掉拖动（手机自由视角
+           拖不动就是这个），改用注入到 iframe 的 pointerdown 唤出浮层。 */
+        if (stageView && !cameraStage && !stageDocOpen) stageView.classList.add('is-hud-armed');
         /* 桌面：窗口三键和光标也一起退场；触屏函数内部直接 return */
         setChromeIdle(true);
       }, cameraStage ? CINEMA_IDLE_MS : 2600);
@@ -2078,7 +3454,14 @@
     let camY = 0;
     let camMoved = false;
     function onStageDown(e) {
-      if (!cameraStage) return;
+      if (!cameraStage) {
+        /* 内置形态（同源）：手指一按下就把浮层叫回来，这一次手势继续交给
+           形态自己 —— 自由视角 / 拖动类作品的第一下不会再被吃掉。
+           2026-11-21 之前这里直接 return，手机上浮层一收就只剩点击层，
+           而点击层只会响应 click，拖动永远唤不醒浮层，看起来就是「拖不动」。 */
+        if (TOUCH_HUD) wake();
+        return;
+      }
       if (!e || (typeof e.button === 'number' && e.button > 0)) return;
       camAt = performance.now();
       camX = e.clientX;
@@ -2086,7 +3469,13 @@
       camMoved = false;
     }
     function onStageMove(e) {
-      if (!cameraStage || !e) return;
+      if (!e) return;
+      if (!cameraStage) {
+        /* 同源形态不盖点击层了，桌面端鼠标移过画面时 iframe 事件也不会冒泡到
+           宿主 —— 在这里补一次 wake，三键 / 光标照旧跟手回来。 */
+        if (!TOUCH_HUD) wake();
+        return;
+      }
       if (!camAt) {
         /* 没按键，只是鼠标移过画面：桌面端把浮层 / 三键 / 光标叫回来。
            相机形态没有点击层，iframe 里的 pointermove 不会冒泡到宿主。 */
@@ -2139,6 +3528,9 @@
     function hookStageTap() {
       let doc = null;
       try { doc = frame && frame.contentDocument; } catch (_) { doc = null; }
+      stageDocOpen = !!doc;
+      /* 文档可读了就把可能已经盖上的点击层撤掉（慢加载时 armIdle 会先盖上去） */
+      if (stageDocOpen && stageView) stageView.classList.remove('is-hud-armed');
       if (!doc || doc.__liziDbl) return;
       doc.__liziDbl = true;
       doc.addEventListener('pointerdown', onStageDown, true);
@@ -2352,11 +3744,17 @@
 
     return {
       get current() { return current; },
+      /* 宿主唯一那个舞台 iframe（就是本函数顶部的 const frame = $('stage-frame')，
+         陀螺仪模块直接复用这个引用，不另外按 id 再取一份 —— 2026-11-17） */
+      get frame() { return frame; },
       list: STAGES,
 
       load(id) {
         const s = STAGES.find((x) => x.id === id) || STAGES[1];
         current = s;
+        showStagePoster(s);
+        /* 换形态：旧文档马上要被换掉，先把 __stageViewQuat 写回 null（2026-11-17） */
+        stageGyroOnStageChange(s.id);
         ready = false;
         /* 换形态：先按静态提示 / 上次 ready 的声明切样式（普通形态两者都没有）。
            新文档的 ready 到了会再确认一次。 */
@@ -2365,8 +3763,7 @@
         /* 从普通形态切过来时 is-near 可能还挂着：相机形态先收回迷你播放器 */
         if (cameraStage) hud.classList.remove('is-near');
         // 换形态时整块重载：同一时刻只能有一个作品在跑
-        if (s.url) frame.src = s.url;
-        else frame.removeAttribute('src');
+        loadIntoFrame(s);
         /* 新文档 = 旧的反色结论立刻作废；ready 事件 / 下面的补测会重新判断 */
         if (hud && hud.classList) hud.classList.remove('is-on-light');
         if (document.body.dataset.view === 'stage') {
@@ -2378,14 +3775,17 @@
 
       /** 进入形态视图 */
       enter() {
-        if (!current || !current.url) current = STAGES[1];
+        if (!current || (!current.url && !current.user)) current = STAGES[1];
+        /* 进入形态：重新取屏幕方向并重设陀螺仪回正基准（2026-11-17） */
+        stageGyroOnEnter();
         /* 离开再进来时 leave() 已经把 cameraStage 清掉了，这里按静态提示 /
            上次的声明恢复，避免重新进 552 时又先弹一下展开的迷你播放器。 */
         cameraStage = !!(current.camera || cameraStageIds.has(current.id));
         if (stageView) stageView.classList.toggle('is-cinema', cameraStage);
         if (cameraStage) hud.classList.remove('is-near');
         /* 换/重装 iframe 就是新文档：ready 要重新等，否则新文档永远收不到 init */
-        if (!frame.getAttribute('src')) { ready = false; frame.src = current.url; }
+        if (!frame.getAttribute('src') && !frame.hasAttribute('srcdoc')) { ready = false; loadIntoFrame(current); }
+        if (!ready) showStagePoster(current);
         startTick();
         wake();
         /* 形态背景可能晚于第一帧才画出来：进入后补测一次，之后每 1200ms 轮询 */
@@ -2395,6 +3795,9 @@
         document.body.classList.add('is-stage');
       },
       leave() {
+        /* 离开形态：先写 null，再卸 iframe（2026-11-17） */
+        hideStagePoster();
+        stageGyroOnLeave();
         stopTick();
         clearTimeout(idleTimer);
         clearHudHeld();
@@ -2405,6 +3808,7 @@
         if (stageView) stageView.classList.remove('is-hud-armed');
         /* 影院模式同理；Set 里记着的形态 id 留着，下次进来不用等 ready */
         cameraStage = false;
+        stageDocOpen = false;
         if (stageView) stageView.classList.remove('is-cinema');
         /* 离开形态：反色轮询停掉，类也摘掉（下次进来按新背景重新判断） */
         stopLightWatch();
@@ -2412,6 +3816,7 @@
         /* 离开形态时把 iframe 卸掉：隐藏的形态照样在跑 rAF，白烧 CPU。
            src 清空后下次 enter 会按 current 重新装回来。 */
         if (frame.getAttribute('src')) frame.removeAttribute('src');
+        if (frame.hasAttribute('srcdoc')) frame.removeAttribute('srcdoc');
         document.body.classList.remove('is-stage');
       },
 
@@ -2423,6 +3828,7 @@
       },
 
       onReady(payload) {
+        hideStagePoster();
         /* 形态可以在 ready 里声明 camera:true：画面本身要拖动转头。
            宿主对这类形态不盖点击层，浮层切成极简版（见 app.css .is-cinema），
            触屏上只认「点按」唤出。老形态不发这个字段，行为一字不变。
@@ -2457,6 +3863,8 @@
         try { dispatchEvent(new Event('stage:ready')); } catch (_) {}
       },
       onBeat(b) { post('beat', { index: b.index, level: shakeOff() ? 0 : b.level }); },
+      /* 低频专用瞬态：比 beat 更贴底鼓，但不参与拍相位，所以不套 shakeOff */
+      onKick(k) { post('kick', { level: k.level, energy: k.energy, bpm: k.bpm }); },
       onLive(st) {
         const t = performance.now();
         if (t - lastLive < 120) return;  // 约 8Hz，省点消息开销
@@ -2485,6 +3893,960 @@
       probeLight: probeStageLight,
     };
   })();
+
+  /* ======================= 手机陀螺仪转视角（2026-11-17） =======================
+     契约（形态侧已经定死，宿主只负责写）：
+       stage iframe 的 window.__stageViewQuat = { x, y, z, w }  // 相对回正基准的偏移
+       window.__stageViewQuat = null                            // 关闭 / 不可用
+     · deviceorientation 回调只更新 lastQuat，绝不直接写全局：真正的写入由 rAF
+       循环统一做（约 60Hz；形态每帧读一次就够）。
+     · 内置形态和宿主同源，可以直接挂属性；用户自制形态是 srcdoc +
+       sandbox="allow-scripts"（没有 allow-same-origin），访问 contentWindow 的
+       location 就会抛 SecurityError，必须整段 try/catch 静默跳过。
+     · 和 AR 投屏的仲裁见 arControlling()。
+     ========================================================================== */
+  StageGyro = (() => {
+    const KEY = 'lizi.stage.gyro';
+    /* 2026-11-17 的八个形态；以后新形态接入时要同步这里，或改成 ready payload 声明。
+       形态文件不归本模块维护，这一版只能先做成常量集合。 */
+    const SUPPORTED = new Set(['552', '671', '673', '674', '675', '676', '677', '678']);
+    const WRITE_EVERY = 4;          // 最多隔 4 帧强制写一次，避免形态侧跳帧卡住
+    const EPS = 1e-4;               // 四元数分量变化小于它就不写
+    const AR_CLEAR_MS = 2500;       // 和 ar-pair.js:1152 的视角清零超时保持一致
+    const DEG = Math.PI / 180;
+
+    let enabled = false;
+    let pendingOn = false;
+    let listening = false;
+    let lastQuat = null;        // 最新姿态（已做屏幕方向补偿）
+    let qRef = null;            // 回正基准；输出 = qRef⁻¹ * lastQuat
+    let refPending = false;     // 下次收到事件时把 qRef 设成那一帧
+    let screenAngle = 0;        // 0 / 90 / 180 / 270
+    let rafId = 0;
+    let lastWritten;            // undefined=没写过；null=写过 null；对象=上次值
+    let framesSinceWrite = 99;
+    let noDataTimer = 0;
+    let noDataHinted = false;
+
+    /* ---------- 四元数：和 THREE.Euler(x,y,z,'ZXY') 同序（Rz * Rx * Ry） ---------- */
+    function qMul(a, b) {
+      return {
+        x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+        y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+        z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+        w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+      };
+    }
+    function qNorm(q) {
+      if (!q) return null;
+      const n = Math.sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+      if (!Number.isFinite(n) || n < 1e-6) return null;
+      const x = q.x / n, y = q.y / n, z = q.z / n, w = q.w / n;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)
+        || !Number.isFinite(w)) return null;
+      return { x, y, z, w };
+    }
+    function qConj(q) { return { x: -q.x, y: -q.y, z: -q.z, w: q.w }; }
+
+    /** THREE.Quaternion.setFromEuler('YXZ') 的展开式。
+        为什么用 YXZ 而不是直接把 alpha/beta/gamma 当 ZXY 塞进去：
+        AR 投屏手机端（E:\Claude code\stage-ar\public\cast.html:360-401）已经用
+        「Euler('YXZ', beta, alpha, -gamma) → 绕 X -90° → 屏幕方向补偿」跑通了，
+        新八形态的 applyStageGyro 又和它共用同一套 ZXY 欧拉分解。
+        宿主这边必须产出同一个四元数，否则横屏下会整体歪 90° / 上下颠倒。
+        消费端看到的仍然是标准的世界坐标系姿态，再按 ZXY 分解成 pitch/yaw/roll。 */
+    function qFromEulerYXZ(x, y, z) {
+      const c1 = Math.cos(x / 2), c2 = Math.cos(y / 2), c3 = Math.cos(z / 2);
+      const s1 = Math.sin(x / 2), s2 = Math.sin(y / 2), s3 = Math.sin(z / 2);
+      return {
+        x: s1 * c2 * c3 + c1 * s2 * s3,
+        y: c1 * s2 * c3 - s1 * c2 * s3,
+        z: c1 * c2 * s3 - s1 * s2 * c3,
+        w: c1 * c2 * c3 + s1 * s2 * s3,
+      };
+    }
+
+    /** alpha / beta / gamma（角度）→ 设备姿态四元数，再做屏幕方向补偿。
+        · beta/alpha/-gamma 按 YXZ 合成（标准 DeviceOrientationControls 写法）；
+        · 绕 X 转 -90°：手机竖着拿时屏幕法线朝人，这一步把它映射到镜头朝前的坐标系；
+        · 最后绕设备 z 轴（屏幕法线）转 -screenAngle：形态里被强制横屏，
+          不补的话视角会整体转 90°。 */
+    function deviceQuat(alpha, beta, gamma, angleDeg) {
+      let q = qFromEulerYXZ(beta * DEG, alpha * DEG, -gamma * DEG);
+      q = qMul(q, { x: -Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 });   // 绕 X -90°
+      const h = -angleDeg * DEG / 2;
+      q = qMul(q, { x: 0, y: 0, z: Math.sin(h), w: Math.cos(h) });
+      return qNorm(q);
+    }
+
+    function readScreenAngle() {
+      let a = 0;
+      try {
+        const so = window.screen && window.screen.orientation;
+        if (so && typeof so.angle === 'number') a = so.angle;
+        else if (typeof window.orientation === 'number') a = window.orientation;
+      } catch { /* 忽略 */ }
+      if (!Number.isFinite(a)) a = 0;
+      a = Math.round(a / 90) * 90;
+      return ((a % 360) + 360) % 360;
+    }
+
+    /* ---------- 设置持久化（'1' 开；缺省 / 其它都算关） ---------- */
+    function storedOn() {
+      try { return localStorage.getItem(KEY) === '1'; } catch { return false; }
+    }
+    function saveOn(on) {
+      try { localStorage.setItem(KEY, on ? '1' : '0'); } catch { /* 隐私模式：本次仍生效 */ }
+    }
+
+    /* ---------- 设置页控件 ---------- */
+    function paintSwitch() {
+      const sw = document.getElementById('set-stage-gyro');
+      if (sw && sw.setAttribute) sw.setAttribute('aria-checked', String(enabled || pendingOn));
+    }
+    /* 只在触屏窄屏显示这一行；matchMedia 会随窗口 / 指针类型变化重新触发，
+       不是加载时算一次就完。桌面是直接 hidden，不是 disabled。 */
+    const narrowMq = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width:1280px) and (pointer:coarse)')
+      : null;
+    function syncRowVisibility() {
+      const show = !!(narrowMq && narrowMq.matches);
+      ['set-gyro-row', 'set-gyro-note-row'].forEach((id) => {
+        const row = document.getElementById(id);
+        if (row) row.hidden = !show;
+      });
+    }
+    if (narrowMq) {
+      try {
+        if (narrowMq.addEventListener) narrowMq.addEventListener('change', syncRowVisibility);
+        else if (narrowMq.addListener) narrowMq.addListener(syncRowVisibility);
+      } catch { /* 老环境忽略 */ }
+    }
+
+    /* ---------- 屏幕方向变化：重设基准，下次事件把 qRef 定在新朝向上 ---------- */
+    function onScreenChange() {
+      const next = readScreenAngle();
+      if (next === screenAngle) return;
+      screenAngle = next;
+      if (!enabled) return;
+      qRef = null;
+      refPending = true;
+      lastWritten = undefined;       // 强制下一帧写一次（此时通常是 null）
+      framesSinceWrite = 99;
+    }
+    try {
+      if (window.screen && window.screen.orientation
+        && window.screen.orientation.addEventListener) {
+        window.screen.orientation.addEventListener('change', onScreenChange);
+      }
+      window.addEventListener('orientationchange', onScreenChange);
+      window.addEventListener('resize', onScreenChange, { passive: true });
+    } catch { /* 忽略 */ }
+
+    /* ---------- deviceorientation：只更新姿态，不写全局 ---------- */
+    function onDeviceOrientation(e) {
+      /* 三个都缺 = 设备根本没给方向；只有个别字段为 null 时按 0 处理
+         （和 stage-ar/cast.html 的手机端判据一致）。 */
+      if (e.alpha == null && e.beta == null && e.gamma == null) return;
+      const alpha = Number(e.alpha) || 0;
+      const beta = Number(e.beta) || 0;
+      const gamma = Number(e.gamma) || 0;
+      if (!Number.isFinite(alpha) || !Number.isFinite(beta) || !Number.isFinite(gamma)) return;
+      const q = deviceQuat(alpha, beta, gamma, screenAngle);
+      if (!q) return;                // 非有限数 / 零长度：直接丢弃
+      lastQuat = q;
+      if (noDataTimer) { clearTimeout(noDataTimer); noDataTimer = 0; }
+      if (refPending || !qRef) { qRef = q; refPending = false; }
+    }
+    function attach() {
+      if (listening) return;
+      try {
+        window.addEventListener('deviceorientation', onDeviceOrientation, true);
+        listening = true;
+      } catch { /* 忽略 */ }
+    }
+    function detach() {
+      if (!listening) return;
+      try { window.removeEventListener('deviceorientation', onDeviceOrientation, true); } catch { /* 忽略 */ }
+      listening = false;
+    }
+
+    /* ---------- 写到舞台 iframe ---------- */
+    /**
+     * 取当前舞台窗口。同源判断放在 try 里：
+     * 用户自制形态 srcdoc + sandbox="allow-scripts" 是不透明源，读 location 会抛，
+     * 这里返回 null，写入静默跳过。内置形态（有 url）和宿主同源，正常通过。
+     */
+    function stageWindow() {
+      let frame = null;
+      try { frame = StageHost && StageHost.frame; } catch { /* 忽略 */ }
+      if (!frame) return null;
+      try {
+        const win = frame.contentWindow;
+        if (!win) return null;
+        if (win.location.origin !== window.location.origin) return null;
+        return win;
+      } catch { return null; }
+    }
+    function writeQuat(val) {
+      const win = stageWindow();
+      if (!win) return false;
+      try { win.__stageViewQuat = val; return true; } catch { return false; }
+    }
+    function writeNullNow() {
+      lastWritten = undefined;
+      if (writeQuat(null)) lastWritten = null;
+      framesSinceWrite = 99;
+    }
+
+    /* ---------- 和 AR 投屏的仲裁 ----------
+       ar-pair.js:952 的 castApplyView 也在写 window.__stageViewQuat（AR 投屏管线），
+       它把内部状态挂在 window.__stageCast（ar-pair.js:1172）。依据：
+         · state.pc 非空 = WebRTC 投屏会话在跑（castStart 里赋值 / castStop 置 null）；
+         · state.lastViewAt 是手机视角消息的最后时间（ar-pair.js:952-961），
+           超过 2500ms 会被它自己清零（ar-pair.js:1152）。
+       两者任一生效就让 AR 优先：陀螺仪这一帧完全不写，连 null 也不写，
+       否则会把 AR 的视角每帧抹掉。 */
+    function arControlling() {
+      const cast = window.__stageCast;
+      if (!cast || !cast.state) return false;
+      const st = cast.state;
+      if (st.pc) return true;
+      return !!(st.lastViewAt && Date.now() - st.lastViewAt < AR_CLEAR_MS);
+    }
+
+    /* ---------- 取值 ---------- */
+    function currentRelative() {
+      if (!enabled || !lastQuat || !qRef) return null;
+      return qNorm(qMul(qConj(qRef), lastQuat));
+    }
+    function sameQuat(a, b) {
+      if (!a || !b) return false;
+      return Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS
+        && Math.abs(a.z - b.z) < EPS && Math.abs(a.w - b.w) < EPS;
+    }
+    function currentStageSupported() {
+      const cur = StageHost && StageHost.current;
+      return !!(cur && cur.id && SUPPORTED.has(String(cur.id)));
+    }
+    function inStageView() {
+      return !!(document.body && document.body.dataset.view === 'stage');
+    }
+
+    function writeTarget(target) {
+      if (target === null) {
+        if (lastWritten === null) return;
+        if (writeQuat(null)) { lastWritten = null; framesSinceWrite = 0; }
+        return;
+      }
+      if (framesSinceWrite < WRITE_EVERY && sameQuat(target, lastWritten)) return;
+      if (writeQuat(target)) {
+        lastWritten = { x: target.x, y: target.y, z: target.z, w: target.w };
+        framesSinceWrite = 0;
+      }
+    }
+
+    /* ---------- rAF 循环：和 deviceorientation 解耦 ---------- */
+    function tick() {
+      rafId = 0;
+      if (!enabled) return;
+      rafId = requestAnimationFrame(tick);
+      framesSinceWrite++;
+      if (arControlling()) {
+        /* AR 接管这一帧。等 AR 结束后强制补写一次，避免沿用旧判断。 */
+        lastWritten = undefined;
+        return;
+      }
+      /* 不在形态页就不写：离开时会由 onLeave() 明确写一次 null。 */
+      if (!inStageView()) return;
+      const rel = currentStageSupported() ? currentRelative() : null;
+      writeTarget(rel);
+    }
+    function startLoop() {
+      if (rafId) return;
+      rafId = requestAnimationFrame(tick);
+    }
+    function stopLoop() {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
+
+    /* ---------- 形态页顶栏「回正」按钮 ---------- */
+    function updateButton() {
+      const btn = document.getElementById('stage-gyro-btn');
+      if (!btn) return;
+      btn.hidden = !(enabled && inStageView() && currentStageSupported());
+    }
+
+    /* 2026-11-22：不再提示「当前形态不支持陀螺仪」。
+       以前每进 / 换一个形态就弹一次，用户嫌烦；支持与否看顶栏有没有「回正」即可。 */
+
+    /* ---------- 回正 ---------- */
+    function resetReference() {
+      if (lastQuat) { qRef = lastQuat; refPending = false; }
+      else { qRef = null; refPending = true; }
+      lastWritten = undefined;
+      framesSinceWrite = 99;
+      updateButton();
+    }
+
+    /* ---------- 开关 / 权限 ---------- */
+    function armNoDataHint() {
+      if (noDataHinted) return;
+      if (noDataTimer) clearTimeout(noDataTimer);
+      noDataTimer = setTimeout(() => {
+        noDataTimer = 0;
+        if (!enabled || lastQuat) return;
+        noDataHinted = true;
+        /* 有些设备要动一下才派发事件：只提示，不自动关开关 */
+        try { stageTip('这个设备没有陀螺仪数据'); } catch { /* 忽略 */ }
+      }, 3000);
+    }
+    function commitOn(fromGesture) {
+      enabled = true;
+      pendingOn = false;
+      saveOn(true);
+      attach();
+      startLoop();
+      if (fromGesture) armNoDataHint();
+      paintSwitch();
+      updateButton();
+    }
+    function disable() {
+      enabled = false;
+      pendingOn = false;
+      saveOn(false);
+      writeNullNow();             // 关闭时立刻把形态视角归零
+      stopLoop();
+      detach();
+      if (noDataTimer) { clearTimeout(noDataTimer); noDataTimer = 0; }
+      lastQuat = null;
+      qRef = null;
+      refPending = false;
+      paintSwitch();
+      updateButton();
+    }
+
+    /* 开关点击：iOS 的 requestPermission 必须在这个 click 的同一个调用栈里同步发起，
+       不能挪到 setTimeout / await 之后，否则 Safari 会直接判为没有用户手势。 */
+    function onSwitchClick() {
+      if (pendingOn) return;
+      if (enabled) { disable(); return; }
+      const DOE = window.DeviceOrientationEvent;
+      let perm = null;
+      if (DOE && typeof DOE.requestPermission === 'function') {
+        try {
+          perm = DOE.requestPermission();   // ← 同步调用，关键就在这一行
+        } catch {
+          pendingOn = false;
+          paintSwitch();
+          try { stageTip('无法申请陀螺仪权限'); } catch { /* 忽略 */ }
+          return;
+        }
+      }
+      if (!perm) { commitOn(true); return; }   // 安卓 / 桌面没有授权 API：直接监听
+      pendingOn = true;
+      paintSwitch();
+      Promise.resolve(perm).then((state) => {
+        if (state === 'granted') {
+          commitOn(true);
+        } else {
+          /* 拒绝：开关回退到关，并提示；不留「开着但没数据」的状态 */
+          pendingOn = false;
+          saveOn(false);
+          paintSwitch();
+          try { stageTip('没有获得陀螺仪权限，已保持关闭'); } catch { /* 忽略 */ }
+        }
+      }, () => {
+        pendingOn = false;
+        saveOn(false);
+        paintSwitch();
+        try { stageTip('没有获得陀螺仪权限，已保持关闭'); } catch { /* 忽略 */ }
+      });
+    }
+
+    /* ---------- 绑定 DOM ---------- */
+    const swBtn = document.getElementById('set-stage-gyro');
+    if (swBtn) swBtn.addEventListener('click', onSwitchClick);
+    const resetBtn = document.getElementById('set-stage-gyro-reset');
+    if (resetBtn) resetBtn.addEventListener('click', resetReference);
+    const stageBtn = document.getElementById('stage-gyro-btn');
+    if (stageBtn) {
+      stageBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        resetReference();
+      });
+    }
+
+    /* ---------- 启动 ---------- */
+    syncRowVisibility();
+    screenAngle = readScreenAngle();
+    enabled = storedOn();
+    /* 启动时接着上次的开关：只挂监听、不申请权限（没有用户手势，iOS 也不会给）。
+       没数据的提示只在用户本次手动打开时计时，避免刷新后误报。 */
+    if (enabled) { attach(); startLoop(); }
+    paintSwitch();
+
+    return {
+      onEnter() {
+        /* 进入形态时重新取屏幕方向（手机在形态里被强制横屏，角度可能刚变）。
+           角度变了就不能拿旧补偿算出的 lastQuat 当基准，等下一帧事件重设。 */
+        const nextAngle = readScreenAngle();
+        if (nextAngle !== screenAngle || !lastQuat) {
+          screenAngle = nextAngle;
+          qRef = null;
+          refPending = true;
+        } else {
+          qRef = lastQuat;
+          refPending = false;
+        }
+        lastWritten = undefined;
+        framesSinceWrite = 99;
+        updateButton();
+      },
+      onLeave() {
+        writeNullNow();
+        updateButton();
+      },
+      onStageChange() {
+        writeNullNow();          // 旧文档马上销毁：先归零
+        lastWritten = undefined;
+        updateButton();
+      },
+      resetReference,
+    };
+  })();
+
+  /* ======================= 顶栏浮层互斥 =======================
+     2026-11-17：形态页顶栏有三个互斥浮层 ——
+       · 形态下拉 #stage-menu-pop（本文件，id 'menu'）
+       · 本形态设置 #stage-settings（本文件，id 'settings'）
+       · 播放队列 #stage-queue-pop（public/snow-queue.js，id 'queue'）
+     前两个和第三个分属两个 IIFE，没有共享作用域，所以互斥走 document 上的
+     自定义事件：谁真正「打开」自己，就广播一次自己的 id；每一方收到「不是
+     自己的 id」且自己正开着，就关掉自己。
+     关闭路径一律不广播 —— 否则 A 一关就把 B 也带走，变成谁都开不住。
+     toggle 关掉自己同样不会走这里；各家的 setOpen/setPop 只在「从关到开」
+     的那一支调用本函数。 */
+  function fireStagePanel(id) {
+    try {
+      document.dispatchEvent(new CustomEvent('lizi:stagepanel', { detail: { id } }));
+    } catch { /* 老环境没有 CustomEvent，忽略 */ }
+  }
+
+  /* ======================= 形态设置面板的自绘下拉 =======================
+     2026-11-21：手机上面板里的 <select> 走的是安卓系统选择器，一股系统控件味，
+     和深色玻璃面板完全不搭，用户要求换掉。这里改成「按钮 + 就地展开一列选项」：
+     不弹系统层、不用浮层（面板本身可滚动，浮层会被 overflow 裁掉）。
+     options: [{ v, t }]；onPick 收到原始 v（字符串 / 数字都原样传）。
+     返回 { el, set(v), get value() }。 */
+  function buildStagePicker(options, current, onPick) {
+    const wrap = document.createElement('div');
+    wrap.className = 'spnl__pick';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'spnl__pickbtn';
+    btn.setAttribute('aria-haspopup', 'listbox');
+    btn.setAttribute('aria-expanded', 'false');
+    const lab = document.createElement('span');
+    lab.className = 'spnl__picklab';
+    const chev = document.createElement('span');
+    chev.className = 'spnl__pickchev';
+    chev.setAttribute('aria-hidden', 'true');
+    chev.textContent = '▾';
+    btn.appendChild(lab);
+    btn.appendChild(chev);
+    const list = document.createElement('div');
+    list.className = 'spnl__picklist';
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    const items = [];
+    let value = current;
+
+    function paint() {
+      let curText = '';
+      items.forEach(({ b, o }) => {
+        const on = String(o.v) === String(value);
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+        if (on) curText = o.t;
+      });
+      lab.textContent = curText || (options[0] && options[0].t) || '';
+    }
+    function close() {
+      list.hidden = true;
+      wrap.classList.remove('is-open');
+      btn.setAttribute('aria-expanded', 'false');
+    }
+    function open() {
+      /* 同一个面板里同时只开一个下拉：先把别人收掉 */
+      try {
+        wrap.ownerDocument.querySelectorAll('.spnl__pick.is-open').forEach((w) => {
+          if (w === wrap) return;
+          w.classList.remove('is-open');
+          const l = w.querySelector('.spnl__picklist');
+          if (l) l.hidden = true;
+          const b = w.querySelector('.spnl__pickbtn');
+          if (b) b.setAttribute('aria-expanded', 'false');
+        });
+      } catch (_) { /* 忽略 */ }
+      list.hidden = false;
+      wrap.classList.add('is-open');
+      btn.setAttribute('aria-expanded', 'true');
+    }
+    (options || []).forEach((o) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'spnl__pickopt';
+      b.setAttribute('role', 'option');
+      b.textContent = o.t;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        value = o.v;
+        paint();
+        close();
+        try { onPick(o.v); } catch (_) { /* 回调自己兜底 */ }
+      });
+      list.appendChild(b);
+      items.push({ b, o });
+    });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (list.hidden) open();
+      else close();
+    });
+    paint();
+    wrap.appendChild(btn);
+    wrap.appendChild(list);
+    return {
+      el: wrap,
+      set(v) { value = v; paint(); },
+      get value() { return value; },
+    };
+  }
+
+  /* ======================= 形态画质（全局默认 + 单形态覆盖） =======================
+     设置 → 画质 里存的是全局默认；某个形态在自己的设置面板里关掉
+     「跟随全局画质」后单独存一份：改它不动全局，改全局也不碰它。
+     键：全局 lizi.picture.v1 = { scale, sat, bri, fps }
+         单形态 lizi.stagePicture.<id> = { follow:false, scale, sat, bri, fps }
+     · scale 作用于 #view-stage 的 --stage-scale（iframe 缩小再放大，像素按 s² 掉）
+     · sat / bri 是 #stage-frame 的 CSS filter（只染形态画面，不动宿主 UI）
+     · fps 给同源形态注入 rAF 限速；用户自建形态是不透明源，读不到，静默跳过
+     默认：scale 1 · sat 100 · bri 100 · fps 0（不限）。 */
+  const StagePicture = (() => {
+    const GKEY = 'lizi.picture.v1';
+    const RKEY = 'lizi.win.round';
+    const SKEY = (id) => 'lizi.stagePicture.' + id;
+    const SCALES = [0.5, 0.7, 0.85, 1];
+    const FPS = [0, 60, 30];
+    const DEF = { scale: 1, sat: 100, bri: 100, fps: 0 };
+    let global = readGlobal();
+    let currentId = '';
+    let saveTimer = 0;
+
+    function num(v, min, max, d) {
+      const n = Number(v);
+      return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : d;
+    }
+    function readGlobal() {
+      let o = {};
+      try { o = JSON.parse(localStorage.getItem(GKEY) || '{}') || {}; } catch { o = {}; }
+      return {
+        scale: SCALES.indexOf(Number(o.scale)) >= 0 ? Number(o.scale) : DEF.scale,
+        sat: num(o.sat, 50, 150, DEF.sat),
+        bri: num(o.bri, 70, 130, DEF.bri),
+        fps: FPS.indexOf(Number(o.fps)) >= 0 ? Number(o.fps) : DEF.fps,
+      };
+    }
+    function writeGlobal() {
+      try { localStorage.setItem(GKEY, JSON.stringify(global)); } catch { /* 隐私模式：本次仍生效 */ }
+    }
+    function readStage(id) {
+      if (!id) return null;
+      let o = null;
+      try { o = JSON.parse(localStorage.getItem(SKEY(id)) || 'null'); } catch { o = null; }
+      if (!o || typeof o !== 'object') return null;
+      return {
+        follow: o.follow !== false,
+        scale: SCALES.indexOf(Number(o.scale)) >= 0 ? Number(o.scale) : global.scale,
+        sat: num(o.sat, 50, 150, global.sat),
+        bri: num(o.bri, 70, 130, global.bri),
+        fps: FPS.indexOf(Number(o.fps)) >= 0 ? Number(o.fps) : global.fps,
+      };
+    }
+    function writeStage(id, v) {
+      if (!id) return;
+      try { localStorage.setItem(SKEY(id), JSON.stringify(v)); } catch { /* 忽略 */ }
+    }
+    function effective(id) {
+      const s = readStage(id);
+      return s && !s.follow ? s : global;
+    }
+    function capWindow(win, fps) {
+      if (!win) return;
+      try {
+        win.__liziRafCap = Number(fps) || 0;
+        if (win.__liziRafHooked) return;
+        const raw = win.requestAnimationFrame;
+        if (typeof raw !== 'function') return;
+        const bound = raw.bind(win);
+        let last = 0;
+        win.requestAnimationFrame = function (cb) {
+          const cap = Number(win.__liziRafCap) || 0;
+          if (!cap) return bound(cb);
+          const gap = 1000 / cap;
+          return bound(function (t) {
+            if (t - last >= gap - 1) { last = t; cb(t); }
+            else win.requestAnimationFrame(cb);
+          });
+        };
+        win.__liziRafHooked = true;
+      } catch { /* 用户自建形态（不透明源）读不到 window：跳过 */ }
+    }
+    function applyFrame(eff) {
+      const view = document.getElementById('view-stage');
+      if (view) view.style.setProperty('--stage-scale', String(eff.scale));
+      const frame = document.getElementById('stage-frame');
+      if (!frame) return;
+      const parts = [];
+      if (Math.abs(eff.sat - 100) > 0.01) parts.push('saturate(' + eff.sat + '%)');
+      if (Math.abs(eff.bri - 100) > 0.01) parts.push('brightness(' + eff.bri + '%)');
+      const css = parts.join(' ');
+      frame.style.filter = css;
+      /* 进场海报也套同一层滤镜：否则 ready 交叉淡入时，海报到形态画面会跳一下色 */
+      const poster = document.querySelector('.stage-poster');
+      if (poster) poster.style.filter = css;
+      let win = null;
+      try { win = frame.contentWindow; } catch { win = null; }
+      capWindow(win, eff.fps);
+    }
+    function applyRoot() {
+      document.documentElement.style.setProperty('--stage-scale', String(global.scale));
+    }
+    function inStage() {
+      return !!(document.body && document.body.classList.contains('is-stage'));
+    }
+    function applyCurrent() {
+      const cur = (typeof StageHost !== 'undefined' && StageHost && StageHost.current) || null;
+      currentId = cur ? cur.id : currentId;
+      applyFrame(currentId ? effective(currentId) : global);
+    }
+
+    /* ---------- 设置 → 画质 的全局控件 ---------- */
+    function segPaint(id, attr, val) {
+      const box = document.getElementById(id);
+      if (!box) return;
+      box.querySelectorAll('button').forEach((b) => {
+        const on = Math.abs(Number(b.dataset[attr]) - Number(val)) < 0.001;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+    }
+    function paintGlobalUI() {
+      segPaint('set-pic-scale', 'v', global.scale);
+      segPaint('set-pic-fps', 'v', global.fps);
+      const sat = document.getElementById('set-pic-sat');
+      const satv = document.getElementById('set-pic-sat-val');
+      if (sat) sat.value = String(global.sat);
+      if (satv) satv.textContent = Math.round(global.sat) + '%';
+      const bri = document.getElementById('set-pic-bri');
+      const briv = document.getElementById('set-pic-bri-val');
+      if (bri) bri.value = String(global.bri);
+      if (briv) briv.textContent = Math.round(global.bri) + '%';
+      const wr = document.getElementById('set-win-round');
+      if (wr) wr.setAttribute('aria-checked', winRoundOn() ? 'true' : 'false');
+    }
+    function saveGlobalSoon() {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(writeGlobal, 220);
+    }
+    function applyGlobal(v) {
+      if (v && typeof v === 'object') {
+        if (v.scale != null && SCALES.indexOf(Number(v.scale)) >= 0) global.scale = Number(v.scale);
+        if (v.sat != null) global.sat = num(v.sat, 50, 150, global.sat);
+        if (v.bri != null) global.bri = num(v.bri, 70, 130, global.bri);
+        if (v.fps != null && FPS.indexOf(Number(v.fps)) >= 0) global.fps = Number(v.fps);
+      }
+      writeGlobal();
+      applyRoot();
+      paintGlobalUI();
+      if (inStage()) applyCurrent();
+    }
+
+    /* ---------- 桌面窗口圆角（默认开） ---------- */
+    function winRoundOn() {
+      try { return localStorage.getItem(RKEY) !== '0'; } catch { return true; }
+    }
+    function applyWinRound(on) {
+      document.documentElement.classList.toggle('win-square', !on);
+    }
+
+    /* ---------- 形态设置面板里的「画面」分组 ---------- */
+    function renderPanel(host) {
+      if (!host) return;
+      const id = currentId;
+      let st = readStage(id);
+      const follow = !st || st.follow;
+      if (!st) st = { follow: true };
+      if (follow) {
+        st.scale = global.scale; st.sat = global.sat; st.bri = global.bri; st.fps = global.fps;
+      }
+      const group = document.createElement('div');
+      group.className = 'spnl__group';
+
+      const gh = document.createElement('div');
+      gh.className = 'spnl__grouph';
+      gh.textContent = '画面';
+      group.appendChild(gh);
+
+      const row = document.createElement('div');
+      row.className = 'spnl__row';
+      const lab = document.createElement('div');
+      lab.className = 'spnl__lab';
+      const labText = document.createElement('span');
+      labText.textContent = '跟随全局画质';
+      lab.appendChild(labText);
+      row.appendChild(lab);
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'spnl__sw';
+      sw.setAttribute('role', 'switch');
+      sw.setAttribute('aria-checked', String(follow));
+      row.appendChild(sw);
+      group.appendChild(row);
+
+      const hint = document.createElement('div');
+      hint.className = 'spnl__hint';
+      group.appendChild(hint);
+
+      const ctl = document.createElement('div');
+      ctl.className = 'spnl__picctl';
+      ctl.hidden = follow;
+      group.appendChild(ctl);
+
+      function updHint() {
+        const e = st.follow ? global : st;
+        hint.textContent = (st.follow ? '跟随设置 → 画质：' : '本形态单独设置：')
+          + '渲染 ' + Math.round(e.scale * 100) + '% · 饱和 ' + Math.round(e.sat)
+          + '% · 亮度 ' + Math.round(e.bri) + '% · 帧率 ' + (e.fps ? e.fps : '不限');
+      }
+      function commit() {
+        writeStage(id, st);
+        updHint();
+        applyCurrent();
+      }
+      function ctlRow(label) {
+        const r = document.createElement('div');
+        r.className = 'spnl__row';
+        const l = document.createElement('div');
+        l.className = 'spnl__lab';
+        const t = document.createElement('span');
+        t.textContent = label;
+        const val = document.createElement('span');
+        val.className = 'spnl__val';
+        l.appendChild(t);
+        l.appendChild(val);
+        r.appendChild(l);
+        ctl.appendChild(r);
+        return { row: r, val };
+      }
+
+      const scaleRow = ctlRow('渲染比例');
+      const scalePick = buildStagePicker(
+        [{ v: 0.5, t: '50%' }, { v: 0.7, t: '70%' }, { v: 0.85, t: '85%' }, { v: 1, t: '100%' }],
+        st.scale,
+        (v) => {
+          st.scale = Number(v);
+          scaleRow.val.textContent = Math.round(st.scale * 100) + '%';
+          commit();
+        }
+      );
+      scaleRow.val.textContent = Math.round(st.scale * 100) + '%';
+      scaleRow.row.appendChild(scalePick.el);
+
+      const satRow = ctlRow('饱和度');
+      satRow.val.textContent = Math.round(st.sat) + '%';
+      const satInp = document.createElement('input');
+      satInp.type = 'range';
+      satInp.className = 'spnl__range';
+      satInp.min = '50'; satInp.max = '150'; satInp.step = '1';
+      satInp.value = String(st.sat);
+      satInp.addEventListener('input', () => {
+        st.sat = Number(satInp.value);
+        satRow.val.textContent = Math.round(st.sat) + '%';
+        commit();
+      });
+      satRow.row.appendChild(satInp);
+
+      const briRow = ctlRow('亮度');
+      briRow.val.textContent = Math.round(st.bri) + '%';
+      const briInp = document.createElement('input');
+      briInp.type = 'range';
+      briInp.className = 'spnl__range';
+      briInp.min = '70'; briInp.max = '130'; briInp.step = '1';
+      briInp.value = String(st.bri);
+      briInp.addEventListener('input', () => {
+        st.bri = Number(briInp.value);
+        briRow.val.textContent = Math.round(st.bri) + '%';
+        commit();
+      });
+      briRow.row.appendChild(briInp);
+
+      const fpsRow = ctlRow('帧率上限');
+      const fpsPick = buildStagePicker(
+        [{ v: 0, t: '不限' }, { v: 60, t: '60' }, { v: 30, t: '30' }],
+        st.fps,
+        (v) => {
+          st.fps = Number(v);
+          fpsRow.val.textContent = st.fps ? String(st.fps) : '不限';
+          commit();
+        }
+      );
+      fpsRow.val.textContent = st.fps ? String(st.fps) : '不限';
+      fpsRow.row.appendChild(fpsPick.el);
+
+      sw.addEventListener('click', () => {
+        st.follow = !st.follow;
+        sw.setAttribute('aria-checked', String(st.follow));
+        ctl.hidden = st.follow;
+        if (st.follow) {
+          /* 收起控件时顺手把展开的下拉也关掉，免得再展开时它还是打开的 */
+          ctl.querySelectorAll('.spnl__pick.is-open').forEach((w) => {
+            w.classList.remove('is-open');
+            const l = w.querySelector('.spnl__picklist');
+            if (l) l.hidden = true;
+            const b = w.querySelector('.spnl__pickbtn');
+            if (b) b.setAttribute('aria-expanded', 'false');
+          });
+        }
+        if (st.follow) {
+          st.scale = global.scale; st.sat = global.sat; st.bri = global.bri; st.fps = global.fps;
+        }
+        writeStage(id, st);
+        /* 关掉跟随的瞬间就用当前全局值打底，避免控件跳回旧存档 */
+        scalePick.set(st.scale);
+        satInp.value = String(st.sat);
+        briInp.value = String(st.bri);
+        fpsPick.set(st.fps);
+        scaleRow.val.textContent = Math.round(st.scale * 100) + '%';
+        satRow.val.textContent = Math.round(st.sat) + '%';
+        briRow.val.textContent = Math.round(st.bri) + '%';
+        fpsRow.val.textContent = st.fps ? String(st.fps) : '不限';
+        updHint();
+        applyCurrent();
+      });
+
+      updHint();
+      host.appendChild(group);
+    }
+    function resetOverride() {
+      const id = currentId || ((StageHost.current && StageHost.current.id) || '');
+      if (!id) return;
+      try { localStorage.removeItem(SKEY(id)); } catch { /* 忽略 */ }
+      applyCurrent();
+    }
+
+    /* ---------- 设备配置检测（引导页给推荐用） ---------- */
+    function deviceProfile() {
+      const nav = window.navigator || {};
+      const cores = Number(nav.hardwareConcurrency) || 0;
+      const mem = Number(nav.deviceMemory) || 0;
+      const dpr = Number(window.devicePixelRatio) || 1;
+      let longSide = 0;
+      try { longSide = Math.round(Math.max(screen.width, screen.height) * dpr); } catch { longSide = 0; }
+      let tier = 'mid';
+      if ((cores && cores <= 4) || (mem && mem <= 3)) tier = 'low';
+      else if (cores >= 8 && mem >= 6) tier = 'high';
+      else if (longSide >= 2600 && dpr >= 3 && cores < 8) tier = 'low';
+      const rec = tier === 'low' ? { scale: 0.7, fps: 30 }
+        : tier === 'mid' ? { scale: 0.85, fps: 60 }
+        : { scale: 1, fps: 0 };
+      return { cores, mem, dpr, longSide, tier, rec };
+    }
+
+    /* ---------- 启动接线（设置页控件 + 根变量） ---------- */
+    applyRoot();
+    applyWinRound(winRoundOn());
+
+    {
+      const scaleBox = document.getElementById('set-pic-scale');
+      if (scaleBox) {
+        scaleBox.addEventListener('click', (e) => {
+          const b = e.target.closest('button[data-v]');
+          if (!b) return;
+          applyGlobal({ scale: Number(b.dataset.v) });
+        });
+      }
+      const fpsBox = document.getElementById('set-pic-fps');
+      if (fpsBox) {
+        fpsBox.addEventListener('click', (e) => {
+          const b = e.target.closest('button[data-v]');
+          if (!b) return;
+          applyGlobal({ fps: Number(b.dataset.v) });
+        });
+      }
+      const sat = document.getElementById('set-pic-sat');
+      if (sat) sat.addEventListener('input', () => {
+        global.sat = num(sat.value, 50, 150, global.sat);
+        const v = document.getElementById('set-pic-sat-val');
+        if (v) v.textContent = Math.round(global.sat) + '%';
+        if (inStage()) applyCurrent();
+        saveGlobalSoon();
+      });
+      const bri = document.getElementById('set-pic-bri');
+      if (bri) bri.addEventListener('input', () => {
+        global.bri = num(bri.value, 70, 130, global.bri);
+        const v = document.getElementById('set-pic-bri-val');
+        if (v) v.textContent = Math.round(global.bri) + '%';
+        if (inStage()) applyCurrent();
+        saveGlobalSoon();
+      });
+      const wr = document.getElementById('set-win-round');
+      if (wr) wr.addEventListener('click', () => {
+        const on = !winRoundOn();
+        try { localStorage.setItem(RKEY, on ? '1' : '0'); } catch { /* 忽略 */ }
+        applyWinRound(on);
+        paintGlobalUI();
+      });
+      const wrRow = document.getElementById('set-win-round-row');
+      const fineMq = window.matchMedia ? window.matchMedia('(pointer:fine)') : null;
+      const syncWinRow = () => { if (wrRow) wrRow.hidden = !(fineMq && fineMq.matches); };
+      if (fineMq) {
+        try {
+          if (fineMq.addEventListener) fineMq.addEventListener('change', syncWinRow);
+          else if (fineMq.addListener) fineMq.addListener(syncWinRow);
+        } catch { /* 忽略 */ }
+      }
+      syncWinRow();
+    }
+    paintGlobalUI();
+
+    /* 形态 ready 时按「本形态覆盖 / 全局」应用一次；离开形态时 iframe 会被卸掉，
+       下次 ready 重新套用，不需要额外清理。 */
+    addEventListener('stage:ready', () => {
+      try { applyCurrent(); } catch { /* 忽略 */ }
+    });
+
+    return {
+      applyGlobal,
+      getGlobal: () => Object.assign({}, global),
+      deviceProfile,
+      renderPanel,
+      resetOverride,
+      setCurrent: (id) => { currentId = id || ''; },
+      applyCurrent,
+      paintGlobalUI,
+    };
+  })();
+  try {
+    window.LIZI_PICTURE = {
+      applyGlobal: StagePicture.applyGlobal,
+      getGlobal: StagePicture.getGlobal,
+      deviceProfile: StagePicture.deviceProfile,
+    };
+  } catch { /* 老内核忽略 */ }
 
   /* ======================= 形态设置面板 =======================
      只服务「用户可见的形态设置」，和 F5 那个开发者调参面板是两回事。
@@ -2541,6 +4903,68 @@
       try { localStorage.setItem(storeKey(stageId), JSON.stringify(data)); } catch { /* 忽略 */ }
     }
 
+    /* ---------- 自定义背景的媒体层 ----------
+       2026-11-16：视频和原图都进 IndexedDB（public/hall/stage-media.js），
+       localStorage 只留 'idb:<id>' 小字符串。老的 dataURL 继续原样保存、
+       原样推送，不做迁移 —— 升级不能把用户已经设好的背景弄丢。 */
+    const SMALL_IMAGE_BYTES = 400 * 1024;          // 小于它继续走 dataURL，省得为小图开库
+    const VIDEO_SOFT_MAX = 80 * 1024 * 1024;       // 超过给提示但允许
+    const VIDEO_HARD_MAX = 200 * 1024 * 1024;      // 硬性拒绝
+    const defaultCrop = () => ({ x: 0, y: 0, w: 1, h: 1 });
+    const mediaUIs = {};                            // key -> { status, refresh }，render 时重建
+    const mediaPushTimers = {};                     // 合并同一 key 的重复推送
+    const mediaPushSeq = {};                        // 同一 key 的推送序号，异步返回时防旧值覆盖新值
+
+    function normalizeCrop(v) {
+      if (!v || typeof v !== 'object') return defaultCrop();
+      const num = (x, d) => {
+        const n = Number(x);
+        return Number.isFinite(n) ? n : d;
+      };
+      const x = Math.min(Math.max(num(v.x, 0), 0), 1);
+      const y = Math.min(Math.max(num(v.y, 0), 0), 1);
+      let w = Math.min(Math.max(num(v.w, 1), 0.0001), 1);
+      let h = Math.min(Math.max(num(v.h, 1), 0.0001), 1);
+      if (x + w > 1) w = Math.max(0.0001, 1 - x);
+      if (y + h > 1) h = Math.max(0.0001, 1 - y);
+      return { x, y, w, h };
+    }
+
+    function isIdbRef(v) {
+      return typeof v === 'string' && v.indexOf('idb:') === 0 && v.length > 4;
+    }
+
+    /* stage-media.js 不写进 index.html（那两份文件别的代理在改），按需注入一次。
+       如果以后有人加了静态 <script>，这里会复用它而不是再插一份。 */
+    let stageMediaPromise = null;
+    function ensureStageMedia() {
+      if (window.LIZI_STAGE_MEDIA) return Promise.resolve(window.LIZI_STAGE_MEDIA);
+      if (stageMediaPromise) return stageMediaPromise;
+      const existing = document.querySelector('script[src$="hall/stage-media.js"]');
+      if (existing) {
+        stageMediaPromise = new Promise((resolve) => {
+          existing.addEventListener('load', () => resolve(window.LIZI_STAGE_MEDIA || null), { once: true });
+          existing.addEventListener('error', () => resolve(null), { once: true });
+          setTimeout(() => resolve(window.LIZI_STAGE_MEDIA || null), 8000);
+        });
+        return stageMediaPromise;
+      }
+      stageMediaPromise = new Promise((resolve) => {
+        const s = document.createElement('script');
+        s.src = 'hall/stage-media.js';
+        s.async = true;
+        s.setAttribute('data-lizi-stage-media', '1');
+        s.onload = () => resolve(window.LIZI_STAGE_MEDIA || null);
+        s.onerror = () => {
+          stageMediaPromise = null;
+          try { s.remove(); } catch { /* 忽略 */ }
+          resolve(null);
+        };
+        document.head.appendChild(s);
+      });
+      return stageMediaPromise;
+    }
+
     /** 通知形态：某个设置变了 */
     function push(key, value) {
       const f = $('stage-frame');
@@ -2549,9 +4973,86 @@
         f.contentWindow.postMessage({ __c100: 1, type: 'setting', payload: { key, value } }, '*');
       } catch { /* 忽略 */ }
     }
-    /** 把当前全部设置推一遍（形态 ready 时调用） */
+
+    /** 合并 40ms 内的重复请求（render / commit / pushAll 常常一起发生） */
+    function queueMediaPush(key) {
+      if (mediaPushTimers[key]) return;
+      mediaPushTimers[key] = setTimeout(() => {
+        delete mediaPushTimers[key];
+        try { pushMedia(key); } catch { /* 忽略 */ }
+      }, 40);
+    }
+
+    /** 推一条自定义背景的三种消息：<key> URL / <key>Kind / <key>Crop。
+        push() 本身是同步的，idb: 解析是异步的，所以统一收在这里。 */
+    async function pushMedia(key) {
+      const myStage = stageId;
+      const raw = data[key];
+      const crop = normalizeCrop(data[key + 'Crop']);
+      const kindHint = data[key + 'Kind'] === 'video' ? 'video' : 'image';
+
+      if (!raw || typeof raw !== 'string') {
+        push(key, '');
+        push(key + 'Kind', '');
+        push(key + 'Crop', crop);
+        return;
+      }
+
+      /* 老值：dataURL 就是图片本身，同步推，和升级前的行为完全一致 */
+      if (raw.indexOf('data:') === 0) {
+        push(key, raw);
+        push(key + 'Kind', 'image');
+        push(key + 'Crop', crop);
+        return;
+      }
+
+      /* 未知格式（早期手工写入的值）：原样推，至少不丢用户数据 */
+      if (!isIdbRef(raw)) {
+        push(key, raw);
+        push(key + 'Kind', kindHint);
+        push(key + 'Crop', crop);
+        return;
+      }
+
+      const ui = mediaUIs[key];
+      if (ui) ui.status('载入中…');
+      const seq = (mediaPushSeq[key] = (mediaPushSeq[key] || 0) + 1);
+      const mod = await ensureStageMedia();
+      let r = null;
+      try { r = mod ? await mod.resolve(raw) : null; } catch { r = null; }
+      /* 解析期间切了形态 / 又换了一次媒体：以最后一次为准，别让慢的旧解析覆盖新值 */
+      if (stageId !== myStage) return;
+      if (mediaPushSeq[key] !== seq) return;
+      if (ui) ui.refresh();
+      if (!r) {
+        if (ui) ui.status('原文件已丢失（本地存储被清理），请重新选择');
+        push(key, '');
+        push(key + 'Kind', '');
+        push(key + 'Crop', crop);
+        return;
+      }
+      push(key, r.url);
+      push(key + 'Kind', r.kind === 'video' ? 'video' : 'image');
+      push(key + 'Crop', crop);
+    }
+
+    /** 把当前全部设置推一遍（形态 ready 时调用）。
+        media 项由 pushMedia 统一发三条，避免把 'idb:<id>' 这种内部引用直接漏给形态。 */
     function pushAll() {
-      Object.keys(data).forEach((k) => push(k, data[k]));
+      const mediaKeys = new Set();
+      const derived = new Set();
+      ((spec && spec.items) || []).forEach((it) => {
+        if (it && it.key && (it.type === 'media' || it.type === 'image')) {
+          mediaKeys.add(it.key);
+          derived.add(it.key + 'Kind');
+          derived.add(it.key + 'Crop');
+        }
+      });
+      Object.keys(data).forEach((k) => {
+        if (mediaKeys.has(k) || derived.has(k)) return;
+        push(k, data[k]);
+      });
+      mediaKeys.forEach((k) => { try { pushMedia(k); } catch { /* 忽略 */ } });
     }
 
     function fmtNum(v, step) {
@@ -2562,8 +5063,11 @@
     /* ---------- 渲染 ---------- */
     function render() {
       body.innerHTML = '';
+      /* 面板整块重画：旧的 UI 句柄指向已脱离文档的元素，留着只会白白占内存 */
+      Object.keys(mediaUIs).forEach((k) => { delete mediaUIs[k]; });
       const items = (spec && Array.isArray(spec.items)) ? spec.items : [];
       titleEl.textContent = (spec && spec.title) || (StageHost.current && StageHost.current.name) || '设置';
+      const switchEls = {};
 
       items.forEach((it) => {
         const row = document.createElement('div');
@@ -2603,6 +5107,7 @@
           sw.className = 'spnl__sw';
           sw.setAttribute('role', 'switch');
           sw.setAttribute('aria-checked', String(!!cur));
+          switchEls[it.key] = sw;
           sw.addEventListener('click', () => {
             data[it.key] = !data[it.key];
             sw.setAttribute('aria-checked', String(data[it.key]));
@@ -2613,21 +5118,42 @@
           row.appendChild(sw);
 
         } else if (it.type === 'select') {
-          const sel = document.createElement('select');
-          sel.className = 'spnl__sel';
-          (it.options || []).forEach((o) => {
-            const op = document.createElement('option');
-            op.value = o.v; op.textContent = o.t;
-            if (o.v === cur) op.selected = true;
-            sel.appendChild(op);
-          });
-          sel.addEventListener('change', () => {
-            data[it.key] = sel.value;
+          /* 自绘下拉（2026-11-21）：不再用原生 <select>，安卓的系统选择器太简陋。
+             值原样回存 / 回推 —— 老存档里是字符串，保持字符串语义。 */
+          const pick = buildStagePicker(it.options || [], cur, (v) => {
+            data[it.key] = v;
             push(it.key, data[it.key]);
             save();
           });
           row.appendChild(lab);
-          row.appendChild(sel);
+          row.appendChild(pick.el);
+
+        } else if (it.type === 'color') {
+          /* 取色器：值就是 #rrggbb，形态按原样收 setting。
+             def 必须写 #rrggbb（input[type=color] 不接受简写和透明色）。 */
+          const wrap = document.createElement('div');
+          wrap.className = 'spnl__color';
+
+          const inp = document.createElement('input');
+          inp.type = 'color';
+          inp.className = 'spnl__colorinp';
+          inp.value = /^#[0-9a-f]{6}$/i.test(String(cur)) ? String(cur) : (it.def || '#000000');
+
+          const hex = document.createElement('span');
+          hex.className = 'spnl__val spnl__hex';
+          hex.textContent = inp.value.toUpperCase();
+
+          inp.addEventListener('input', () => {
+            data[it.key] = inp.value;
+            hex.textContent = inp.value.toUpperCase();
+            push(it.key, data[it.key]);
+            save();
+          });
+
+          wrap.appendChild(inp);
+          wrap.appendChild(hex);
+          row.appendChild(lab);
+          row.appendChild(wrap);
 
         } else if (it.type === 'segment') {
           const seg = document.createElement('div');
@@ -2671,12 +5197,342 @@
               data[it.key] = o.v;
               [...gal.children].forEach((c) => c.classList.toggle('is-on', c === card));
               push(it.key, data[it.key]);
+              /* 图集项可以声明选择后顺带写形态已有的媒体键（2026-11-22）：
+                 Wallpaper Engine 壁纸选完直接落到 bgImage / wallImg / bgImg，
+                 不用每个形态再写一套消息处理。 */
+              if (it.apply && it.apply.key) {
+                const ap = it.apply;
+                const set = (k, v) => { data[k] = v; push(k, v); };
+                set(ap.key, o.v);
+                if (ap.kindKey) set(ap.kindKey, o.kind === 'video' ? 'video' : 'image');
+                if (ap.cropKey) set(ap.cropKey, defaultCrop());
+                if (ap.extra && typeof ap.extra === 'object') {
+                  Object.keys(ap.extra).forEach((k) => set(k, ap.extra[k]));
+                }
+              }
+              /* 504 的 bgpick 声明了 onSelect：选壁纸 = 打开「自定义背景」开关，
+                 不让开关还停在关、画面却已经有背景。 */
+              if (it.onSelect && it.onSelect.key) {
+                data[it.onSelect.key] = it.onSelect.value;
+                push(it.onSelect.key, it.onSelect.value);
+              }
               save();
             });
             gal.appendChild(card);
           });
           row.appendChild(lab);
           row.appendChild(gal);
+
+        } else if (it.type === 'media' || it.type === 'image') {
+          /* 2026-11-16 自定义背景升级：图片 / 视频 + 四角取景。
+             type:'image' 继续当 type:'media' 的别名（等价 accept:'image'，走老的
+             dataURL 路径）—— 形态侧代理和宿主并行落地，两个字符串都认，否则老
+             形态的设置项会被下面的 else 当成未知类型整项跳过。
+             预览缩略图按用户要求整体去掉：要看效果就点「调整」进取景编辑器。 */
+          const legacyImg = it.type === 'image';
+          const accept = legacyImg ? 'image'
+            : it.accept === 'image' ? 'image'
+            : it.accept === 'video' ? 'video' : 'both';
+
+          const wrap = document.createElement('div');
+          wrap.className = 'spnl__media';
+
+          const btns = document.createElement('div');
+          btns.className = 'spnl__mediabtns';
+
+          const upBtn = document.createElement('button');
+          upBtn.type = 'button';
+          upBtn.className = 'spnl__mediabtn';
+
+          const adjBtn = document.createElement('button');
+          adjBtn.type = 'button';
+          adjBtn.className = 'spnl__mediaadj';
+          adjBtn.textContent = '调整';
+          /* 老形态还不认 <key>Crop，给它一个按了也没效果的按钮只会让人困惑 */
+          if (legacyImg) adjBtn.hidden = true;
+
+          const clrBtn = document.createElement('button');
+          clrBtn.type = 'button';
+          clrBtn.className = 'spnl__mediaclr';
+          clrBtn.textContent = '清除';
+
+          const stEl = document.createElement('span');
+          stEl.className = 'spnl__mediast';
+
+          const fileInp = document.createElement('input');
+          fileInp.type = 'file';
+          fileInp.accept = accept === 'image' ? 'image/*'
+            : accept === 'video' ? 'video/*' : 'image/*,video/*';
+          fileInp.hidden = true;
+
+          const pickText = accept === 'image' ? '选择图片'
+            : accept === 'video' ? '选择视频' : '选择图片/视频';
+
+          function hasMedia() {
+            return typeof data[it.key] === 'string' && data[it.key].length > 0;
+          }
+
+          function setStatus(msg) {
+            stEl.textContent = msg;
+            stEl.classList.add('is-busy');
+          }
+
+          /** 只刷新按钮与状态；skipPush 用于 pushMedia 内部回写，避免自激循环 */
+          function syncMediaUI(customMsg, skipPush) {
+            const has = hasMedia();
+            upBtn.textContent = has ? '更换' : pickText;
+            clrBtn.disabled = !has;
+            adjBtn.disabled = !has;
+            stEl.classList.remove('is-busy');
+            stEl.textContent = customMsg || (has ? '已设自定义壁纸' : '未上传（使用内置默认）');
+            if (!skipPush) queueMediaPush(it.key);
+          }
+
+          /** 写值 + 派生 Kind/Crop + 持久化。value 为空时清空三种消息。 */
+          function commitMedia(value, kind, crop, msg) {
+            data[it.key] = value || '';
+            data[it.key + 'Kind'] = value ? (kind === 'video' ? 'video' : 'image') : '';
+            data[it.key + 'Crop'] = crop || defaultCrop();
+            if (value && it.autoEnable && !data[it.autoEnable]) {
+              data[it.autoEnable] = true;
+              if (switchEls[it.autoEnable]) {
+                switchEls[it.autoEnable].setAttribute('aria-checked', 'true');
+              }
+              push(it.autoEnable, true);
+            }
+            save();
+            let persisted = true;
+            try {
+              const raw = localStorage.getItem(storeKey(stageId));
+              persisted = !!(raw && JSON.parse(raw)[it.key] === data[it.key]);
+            } catch {
+              persisted = false;
+            }
+            syncMediaUI(msg || (persisted ? '已设自定义壁纸' : '已应用（图片较大，仅本次会话有效）'));
+          }
+
+          function readRawFallback(file) {
+            const fr = new FileReader();
+            fr.onload = () => {
+              if (typeof fr.result === 'string') commitMedia(fr.result, 'image', defaultCrop());
+            };
+            fr.onerror = () => setStatus('读取图片失败');
+            fr.readAsDataURL(file);
+          }
+
+          /** 大图 / 视频进 IndexedDB，localStorage 里只留 'idb:<id>'。 */
+          async function storeBlob(blob, kind) {
+            setStatus('载入中…');
+            const mod = await ensureStageMedia();
+            if (!mod) { setStatus('本地媒体存储不可用（隐私模式或浏览器限制）'); return; }
+            try {
+              const rec = await mod.put(blob);
+              if (!rec || !rec.id) throw new Error('empty record');
+              commitMedia(mod.refOf(rec.id), kind, defaultCrop());
+            } catch (err) {
+              if (kind === 'video') {
+                setStatus('视频写入失败：' + ((err && err.message) || '存储空间可能不足'));
+              } else {
+                setStatus('本地存储写入失败，正在退回原图…');
+                readRawFallback(blob);
+              }
+            }
+          }
+
+          async function storeVideo(file, soft) {
+            setStatus(soft ? '视频较大，正在写入本地…' : '载入中…');
+            const mod = await ensureStageMedia();
+            if (!mod) { setStatus('本地媒体存储不可用（隐私模式或浏览器限制）'); return; }
+            try {
+              const rec = await mod.put(file);
+              if (!rec || !rec.id) throw new Error('empty record');
+              commitMedia(mod.refOf(rec.id), 'video', defaultCrop(),
+                soft ? '已设自定义壁纸（视频较大，已存到本地）' : '已设自定义壁纸');
+            } catch (err) {
+              setStatus('视频写入失败：' + ((err && err.message) || '存储空间可能不足'));
+            }
+          }
+
+          /** 老 image 路径：压缩到 1200px / JPEG 0.86，alpha 走原图，全存 dataURL。 */
+          function handleLegacyImage(file) {
+            const objUrl = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+              try {
+                const w = img.naturalWidth || img.width || 0;
+                const h = img.naturalHeight || img.height || 0;
+                if (!w || !h) throw new Error('empty image');
+                const scale = Math.min(1, 1200 / Math.max(w, h));
+                const tw = Math.max(1, Math.round(w * scale));
+                const th = Math.max(1, Math.round(h * scale));
+                const cv = document.createElement('canvas');
+                cv.width = tw;
+                cv.height = th;
+                const ctx = cv.getContext('2d');
+                if (!ctx) throw new Error('no 2d');
+                ctx.drawImage(img, 0, 0, tw, th);
+
+                let hasAlpha = false;
+                if (file.type && file.type !== 'image/jpeg' && file.type !== 'image/jpg') {
+                  const px = ctx.getImageData(0, 0, tw, th).data;
+                  for (let i = 3; i < px.length; i += 16) {
+                    if (px[i] < 252) { hasAlpha = true; break; }
+                  }
+                }
+                if (hasAlpha) {
+                  readRawFallback(file);
+                } else {
+                  const out = cv.toDataURL('image/jpeg', 0.86);
+                  if (out && out.startsWith('data:image/')) commitMedia(out, 'image', defaultCrop());
+                  else readRawFallback(file);
+                }
+              } catch {
+                readRawFallback(file);
+              } finally {
+                URL.revokeObjectURL(objUrl);
+              }
+            };
+            img.onerror = () => {
+              URL.revokeObjectURL(objUrl);
+              readRawFallback(file);
+            };
+            img.src = objUrl;
+          }
+
+          /** 新 media 路径：同样压缩，但大图存 IDB；<400KB 仍存 dataURL 省得开库。 */
+          function handleImage(file) {
+            const objUrl = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+              try {
+                const w = img.naturalWidth || img.width || 0;
+                const h = img.naturalHeight || img.height || 0;
+                if (!w || !h) throw new Error('empty image');
+                const scale = Math.min(1, 1200 / Math.max(w, h));
+                const tw = Math.max(1, Math.round(w * scale));
+                const th = Math.max(1, Math.round(h * scale));
+                const cv = document.createElement('canvas');
+                cv.width = tw;
+                cv.height = th;
+                const ctx = cv.getContext('2d');
+                if (!ctx) throw new Error('no 2d');
+                ctx.drawImage(img, 0, 0, tw, th);
+
+                let hasAlpha = false;
+                if (file.type && file.type !== 'image/jpeg' && file.type !== 'image/jpg') {
+                  const px = ctx.getImageData(0, 0, tw, th).data;
+                  for (let i = 3; i < px.length; i += 16) {
+                    if (px[i] < 252) { hasAlpha = true; break; }
+                  }
+                }
+
+                /* 透明图保留原图（PNG/WebP 的 alpha 不能被 JPEG 吃掉），
+                   老逻辑就是 readRawFallback，这里只是把大文件换到 IDB */
+                if (hasAlpha) {
+                  if (file.size < SMALL_IMAGE_BYTES) readRawFallback(file);
+                  else storeBlob(file, 'image');
+                  return;
+                }
+
+                const asDataUrl = () => {
+                  const out = cv.toDataURL('image/jpeg', 0.86);
+                  if (out && out.startsWith('data:image/')) commitMedia(out, 'image', defaultCrop());
+                  else readRawFallback(file);
+                };
+                if (typeof cv.toBlob !== 'function') { asDataUrl(); return; }
+                cv.toBlob((blob) => {
+                  if (!blob) { asDataUrl(); return; }
+                  if (blob.size < SMALL_IMAGE_BYTES) asDataUrl();
+                  else storeBlob(blob, 'image');
+                }, 'image/jpeg', 0.86);
+              } catch {
+                readRawFallback(file);
+              } finally {
+                URL.revokeObjectURL(objUrl);
+              }
+            };
+            img.onerror = () => {
+              URL.revokeObjectURL(objUrl);
+              readRawFallback(file);
+            };
+            img.src = objUrl;
+          }
+
+          function handlePick(file) {
+            const type = file.type || '';
+            const isVideo = /^video\//i.test(type);
+            /* 少数来源的文件没有 MIME：按老的宽容行为当图片试一次（accept 允许时） */
+            const isImage = /^image\//i.test(type) || (!type && accept !== 'video');
+            if (accept === 'image' && !isImage) {
+              setStatus(isVideo ? '这里只支持图片' : '不支持的文件类型');
+              return;
+            }
+            if (accept === 'video' && !isVideo) {
+              setStatus(isImage ? '这里只支持视频' : '不支持的文件类型');
+              return;
+            }
+            if (!isImage && !isVideo) {
+              setStatus('不支持的文件类型（只收图片或视频）');
+              return;
+            }
+            if (isVideo) {
+              if (file.size > VIDEO_HARD_MAX) {
+                setStatus('视频超过 200MB，无法使用');
+                return;
+              }
+              storeVideo(file, file.size > VIDEO_SOFT_MAX);
+              return;
+            }
+            if (legacyImg) handleLegacyImage(file);
+            else handleImage(file);
+          }
+
+          mediaUIs[it.key] = {
+            status(msg) {
+              if (!wrap.isConnected) return;
+              stEl.textContent = msg;
+              stEl.classList.add('is-busy');
+            },
+            /* skipPush=true：pushMedia 解析完成后回写界面，不能再触发一轮推送 */
+            refresh() { if (wrap.isConnected) syncMediaUI(undefined, true); },
+          };
+          syncMediaUI();
+
+          upBtn.addEventListener('click', () => { fileInp.click(); });
+
+          fileInp.addEventListener('change', () => {
+            const file = fileInp.files && fileInp.files[0];
+            fileInp.value = '';
+            if (!file) return;
+            handlePick(file);
+          });
+
+          adjBtn.addEventListener('click', () => {
+            if (!hasMedia()) return;
+            openCropEditor(it);
+          });
+
+          clrBtn.addEventListener('click', () => {
+            data[it.key] = '';
+            data[it.key + 'Kind'] = '';
+            data[it.key + 'Crop'] = defaultCrop();
+            save();
+            syncMediaUI();
+            /* 三条消息同步推一遍：空串 = 没有自定义背景 */
+            push(it.key, '');
+            push(it.key + 'Kind', '');
+            push(it.key + 'Crop', defaultCrop());
+          });
+
+          btns.appendChild(upBtn);
+          if (!legacyImg) btns.appendChild(adjBtn);
+          btns.appendChild(clrBtn);
+          wrap.appendChild(btns);
+          wrap.appendChild(stEl);
+          wrap.appendChild(fileInp);
+
+          row.appendChild(lab);
+          row.appendChild(wrap);
 
         } else {
           return;   // 不认识的类型直接跳过，不污染界面
@@ -2691,17 +5547,29 @@
         hint.textContent = spec.hint;
         body.appendChild(hint);
       }
+
+      /* 画面分组由宿主补，不属于形态自己的 __stagePanel 声明：任一形态都能调
+         比例 / 饱和 / 亮度 / 帧率，没声明的形态也有这个分组。 */
+      try { StagePicture.renderPanel(body); } catch (err) { console.warn('[picture] panel failed', err); }
     }
 
     function applyDefaults() {
       data = {};
       ((spec && spec.items) || []).forEach((it) => {
-        if (it && it.key) data[it.key] = it.def;
+        if (!it || !it.key) return;
+        data[it.key] = it.def;
+        /* 自定义背景的派生键也要占位：sync()/refreshSpec() 用 `k in data` 回填
+           存档值，派生键不在 data 里就会被整个丢掉（裁剪和类型随之消失）。 */
+        if (it.type === 'media' || it.type === 'image') {
+          data[it.key + 'Kind'] = '';
+          data[it.key + 'Crop'] = defaultCrop();
+        }
       });
     }
 
     /* ---------- 开合 ---------- */
     function setOpen(v) {
+      const was = open;
       open = !!v;
       if (open) {
         /* 面板是 HUD 的子元素：HUD 处于 is-idle 时整条 opacity:0，面板会跟着透明。
@@ -2713,12 +5581,559 @@
         box.hidden = false;
         void box.offsetWidth;      // 强制一次布局，让 transition 有起点
         box.classList.add('is-open');
+        /* 顶栏浮层互斥（2026-11-17）：只在「从关到开」时广播。
+           无设置声明的形态里 btn.hidden 为 true，toggle() 在调 setOpen 之前
+           就 return 了，所以这条路径不会在「按钮点不到」的形态上触发；
+           就算触发也只会在真的打开面板时发生，不会出现「关了菜单却什么也没开」。 */
+        if (!was) fireStagePanel('settings');
       } else {
         box.classList.remove('is-open');
         clearTimeout(box._hideT);
         box._hideT = setTimeout(() => { if (!open) box.hidden = true; }, 220);
       }
       btn.setAttribute('aria-expanded', String(open));
+    }
+
+    /* ---------- 四角取景编辑器 ----------
+       2026-11-16 / 17：坐标系（这一段是整套 UI 的核心，改之前先看懂）
+
+       形态舞台 iframe 的可视区记 vpW×vpH（用户在形态里真正看到的画面）。
+       媒体按 cover 居中铺满它：
+         cover = max(vpW/sw, vpH/sh)
+         dw = sw*cover, dh = sh*cover       // 完整媒体矩形的舞台坐标尺寸
+         ox = (vpW-dw)/2, oy = (vpH-dh)/2   // 溢出偏移，<=0
+
+       2026-11-17：工作区不再只是可视框，而是**完整媒体矩形** dw×dh，
+       整体等比缩放 S 塞进窗口：
+         CW = dw*S, CH = dh*S
+         frameX = -ox*S, frameY = -oy*S, frameW = vpW*S, frameH = vpH*S
+       可视框只是画在工作区中间的一圈参考线（frameShade 再把框外压暗一层）。
+       因为工作区就是源媒体全图，归一化 UV 直接是：
+         u = x / CW,  v = y / CH
+       保存的仍是归一化 UV，和 <key>Crop 的契约完全一致；cover 溢出的素材
+       （超宽/超高媒体被裁掉的两侧）现在也能选到，只要取景框还在工作区内。
+
+       {0,0,1,1} 表示整幅源，和 cover 行为等价：默认把取景框摆在可视框上
+       （user 没动时仍保存默认值，不把「整幅」写成「当前可见的那块」）。
+
+       2026-11-17 · 取景框锁比例：七个形态对「非舞台比例的区域」铺法不同
+       （有的拉伸、有的 cover），同一份 Crop 会长得不一样。所以拖角时
+       rect.w / rect.h 恒等于舞台宽高比 A = vpW/vpH（工作区和源 UV 同一比例，
+       因此 (w*源宽)/(h*源高) 也恒等于 A）。拖角撞到媒体矩形边界时按比例缩回，
+       绝不改成非等比。老的非等比 Crop 在打开编辑器时以中心为锚等比修正
+       一次（取较小的那一边），用户点应用才真正写回。 */
+
+    function stageViewport() {
+      let W = 0;
+      let H = 0;
+      try {
+        const f = document.getElementById('stage-frame');
+        if (f && typeof f.getBoundingClientRect === 'function') {
+          const r = f.getBoundingClientRect();
+          W = r.width || 0;
+          H = r.height || 0;
+        }
+      } catch { /* 忽略 */ }
+      if (!(W > 40 && H > 40)) {
+        /* iframe 不在（或还没布局）：退回窗口减去播放条，--player-h 由主题给 */
+        let playerH = 84;
+        try {
+          const v = getComputedStyle(document.documentElement).getPropertyValue('--player-h').trim();
+          const n = parseFloat(v);
+          if (Number.isFinite(n) && n >= 0) playerH = n;
+        } catch { /* 忽略 */ }
+        W = Math.max(200, window.innerWidth || 360);
+        H = Math.max(120, (window.innerHeight || 640) - playerH);
+      }
+      return { W, H };
+    }
+
+    /** 全屏取景编辑器：全部 createElement 挂 body，不往 index.html 加 markup */
+    async function openCropEditor(it) {
+      const key = it.key;
+      const raw = data[key];
+      if (!raw || typeof raw !== 'string') return;
+      /* 连点「调整」：先收掉旧的，避免叠两层 */
+      const prev = document.querySelector('.spnl-crop');
+      if (prev) prev.remove();
+
+      const overlay = document.createElement('div');
+      overlay.className = 'spnl-crop';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-label', '调整自定义背景取景');
+
+      const panel = document.createElement('div');
+      panel.className = 'spnl-crop__panel';
+
+      const head = document.createElement('div');
+      head.className = 'spnl-crop__head';
+      const title = document.createElement('span');
+      title.className = 'spnl-crop__title';
+      title.textContent = '调整自定义背景';
+      const ratio = document.createElement('span');
+      ratio.className = 'spnl-crop__ratio';
+      ratio.textContent = '载入中…';
+      head.appendChild(title);
+      head.appendChild(ratio);
+
+      const stage = document.createElement('div');
+      stage.className = 'spnl-crop__stage';
+
+      /* 媒体和遮罩放在 clip 里裁圆角；取景框和手柄放在 clip 外，
+         这样贴边的手柄不会被 overflow:hidden 切掉一半（触屏命中区才够大）。
+         2026-11-17：工作区 = 媒体 cover 之后的完整矩形（不再只是舞台可视框），
+         可视框变成画在中间的一圈参考线，取景框可以拖到框外的素材上。 */
+      const clip = document.createElement('div');
+      clip.className = 'spnl-crop__clip';
+      stage.appendChild(clip);
+
+      const loading = document.createElement('div');
+      loading.className = 'spnl-crop__loading';
+      loading.textContent = '载入中…';
+      clip.appendChild(loading);
+
+      /* 可视框以外再压暗一层（放在取景框遮罩下面，形成两级层次） */
+      const frameShade = document.createElement('div');
+      frameShade.className = 'spnl-crop__frameshade';
+      frameShade.hidden = true;   // 拿到媒体尺寸、定位好之前不铺阴影
+      clip.appendChild(frameShade);
+
+      /* 取景框外压暗用四块遮罩（不用 backdrop-filter，避免大厅 WebGL 卡顿） */
+      const maskTop = document.createElement('div');
+      const maskBottom = document.createElement('div');
+      const maskLeft = document.createElement('div');
+      const maskRight = document.createElement('div');
+      [maskTop, maskBottom, maskLeft, maskRight].forEach((m) => {
+        m.className = 'spnl-crop__mask';
+        clip.appendChild(m);
+      });
+
+      /* 可视框描边放在遮罩之上，保证「屏幕上能看见的边界」永远清晰 */
+      const frameGuide = document.createElement('div');
+      frameGuide.className = 'spnl-crop__frame';
+      frameGuide.hidden = true;
+      clip.appendChild(frameGuide);
+
+      const sel = document.createElement('div');
+      sel.className = 'spnl-crop__sel';
+      sel.hidden = true;
+      ['nw', 'ne', 'sw', 'se'].forEach((pos) => {
+        const h = document.createElement('span');
+        h.className = 'spnl-crop__h spnl-crop__h--' + pos;
+        h.dataset.h = pos;
+        sel.appendChild(h);
+      });
+      stage.appendChild(sel);
+
+      const foot = document.createElement('div');
+      foot.className = 'spnl-crop__foot';
+      const tip = document.createElement('span');
+      tip.className = 'spnl-crop__tip';
+      tip.textContent = '拖动四角等比取景 · 框内平移 · 可拖到画面外 · 方向键微调（Shift ×10）';
+      const acts = document.createElement('div');
+      acts.className = 'spnl-crop__acts';
+      const mkBtn = (text, cls) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = cls || 'spnl-crop__btn';
+        b.textContent = text;
+        return b;
+      };
+      const resetBtn = mkBtn('重置');
+      const cancelBtn = mkBtn('取消');
+      const applyBtn = mkBtn('应用', 'spnl-crop__btn spnl-crop__btn--primary');
+      acts.appendChild(resetBtn);
+      acts.appendChild(cancelBtn);
+      acts.appendChild(applyBtn);
+      foot.appendChild(tip);
+      foot.appendChild(acts);
+
+      panel.appendChild(head);
+      panel.appendChild(stage);
+      panel.appendChild(foot);
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
+
+      /* 媒体还要异步解析/解码，先接好取消和重置，别让「取消」在载入中变成死键。
+         「应用」等 onMeta 拿到真实尺寸后才放开（见 onMeta 里的 disabled=false）。 */
+      applyBtn.disabled = true;
+      cancelBtn.addEventListener('click', close);
+      resetBtn.addEventListener('click', () => {
+        /* 重置回「默认整幅」= 可视框那圈（对应 Crop {0,0,1,1} 的 cover 画面） */
+        rect = { x: frameX, y: frameY, w: frameW, h: frameH };
+        isDefault = true;
+        draw();
+      });
+      applyBtn.addEventListener('click', () => {
+        let out;
+        if (isDefault) {
+          out = defaultCrop();
+        } else {
+          /* 工作区 = cover 后的完整媒体矩形（source 全图），所以归一化 UV
+             就是 rect / 工作区尺寸。存 6 位小数，让
+             (w*源宽)/(h*源高) 尽量精确等于舞台比例。 */
+          const round6 = (n) => Math.round(Math.min(Math.max(n, 0), 1) * 1e6) / 1e6;
+          const x = round6(rect.x / CW);
+          const y = round6(rect.y / CH);
+          const w = Math.max(0.0001, Math.min(round6(rect.w / CW), 1 - x));
+          const h = Math.max(0.0001, Math.min(round6(rect.h / CH), 1 - y));
+          out = { x, y, w, h };
+        }
+        data[key + 'Crop'] = out;
+        save();
+        if (ui) {
+          ui.refresh();
+          ui.status('取景已更新');
+        }
+        pushMedia(key);
+        close();
+      });
+
+      /* 编辑器尺寸：先按舞台可视框给一个占位尺寸显示「载入中」，
+         拿到媒体尺寸后再把工作区扩成 cover 后的完整媒体矩形（见 onMeta）。 */
+      const vp = stageViewport();
+      const maxW = Math.min((window.innerWidth || 1280) * 0.90, 1280);
+      const maxH = Math.max(220, (window.innerHeight || 720) * 0.70);
+      const initScale = Math.min(maxW / vp.W, maxH / vp.H);
+      const initW = Math.max(160, Math.round(vp.W * initScale));
+      const initH = Math.max(120, Math.round(vp.H * initScale));
+      stage.style.width = initW + 'px';
+      stage.style.height = initH + 'px';
+
+      /* 舞台比例锁定一次。ratioLabel 只用于顶部提示，尽量显示成 16:9 这种熟格式，
+         不常见的比例退回小数。 */
+      const stageAspect = vp.W / vp.H;
+      const ratioLabel = (() => {
+        const common = [[16, 9], [21, 9], [32, 9], [4, 3], [3, 2], [1, 1], [9, 16], [9, 21]];
+        for (let i = 0; i < common.length; i += 1) {
+          const a = common[i][0];
+          const b = common[i][1];
+          if (Math.abs(stageAspect - a / b) < (a / b) * 0.02) return a + ':' + b;
+        }
+        let m = Math.round(vp.W);
+        let n = Math.round(vp.H);
+        while (n) { const t = m % n; m = n; n = t; }
+        const g = m || 1;
+        const ra = Math.round(vp.W) / g;
+        const rb = Math.round(vp.H) / g;
+        if (ra <= 40 && rb <= 40) return ra + ':' + rb;
+        const r = stageAspect >= 10 ? stageAspect.toFixed(1) : stageAspect.toFixed(2);
+        return r + ':1';
+      })();
+
+      let closed = false;
+      let mediaEl = null;
+      let sw = 0;
+      let sh = 0;
+      let dw = 0;
+      let dh = 0;
+      let ox = 0;
+      let oy = 0;
+      /* 工作区 = cover 后的完整媒体矩形（onMeta 里按实际尺寸定）。
+         归一化 UV 就是工作区坐标 / CW、/ CH，不再经过 ox/oy。 */
+      let CW = initW;
+      let CH = initH;
+      /* 舞台可视框在工作区里的位置：取景框越出这圈参考线 = 用到了画面外素材 */
+      let frameX = 0;
+      let frameY = 0;
+      let frameW = initW;
+      let frameH = initH;
+      let rect = { x: 0, y: 0, w: initW, h: initH };
+      let isDefault = true;
+      let drag = null;
+      let minW = initW * 0.12;      // 每边不小于舞台可视框的 12%
+      let minH = initH * 0.12;
+
+      const ui = mediaUIs[key];
+
+      function fail(msg) {
+        if (closed) return;
+        loading.hidden = false;
+        loading.textContent = msg;
+        if (ui) ui.status(msg);
+        setTimeout(close, 1600);
+      }
+
+      function close() {
+        if (closed) return;
+        closed = true;
+        window.removeEventListener('keydown', onKey, true);
+        window.removeEventListener('pointermove', onMove);
+        try { if (mediaEl && mediaEl.tagName === 'VIDEO') mediaEl.pause(); } catch { /* 忽略 */ }
+        try { overlay.remove(); } catch { /* 忽略 */ }
+      }
+
+      function clampRect(r) {
+        const w = Math.min(Math.max(r.w, minW), CW);
+        const h = Math.min(Math.max(r.h, minH), CH);
+        const x = Math.min(Math.max(r.x, 0), CW - w);
+        const y = Math.min(Math.max(r.y, 0), CH - h);
+        return { x, y, w, h };
+      }
+
+      function draw() {
+        sel.style.left = rect.x + 'px';
+        sel.style.top = rect.y + 'px';
+        sel.style.width = rect.w + 'px';
+        sel.style.height = rect.h + 'px';
+        /* 四块遮罩铺在取景框外（单位是工作区像素，见 openCropEditor 开头） */
+        const right = rect.x + rect.w;
+        const bottom = rect.y + rect.h;
+        maskTop.style.height = Math.max(0, rect.y) + 'px';
+        maskBottom.style.top = bottom + 'px';
+        maskBottom.style.height = Math.max(0, CH - bottom) + 'px';
+        maskLeft.style.top = rect.y + 'px';
+        maskLeft.style.height = rect.h + 'px';
+        maskLeft.style.width = Math.max(0, rect.x) + 'px';
+        maskRight.style.left = right + 'px';
+        maskRight.style.top = rect.y + 'px';
+        maskRight.style.height = rect.h + 'px';
+        maskRight.style.width = Math.max(0, CW - right) + 'px';
+
+        /* 取景框永远锁舞台比例，这里直接告诉用户，省得以为拖歪了；
+           越出可视框（用到画面外素材）时补一句提示，用琥珀色而不是错误红。 */
+        const outOfFrame = rect.x < frameX - 0.5 || rect.y < frameY - 0.5
+          || rect.x + rect.w > frameX + frameW + 0.5
+          || rect.y + rect.h > frameY + frameH + 0.5;
+        ratio.classList.toggle('is-outside', !isDefault && outOfFrame);
+        ratio.textContent = '取景框已锁定舞台比例（' + ratioLabel + '）'
+          + (isDefault ? ' · 默认整幅' : (outOfFrame ? ' · 取景框超出画面区域' : ''));
+      }
+
+      function toScreenPoint(e) {
+        const b = stage.getBoundingClientRect();
+        return {
+          x: Math.min(Math.max(e.clientX - b.left, 0), CW),
+          y: Math.min(Math.max(e.clientY - b.top, 0), CH),
+        };
+      }
+
+      function onMove(e) {
+        if (!drag) return;
+        const p = toScreenPoint(e);
+        const r0 = drag.r0;
+        let next;
+        if (drag.mode === 'move') {
+          /* 平移可以越出舞台可视框，只要还在媒体矩形（工作区）里 */
+          next = {
+            x: Math.min(Math.max(r0.x + (p.x - drag.sx), 0), CW - r0.w),
+            y: Math.min(Math.max(r0.y + (p.y - drag.sy), 0), CH - r0.h),
+            w: r0.w,
+            h: r0.h,
+          };
+        } else {
+          /* 拖角时对角固定：nw 固定右下、ne 固定左下、sw 固定右上、se 固定左上。
+             比例锁定：rect.w / rect.h 恒等于舞台比例 stageAspect。
+             指针先夹到锚点的正确一侧（保证最小宽度），再取 dx/A 与 dy 的较大者
+             作为目标高度（拖动角尽量贴住指针），最后用锚点到**媒体矩形边**的
+             可用空间做等比上限 —— 撞到素材边界只会整体缩回，绝不变成非等比。 */
+          const movingLeft = drag.mode === 'nw' || drag.mode === 'sw';
+          const movingTop = drag.mode === 'nw' || drag.mode === 'ne';
+          const ax = movingLeft ? r0.x + r0.w : r0.x;
+          const ay = movingTop ? r0.y + r0.h : r0.y;
+          let px = p.x;
+          let py = p.y;
+          if (movingLeft) px = Math.min(px, ax - minW);
+          else px = Math.max(px, ax + minW);
+          if (movingTop) py = Math.min(py, ay - minH);
+          else py = Math.max(py, ay + minH);
+          px = Math.min(Math.max(px, 0), CW);
+          py = Math.min(Math.max(py, 0), CH);
+
+          const availW = movingLeft ? ax : (CW - ax);
+          const availH = movingTop ? ay : (CH - ay);
+          const maxH = Math.min(availH, availW / stageAspect);
+          const dx = Math.abs(px - ax);
+          const dy = Math.abs(py - ay);
+          const wanted = Math.max(dy, dx / stageAspect);
+          let h;
+          if (maxH <= minH) {
+            /* 极端几何（正常拖拽不会出现）：优先保证不越界，比例也不能破 */
+            h = Math.max(1, maxH);
+          } else {
+            h = Math.min(Math.max(wanted, minH), maxH);
+          }
+          const w = h * stageAspect;
+          next = {
+            x: movingLeft ? ax - w : ax,
+            y: movingTop ? ay - h : ay,
+            w,
+            h,
+          };
+        }
+        rect = clampRect(next);
+        isDefault = false;
+        draw();
+      }
+
+      function onUp() {
+        drag = null;
+        window.removeEventListener('pointermove', onMove);
+      }
+
+      stage.addEventListener('pointerdown', (e) => {
+        if (sel.hidden) return;
+        const handle = e.target.closest ? e.target.closest('[data-h]') : null;
+        const inside = e.target.closest ? e.target.closest('.spnl-crop__sel') : null;
+        const mode = handle ? handle.getAttribute('data-h') : (inside ? 'move' : '');
+        if (!mode) return;
+        const p = toScreenPoint(e);
+        drag = { mode, sx: p.x, sy: p.y, r0: Object.assign({}, rect) };
+        e.preventDefault();
+        e.stopPropagation();
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp, { once: true });
+        window.addEventListener('pointercancel', onUp, { once: true });
+      });
+
+      function onKey(e) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          close();
+          return;
+        }
+        const step = e.shiftKey ? 10 : 1;
+        let dx = 0;
+        let dy = 0;
+        if (e.key === 'ArrowLeft') dx = -step;
+        else if (e.key === 'ArrowRight') dx = step;
+        else if (e.key === 'ArrowUp') dy = -step;
+        else if (e.key === 'ArrowDown') dy = step;
+        if (!dx && !dy) return;
+        e.preventDefault();
+        e.stopPropagation();
+        rect = clampRect({ x: rect.x + dx, y: rect.y + dy, w: rect.w, h: rect.h });
+        isDefault = false;
+        draw();
+      }
+      /* 捕获阶段拦 Esc / 方向键：否则 Esc 会把下面的设置面板一起关掉 */
+      window.addEventListener('keydown', onKey, true);
+
+      function onMeta() {
+        if (closed) return;
+        const isVideo = mediaEl.tagName === 'VIDEO';
+        sw = isVideo ? (mediaEl.videoWidth || 0) : (mediaEl.naturalWidth || 0);
+        sh = isVideo ? (mediaEl.videoHeight || 0) : (mediaEl.naturalHeight || 0);
+        if (!sw || !sh) { fail('这个媒体无法解码，换一个试试'); return; }
+        /* 1) 媒体按 cover 铺满舞台可视框时，完整媒体矩形有多大（舞台坐标）：
+              cover = max(vpW/sw, vpH/sh)，dw/dh = 源尺寸 * cover；ox/oy 是溢出偏移。
+              注意这只是用来算可视框的位置，取景坐标不再经过它。 */
+        const cover = Math.max(vp.W / sw, vp.H / sh);
+        dw = sw * cover;
+        dh = sh * cover;
+        ox = (vp.W - dw) / 2;
+        oy = (vp.H - dh) / 2;
+
+        /* 2) 编辑器工作区 = 完整媒体矩形，等比缩放到窗口能放下（S 是唯一缩放）。
+              因此工作区归一化坐标就是源 UV：u = x/CW, v = y/CH。
+              舞台可视框在工作区里的位置：x=0 对应舞台坐标 ox → frameX = -ox*S。 */
+        const S = Math.min(maxW / dw, maxH / dh);
+        CW = dw * S;
+        CH = dh * S;
+        frameW = vp.W * S;
+        frameH = vp.H * S;
+        frameX = -ox * S;
+        frameY = -oy * S;
+        stage.style.width = CW + 'px';
+        stage.style.height = CH + 'px';
+        [frameShade, frameGuide].forEach((el) => {
+          el.hidden = false;
+          el.style.left = frameX + 'px';
+          el.style.top = frameY + 'px';
+          el.style.width = frameW + 'px';
+          el.style.height = frameH + 'px';
+        });
+        minW = frameW * 0.12;
+        minH = frameH * 0.12;
+
+        mediaEl.style.opacity = '1';
+        loading.hidden = true;
+        sel.hidden = false;
+        applyBtn.disabled = false;
+
+        const c = normalizeCrop(data[key + 'Crop']);
+        const isTrivial = c.x === 0 && c.y === 0 && c.w === 1 && c.h === 1;
+        if (isTrivial) {
+          /* 默认整幅 = 当前 cover 画面：框贴在舞台可视框上（框可以再拖到框外） */
+          rect = { x: frameX, y: frameY, w: frameW, h: frameH };
+          isDefault = true;
+        } else {
+          /* 存过的 UV 直接映射到工作区（工作区就是源媒体全图）。
+             老数据可能是非舞台比例（旧版自由拖角）：以舞台比例为准、中心不动、
+             取「较小的一边」等比修正一次 —— 在不扩出用户原来取景范围的前提下
+             放下最大的等比框。这里只改编辑器显示，点「应用」才写回存档。 */
+          const srcW = c.w * CW;
+          const srcH = c.h * CH;
+          const fitW = srcH * stageAspect;
+          /* 半像素容差：比例本来就对的 Crop 原样保留，避免每次打开都缩一丁点 */
+          let w = Math.abs(srcW - fitW) <= 0.5 ? srcW : Math.min(srcW, fitW);
+          let h = w / stageAspect;
+          if (w < minW) {
+            /* 旧值比最小尺寸还小：放大到最小，比例不变 */
+            w = minW;
+            h = minH;
+          }
+          /* 工作区比例不一定等于舞台比例，两个方向都要按比例夹一次 */
+          if (w > CW) {
+            w = CW;
+            h = w / stageAspect;
+          }
+          if (h > CH) {
+            h = CH;
+            w = h * stageAspect;
+          }
+          let x = c.x * CW + (srcW - w) / 2;
+          let y = c.y * CH + (srcH - h) / 2;
+          /* 中心修正后可能压到工作区边：整体平移、不改尺寸 → 比例仍然成立 */
+          x = Math.min(Math.max(x, 0), CW - w);
+          y = Math.min(Math.max(y, 0), CH - h);
+          rect = { x, y, w, h };
+          isDefault = false;
+        }
+        draw();
+      }
+
+      /* 取 URL：老 dataURL 直接用；idb: 走媒体仓（object URL 有缓存，不重复建） */
+      let url = '';
+      let kind = data[key + 'Kind'] === 'video' ? 'video' : 'image';
+      if (raw.indexOf('data:') === 0) {
+        url = raw;
+        kind = raw.indexOf('data:video') === 0 ? 'video' : 'image';
+      } else {
+        const mod = await ensureStageMedia();
+        let r = null;
+        try { r = mod ? await mod.resolve(raw) : null; } catch { r = null; }
+        if (closed) return;
+        if (!r) { fail('原文件已丢失（本地存储可能被清理）'); return; }
+        url = r.url;
+        kind = r.kind === 'video' ? 'video' : 'image';
+      }
+
+      if (kind === 'video') {
+        mediaEl = document.createElement('video');
+        mediaEl.muted = true;
+        mediaEl.playsInline = true;
+        mediaEl.className = 'spnl-crop__media';
+        mediaEl.preload = 'auto';   /* 要 seek 到 0.1s 显示一帧，metadata 不够 */
+        mediaEl.addEventListener('loadedmetadata', () => {
+          /* 不要自动播放：静音 seek 到 0.1s 拿一帧当取景底图 */
+          try { mediaEl.currentTime = Math.min(0.1, Math.max(0, (mediaEl.duration || 1) / 2)); } catch { /* 忽略 */ }
+          onMeta();
+        }, { once: true });
+        mediaEl.addEventListener('error', () => fail('视频无法解码'), { once: true });
+      } else {
+        mediaEl = document.createElement('img');
+        mediaEl.alt = '';
+        mediaEl.decoding = 'async';
+        mediaEl.className = 'spnl-crop__media';
+        mediaEl.addEventListener('load', onMeta, { once: true });
+        mediaEl.addEventListener('error', () => fail('图片无法解码'), { once: true });
+      }
+      mediaEl.style.opacity = '0';
+      clip.insertBefore(mediaEl, loading);
+      mediaEl.src = url;
     }
 
     /* ---------- 对外 ---------- */
@@ -2774,12 +6189,19 @@
       sync() {
         const cur = StageHost.current;
         stageId = cur ? cur.id : '';
+        StagePicture.setCurrent(stageId);
         const spec2 = readSpec();
 
         if (!spec2) {
-          spec = null;
-          btn.hidden = true;
+          /* 用户自建形态是不透明源，读不到 __stagePanel，但「画面」分组只作用在
+             宿主这层 iframe 元素上（CSS filter / --stage-scale），照旧可用：
+             面板不再整块藏掉，只是没有形态自己的设置项。 */
+          spec = { title: '', hint: '', items: [] };
+          data = {};
+          render();
+          btn.hidden = false;
           setOpen(false);
+          StagePicture.applyCurrent();
           return;
         }
 
@@ -2787,6 +6209,40 @@
         /* 先按声明铺默认值（含宿主补的 shake:true），再把 localStorage 里
            存过的值盖回去：补默认项不会冲掉用户之前存的值。 */
         const saved = load(stageId);
+        /* 2026-11-22 一次性迁移：679 微距终端影院的「终端光标」默认从关改成开。
+           面板的 save() 会把所有默认项一起写进存档，老用户即使没碰过光标，
+           存档里也可能留着 showCursor:false；这里只在第一次升级时翻成 true，
+           之后用户手动关掉会正常保存，不会被再次翻回来。 */
+        if (stageId === '679') {
+          const MIG = 'lizi.migrate.679.cursorDefaultOn.v1';
+          let done = false;
+          try { done = localStorage.getItem(MIG) === '1'; } catch { /* 隐私模式 */ }
+          if (!done) {
+            if (saved.showCursor === false) {
+              saved.showCursor = true;
+              try { localStorage.setItem(storeKey(stageId), JSON.stringify(saved)); } catch { /* 忽略 */ }
+            }
+            try { localStorage.setItem(MIG, '1'); } catch { /* 忽略 */ }
+          }
+        }
+        /* 2026-11-22 一次性迁移：685 瑞士拼贴的「鼓点反色」「震动」默认从开改成关。
+           面板的 save() 会把所有默认项一起写进存档，老用户即使没碰过这两项，
+           存档里也可能留着 true；只在第一次升级时翻成 false，之后用户手动打开
+           会正常保存，不会被再次翻回来。 */
+        if (stageId === '685') {
+          const MIG = 'lizi.migrate.685.fxDefaultsOff.v1';
+          let done = false;
+          try { done = localStorage.getItem(MIG) === '1'; } catch { /* 隐私模式 */ }
+          if (!done) {
+            let changed = false;
+            if (saved.beatFlash === true) { saved.beatFlash = false; changed = true; }
+            if (saved.shake === true) { saved.shake = false; changed = true; }
+            if (changed) {
+              try { localStorage.setItem(storeKey(stageId), JSON.stringify(saved)); } catch { /* 忽略 */ }
+            }
+            try { localStorage.setItem(MIG, '1'); } catch { /* 忽略 */ }
+          }
+        }
         const keep = Object.assign({}, saved);   // 和 refreshSpec 用同一套回填规则
         applyDefaults();
         Object.keys(keep).forEach((k) => { if (k in data) data[k] = keep[k]; });
@@ -2805,6 +6261,8 @@
       },
       reset() {
         applyDefaults();
+        /* 「恢复默认」连本形态的画质覆盖一起清掉，回到跟随全局 */
+        try { StagePicture.resetOverride(); } catch { /* 忽略 */ }
         render();
         save();
         pushAll();
@@ -2825,8 +6283,22 @@
     if (rst) rst.addEventListener('click', () => StagePanel.reset());
     document.addEventListener('click', (e) => {
       if (!StagePanel.isOpen) return;
-      if (e.target.closest('#stage-settings') || e.target.closest('#stage-settings-btn')) return;
+      /* 取景编辑器是独立的 body 层：点它不该把下面的设置面板关掉（2026-11-16） */
+      if (e.target.closest('#stage-settings') || e.target.closest('#stage-settings-btn')
+        || e.target.closest('.spnl-crop')) return;
       StagePanel.close();
+    });
+    /* 自绘下拉：点面板里其它地方就收起来（点自己的按钮 / 选项不会走到这里，
+       它们 stopPropagation 了）。 */
+    document.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('.spnl__pick')) return;
+      document.querySelectorAll('#spnl-body .spnl__pick.is-open').forEach((w) => {
+        w.classList.remove('is-open');
+        const l = w.querySelector('.spnl__picklist');
+        if (l) l.hidden = true;
+        const b = w.querySelector('.spnl__pickbtn');
+        if (b) b.setAttribute('aria-expanded', 'false');
+      });
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && StagePanel.isOpen) { e.preventDefault(); StagePanel.close(); }
@@ -2877,60 +6349,73 @@
   });
 
   /* ---- 形态下拉（「形态」按钮）----
-     以前点它跳整屏画廊，现在就地展开一个两列的列表，点哪个当场换（圆形蒙版转场） */
+     和播放页抽屉共用同一个分类目录选择器（点哪个当场换，圆形蒙版转场） */
   {
     const pop = $('stage-menu-pop');
     const list = $('stage-menu-pop-list');
     const btn = $('stage-pick-btn');
     let popOpen = false;
 
-    function paintStageMenuPop() {
-      list.innerHTML = stageMenuList(true).map((s) => `
-        <button class="smenu__i" data-id="${s.id}" role="option" aria-selected="false">
-          ${stageEdition === 'dev' ? `<span class="smenu__id">${s.id === 'classic' ? '—' : s.id}</span>` : ''}
-          <span class="smenu__name">${s.name}</span>
-        </button>`).join('');
-    }
-    paintStageMenuPop();
+    const popPicker = createStagePicker(list, {
+      searchId: 'smenu-stage-q',
+      onPick: (it, id) => {
+        setPop(false);
+        irisSwitch(it, () => applyStage(id));
+      },
+    });
+    popPicker.paint();
     document.addEventListener('lizi:stage-edition', () => {
-      paintStageMenuPop();
-      if (popOpen) markMenu();
+      popPicker.paint();
+      if (popOpen) popPicker.sync(true);
+    });
+    /* AI 工坊存/删形态后重排一次，不然新做的形态要重开应用才出现在菜单里 */
+    document.addEventListener('lizi:stages-refresh', () => {
+      popPicker.paint();
+      if (popOpen) popPicker.sync(true);
     });
 
-    function markMenu() {
-      const curId = StageHost.current ? StageHost.current.id : 'classic';
-      list.querySelectorAll('.smenu__i').forEach((b) => {
-        const on = b.dataset.id === curId;
-        b.classList.toggle('is-on', on);
-        b.setAttribute('aria-selected', String(on));
-      });
-      const cur = list.querySelector('.smenu__i.is-on');
-      if (cur) cur.scrollIntoView({ block: 'center' });
-    }
     function setPop(open) {
       if (open === popOpen) return;
       popOpen = open;
       btn.setAttribute('aria-expanded', String(open));
       if (open) {
-        markMenu();
         pop.hidden = false;
+        popPicker.sync(true);
         requestAnimationFrame(() => pop.classList.add('is-open'));
+        /* 顶栏浮层互斥（2026-11-17）：见文件上部的 fireStagePanel。
+           只有真的从关到开才走到这里（setPop 开头的相等判断已经挡掉重复调用），
+           toggle 关掉自己不进这一支，所以不会误发。 */
+        fireStagePanel('menu');
       } else {
         pop.classList.remove('is-open');
         setTimeout(() => { if (!popOpen) pop.hidden = true; }, 220);
       }
     }
     btn.addEventListener('click', (e) => { e.stopPropagation(); setPop(!popOpen); });
-    list.addEventListener('click', (e) => {
-      const it = e.target.closest('.smenu__i');
-      if (!it) return;
-      const id = it.dataset.id;
-      setPop(false);
-      irisSwitch(it, () => applyStage(id));
+    /* 反方向：设置面板 / 队列面板广播它们自己的 id 时，把形态下拉关掉。
+       菜单和设置面板都在本文件同一个作用域里，所以 app.js 只注册这一个监听器：
+       收到 'queue' 就两方都关，收到 'menu' 只关设置，收到 'settings' 只关菜单。
+       事件顺序（2026-11-17，按现有代码确认过）：
+         · 三个打开按钮的 click 都做了 stopPropagation，document 上的
+           「点外面关闭」收不到这次 click；
+         · 队列的「点外面关闭」是 document 上的 pointerdown 捕获阶段，
+           只可能提前关掉队列自己；
+         · 菜单 / 设置的「点外面关闭」在 document 的 click 冒泡阶段。
+       所以点另一个按钮时的真实顺序是 pointerdown（最多关队列）→ click
+       （先开新面板 → 同步广播 → 关旧面板）。旧面板不会在新面板打开之后
+       再被外面点击逻辑关一次，也不会反过来把新面板关掉。 */
+    document.addEventListener('lizi:stagepanel', (e) => {
+      const id = e.detail && e.detail.id;
+      if (!id) return;
+      if (id !== 'menu') setPop(false);
+      if (id !== 'settings') StagePanel.close();
     });
     document.addEventListener('click', (e) => {
       if (!popOpen) return;
       if (e.target.closest('#stage-menu-pop') || e.target.closest('#stage-pick-btn')) return;
+      /* 新建分类浮层 / 长按收藏菜单挂在 body 上（paint 会重建 root，放里面会被冲掉），
+         点它们不算「点外面」，否则一点收藏整个形态下拉就关了。 */
+      if (e.target.closest('.stage-newcat, .stage-holdmenu')) return;
       setPop(false);
     });
     document.addEventListener('keydown', (e) => {
@@ -2945,22 +6430,35 @@
   {
     const tr = $('stage-track');
     let dragging = false;
-    const seekTo = (clientX) => {
+    let moved = false;
+    let lastX = 0;
+    /* commit=false：拖动中只画，松手才真正 seek（同 bindBar 的 commitOnRelease） */
+    const seekTo = (clientX, commit = true) => {
       const r = tr.getBoundingClientRect();
       const p = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
       const total = Player.audio.duration || 0;
-      Player.seek(p * total);
+      if (commit) Player.seek(p * total);
       $('stage-fill').style.width = (p * 100) + '%';
       $('stage-t').textContent = fmtTime(p * total);
       tr.setAttribute('aria-valuenow', String(Math.round(p * 100)));
     };
     tr.addEventListener('pointerdown', (e) => {
       dragging = true;
+      moved = false;
+      lastX = e.clientX;
       tr.setPointerCapture(e.pointerId);
-      seekTo(e.clientX);
+      seekTo(e.clientX, true);
     });
-    tr.addEventListener('pointermove', (e) => { if (dragging) seekTo(e.clientX); });
-    tr.addEventListener('pointerup', () => { dragging = false; });
+    tr.addEventListener('pointermove', (e) => {
+      if (!dragging) return;
+      moved = true;
+      lastX = e.clientX;
+      seekTo(e.clientX, false);
+    });
+    tr.addEventListener('pointerup', () => {
+      if (dragging && moved) seekTo(lastX, true);
+      dragging = false;
+    });
     tr.addEventListener('pointercancel', () => { dragging = false; });
   }
 
@@ -3107,6 +6605,29 @@
     let checking = false;      // 上一轮还没回来就跳过这一轮，避免并发轮询
     let refreshing = 0;        // 连续过期次数：连换 3 次就停手，别把上游惹毛
     let autoTries = 0;         // 过期自动换码时撞上 15s 冷却，最多再等 3 轮
+    let keyAt = 0;             // 当前二维码拿到的时间（上游有效期约 120s）
+    /* 最近发出去的几张码。用户常常是「截图 → 切去 QQ 音乐扫」，
+       截图里那张很可能已经被 105s 自动换码换掉了；只轮询最新那一张会永远
+       等不到 803 —— 表现就是「QQ 那边提示登录成功，LIZI 一点反应没有」。
+       这里留一个小环，回到前台时把环里的 key 都问一遍，任一张成功即登录。 */
+    let keyRing = [];          // [{ key, at }]，最多 6 张、5 分钟内
+    function rememberKey(k) {
+      if (!k) return;
+      const now = Date.now();
+      keyRing = keyRing.filter((e) => e.key !== k && now - e.at < 5 * 60 * 1000);
+      keyRing.push({ key: k, at: now });
+      if (keyRing.length > 6) keyRing.shift();
+    }
+    let lastCode = 0;          // 最近一次 check 的码：只有 801 才允许主动换码
+    let renewTimer = 0;        // 到期前主动换码（比等 800 再换少一次 15s 冷却）
+    let renewing = false;
+    /* 一代一循环：startQr / stop 都会换代，旧的 key 响应、定时器回调据此作废。
+       以前自动换码用裸 setTimeout(startQr) 重新起一轮，旧循环的 interval 又没人清，
+       两次重叠就变成多条轮询互相抢 key（上游 800 → 再开一轮 → 800），码一直闪。 */
+    let gen = 0;
+    let retryTimer = 0;        // startQr 拿 key 失败后的自动重试（原来裸 setTimeout，和新一轮叠加）
+    let resumeHold = false;    // 刚从后台回来：手里可能有截图，先原样留到接近有效期再换
+    let authKnown = false;     // 首次读到登录态只记基线，不把「本来已登录」误判成刚登录
     let channel = 'qqmusic';
     try { channel = localStorage.getItem('lizi.qq.channel') || 'qqmusic'; } catch { /* ignore */ }
 
@@ -3131,8 +6652,15 @@
     }
 
     function stop() {
+      gen++;                   // 在途的 key/check 响应从此作废，不会再把新循环顶掉
       clearInterval(timer);
+      clearTimeout(renewTimer);
+      clearTimeout(retryTimer);
       timer = 0;
+      renewTimer = 0;
+      retryTimer = 0;
+      renewing = false;
+      resumeHold = false;
       checking = false;
     }
 
@@ -3144,6 +6672,8 @@
     }
 
     async function refresh() {
+      const was = logged;
+      let failed = false;
       try {
         const d = await API.qqStatus();
         logged = !!d.loggedIn;
@@ -3160,17 +6690,117 @@
           } catch { /* 没有就没有 */ }
         }
       } catch {
-        logged = false;
-        nickname = '';
-        avatarUrl = '';
+        /* 网络抖一下不能写成「未登录」，只画、不改大厅结论 */
+        failed = true;
       }
       paint();
+      /* 手机去 QQ 音乐 App 里扫完码再切回来时，803 可能从来没在本 WebView 的
+         轮询里出现过（后台定时器被挂起）。refresh 第一次读到「已登录」必须
+         当场通知大厅，否则大厅「我的」/铺色长条会一直停在未登录的旧值，
+         只有重启重新查询才自愈（用户说的「假登录」）。首次读取只记基线，不通知。 */
+      if (!failed) {
+        if (authKnown && logged !== was) notifyAuthChanged(logged ? 'login' : 'logout', 'qq');
+        authKnown = true;
+      }
       return logged;
     }
 
+    /* 上游原生二维码约 120s 有效（边车 MQTT listener 到点就回 mqtt-packet-timeout，
+       随后还会压 15s 冷却）。用户在手机上通常是「截图 → 切到 QQ 音乐从相册扫」，
+       所以切走后必须先保证截图里那张码不被换掉：
+       - document.hidden 时不主动换码、也不安排下一轮换码；
+       - 回到前台时，没到上游有效期就保留原码，只照常 check；
+       - 到有效期了才立刻换，并明确提示「已换新码，请重新截图扫码」；
+       - 用户明确点「换一张 / 重新生成」时不受可见性限制，立刻换。
+       可见状态下仍保留 105s 提前换：旧码还在 `waiting` 时边车会直接抢占
+       （preempt）而不记失败、不触发冷却；`802`（手机已扫、等确认）时绝不换。 */
+    const QR_RENEW_MS = 105 * 1000;
+    const QR_TTL_MS = 120 * 1000;   // 上游有效期估算：回前台时以此判断是否还留着截图那张
+
+    function scheduleRenew() {
+      clearTimeout(renewTimer);
+      renewTimer = 0;
+      if (document.hidden || logged || !timer) return;   // 切去扫码时别在后台动码
+      /* 回前台后的第一张码不按 105s 提前换：留到接近上游有效期，给手里截图留时间 */
+      const target = resumeHold ? QR_TTL_MS - 2000 : QR_RENEW_MS;
+      const left = target - (Date.now() - keyAt);
+      renewTimer = setTimeout(() => renewQr('auto'), Math.max(1000, left));
+    }
+
+    async function renewQr(why) {
+      renewTimer = 0;
+      if (document.hidden || logged || !timer || renewing) return;
+      if (lastCode === 802 || lastCode === 803) return;
+      const my = gen;
+      renewing = true;
+      status.textContent = '正在换新码…';
+      try {
+        const d = await API.qqQrKey(channel);
+        if (my !== gen || logged || !timer) return;
+        if (lastCode === 802) return;       // 等图期间手机扫了旧码：保留确认中的那张
+        if (!d || !d.key || !d.qrimg) {
+          /* 撞上上游冷却就等它过去；其它错误也留旧码继续轮询，别让界面空掉 */
+          const wait = d && d.retryAfterMs ? d.retryAfterMs + 500 : 15000;
+          if (my === gen && !document.hidden && !logged && timer) renewTimer = setTimeout(() => renewQr(why), wait);
+          return;
+        }
+        key = d.key;
+        keyAt = Date.now();
+        rememberKey(d.key);
+        lastCode = 0;
+        /* 不重置 refreshing：新码如果立刻又 800，说明上游真的在反复过期，得让 3 次上限生效 */
+        resumeHold = false;
+        const img = new Image();
+        img.alt = 'QQ 音乐登录二维码';
+        img.onload = () => {
+          if (my !== gen || !timer || logged) return;
+          box.innerHTML = '';
+          box.appendChild(img);
+        };
+        img.onerror = () => { /* 旧码还在，等下一轮 */ };
+        img.src = d.qrimg;
+        status.textContent = why === 'resume' ? '已换新码，请重新截图扫码'
+          : why === 'expired' ? '二维码已过期，已换新码' : '二维码已自动刷新，请继续扫码';
+        status.className = 'qq-qr__status';
+        scheduleRenew();
+      } catch {
+        if (my === gen && !document.hidden && !logged && timer) renewTimer = setTimeout(() => renewQr(why), 15000);
+      } finally { renewing = false; }
+    }
+
+    /* 切出去扫码时 WebView 的后台定时器会被系统挂起，而且用户手里可能有截图：
+       回来先按手里那张码查一次，绝不先换码。
+       用户很可能刚在 QQ 音乐里扫完并点了确认，这张码即使已经过 120s，上游那边
+       也可能已经把登录态发出去了；以前这里一过 120s 就直接 renewQr('resume')，
+       等于把刚扫成功的会话作废 —— 表现就是「QQ 音乐提示登录成功，LIZI 没反应」。
+       只有 check 明确回 800（上游说码过期）才换码。 */
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        clearTimeout(renewTimer);
+        clearTimeout(retryTimer);
+        renewTimer = 0;
+        retryTimer = 0;
+        return;
+      }
+      if (logged || !timer) return;
+      resumeHold = true;
+      check(true);                                    // 环里所有近期的码都问一遍
+      if ((QR_TTL_MS - 2000) - (Date.now() - keyAt) > 0) scheduleRenew();
+    });
+    /* 少数安卓 WebView 从 QQ 音乐回来只补 focus、不补 visibilitychange：
+       同样先查手里的码，别等下一轮 2s 心跳。 */
+    addEventListener('focus', () => {
+      if (document.hidden || logged || !timer) return;
+      check(true);
+    });
+
     async function startQr(auto = false) {
       stop();
-      refreshing = 0;
+      const my = gen;        // 本次启动的代号：期间又有 startQr/stop，本次结果直接丢弃
+      /* 自动重开不清零刷新计数：连续 800 超过 3 次必须真的停手。
+         以前每次 startQr 都归零，800 → 重开 → 再 800 会无限循环。 */
+      if (!auto) { refreshing = 0; autoTries = 0; }
+      resumeHold = false;    // 用户主动换的新码：恢复可见状态下的 105s 提前换
       wrap.hidden = false;
       box.innerHTML = '<span>正在获取二维码…</span>';
       status.textContent = '正在连 QQ 音乐…';
@@ -3181,22 +6811,27 @@
       try {
         d = await API.qqQrKey(channel);
       } catch (e) {
+        if (my !== gen) return;      // 等待期间已换了新的一轮：别拿旧错误盖掉新界面
         box.innerHTML = '<span>边车没起来</span>';
         status.textContent = '启动失败：' + e.message;
         status.className = 'qq-qr__status is-error';
         return;
       }
+      if (my !== gen || logged) return;
       if (!d || !d.key || !d.qrimg) {
         box.innerHTML = '<span>拿不到二维码</span>';
         /* 二维码不是随时能刷：上游对同一设备有 15s 冷却（服务端会把 retryAfterMs 带回来）。
-           自动换码（过期触发）撞上冷却时不要停死 —— 等冷却过去自己再试一次。 */
-        if (auto && d && d.retryAfterMs && autoTries < 3) {
+           手动点「登录」撞上冷却时也不要只丢一句错误 —— 等冷却过去自己再试一次。 */
+        if (d && d.retryAfterMs && autoTries < 3) {
           autoTries++;
           const wait = Math.ceil(d.retryAfterMs / 1000);
           status.textContent = `二维码过期，${wait} 秒后自动重试…`;
           status.className = 'qq-qr__status';
           paint();
-          setTimeout(() => { if (!logged) startQr(true); }, (d.retryAfterMs || 15000) + 500);
+          retryTimer = setTimeout(() => {
+            retryTimer = 0;
+            if (my === gen && !logged) startQr(true);
+          }, (d.retryAfterMs || 15000) + 500);
           return;
         }
         /* 失败时要说清「多久之后再试」，不然用户只看到一句「拿不到」。 */
@@ -3208,21 +6843,45 @@
 
       autoTries = 0;
       key = d.key;
+      keyAt = Date.now();
+      rememberKey(d.key);
+      lastCode = 0;
       const img = new Image();
       img.alt = 'QQ 音乐登录二维码';
-      img.onload = () => { box.innerHTML = ''; box.appendChild(img); };
-      img.onerror = () => { box.innerHTML = '<span>二维码图片加载失败</span>'; };
+      img.onload = () => {
+        if (my !== gen || logged) return;
+        box.innerHTML = ''; box.appendChild(img);
+      };
+      img.onerror = () => { if (my === gen) box.innerHTML = '<span>二维码图片加载失败</span>'; };
       img.src = d.qrimg;                         // data:image/png;base64,...
       status.textContent = CH_LABEL[channel] || CH_LABEL.qqmusic;
       timer = setInterval(check, 2000);
+      scheduleRenew();
       paint();
     }
 
-    async function check() {
-      if (!key || checking) return;
+    async function check(deep = false) {
+      /* 切到 QQ 音乐扫码时不要轮询：后台万一回 800 会自动换码，把用户截图那张作废 */
+      if (!key || checking || document.hidden) return;
+      const my = gen;
       checking = true;
       try {
-        const d = await API.qqQrCheck(key);
+        /* deep = 从 QQ 音乐回到前台/点过登录：把最近发出去的几张码都问一遍。
+           用户截图去扫的那张，很可能已经被 105s 自动换码换掉了；
+           只问最新那张会永远等不到 803 —— QQ 显示登录成功，这边一点反应没有。 */
+        const list = deep ? keyRing.slice().reverse() : [{ key }];
+        let d = null;
+        for (const item of list) {
+          let r;
+          try { r = await API.qqQrCheck(item.key); } catch { continue; }
+          if (my !== gen) return;
+          const code = Number(r && r.code) || 0;
+          if (code === 803) { key = item.key; d = r; break; }   // 环里任意一张成功都算
+          /* 当前这张的 800/801/802 只拿来决定界面，不打断后面旧 key 的查证 */
+          if (item.key === key) d = r;
+        }
+        if (!d) return;
+        lastCode = Number(d && d.code) || 0;
         if (d.code === 803) {
           stop();
           logged = true;
@@ -3232,10 +6891,29 @@
           status.textContent = '登录成功' + (nickname ? '：' + nickname : '');
           status.className = 'qq-qr__status is-ok';
           paint();
+          /* 设置页这一行已经变「已登录」；大厅「我的」/铺色平台长条也要当场
+             重查五家（commit 前这里漏了，用户必须退出重进才看到 QQ 已登录）。 */
+          notifyAuthChanged('login', 'qq');
           setTimeout(() => { if (logged) wrap.hidden = true; }, 1200);
           return;
         }
         if (d.code === 800) {
+          /* 上游明确拒绝（设备数超限、风控、账号受限…）：说原因并且停手，不换码。
+             换新码没有意义 —— 同一张名单还会拒，用户只看到二维码自己闪一下。 */
+          const why = qrLoginHint(d);
+          if (why) {
+            stop();
+            status.textContent = why;
+            status.className = 'qq-qr__status is-error';
+            paint();
+            return;
+          }
+          /* 主动换码时旧 key 会被边车抢占，这一拍回 800 是预期内的，不算「过期」 */
+          if (renewing) return;
+          /* 已经排了换码重试：等它，别每个循环都 +1 把 3 次上限耗尽 */
+          if (renewTimer) return;
+          /* 已经切走（用户可能拿着刚截的图）：后台不要换码，回前台再按有效期处理 */
+          if (document.hidden) return;
           if (++refreshing > 3) {
             stop();
             status.textContent = '二维码反复过期，稍后再点「登录」';
@@ -3245,11 +6923,16 @@
           }
           status.textContent = '二维码过期，换一张…';
           status.className = 'qq-qr__status is-error';
-          stop();
-          setTimeout(() => startQr(true), 600);
+          /* 只换图：保留同一个 interval，不再 stop() + setTimeout(startQr)。
+             以前这条路每 800 就重开一整轮，重叠时旧 interval 清不掉，
+             多条轮询互相抢 key，二维码就一直闪。 */
+          renewQr('expired');
           return;
         }
         if (d.code === 802) {
+          /* 已经扫了：别再主动换码，等手机上确认（换码会把确认中的会话抢掉） */
+          clearTimeout(renewTimer);
+          renewTimer = 0;
           status.textContent = '已扫码，请在手机上确认';
           status.className = 'qq-qr__status is-ok';
           return;
@@ -3259,7 +6942,7 @@
         status.className = 'qq-qr__status';
         refreshing = 0;
       } catch { /* 网络抖一下，下一轮再试 */ }
-      finally { checking = false; }
+      finally { if (my === gen) checking = false; }
     }
 
     async function logout() {
@@ -3268,7 +6951,9 @@
       nickname = '';
       avatarUrl = '';
       key = '';
+      keyRing = [];              // 退出登录后，旧码不该再被认成新的登录
       pause();
+      notifyAuthChanged('logout', 'qq');
     }
 
     loginBtn.addEventListener('click', () => startQr(false));
@@ -3390,6 +7075,10 @@
    * ================================================================== */
   const SOURCES = [
     { id: 'kugou', label: '酷狗音乐', note: '第三方协议，用你自己的账号登录，风险自担。未登录能搜，但播放被酷狗风控拦（20028 需要验证）。' },
+    /* 概念版：同一个酷狗账号也要单独扫一次码（两个版本的 appid 不同），
+       服务端用另一个边车进程 + 另一份 cookie jar。登录哪一版就用哪一版，
+       不再按 VIP 自动切换；同一账号的歌单 /「我喜欢」两边同步。 */
+    { id: 'kugou-lite', label: '酷狗概念版', apiBase: 'kugou', profile: 'lite', note: '同一酷狗账号 · 单独扫码 · 登录后即使用该版本（同一账号歌单同步）' },
     { id: 'qishui', label: '汽水音乐', note: '抖音扫码授权。未登录只有 30 秒试听片段；边车需要本机 Node ≥ 24。' },
     { id: 'bodian', label: '波点音乐', note: '扫码登录。未登录只有 30 秒试听；播放只放行中国大陆网络。' },
     /* 酷我 / Spotify 已整块下线（2026-11-09）：桌面和安卓都不再露出。
@@ -3399,7 +7088,12 @@
 
   const Sources = (() => {
     const rows = {};
-    const qr = { wrap: $('src-qr'), box: $('src-qr-box'), status: $('src-qr-status'), note: $('src-qr-note') };
+    const qr = {
+      wrap: $('src-qr'), box: $('src-qr-box'), status: $('src-qr-status'), note: $('src-qr-note'),
+      /* 酷狗专用：普通版 / 概念版两个 appid，同一账号也要各扫一次；
+         选择页签只在酷狗的二维码里出现（其它家用不到）。 */
+      ch: $('src-qr-ch'),
+    };
 
     let active = '';        // 当前在扫码/授权的是哪一家
     let key = '';
@@ -3415,6 +7109,13 @@
         login: $(s.id + '-login'),
         logout: $(s.id + '-logout'),
         logged: false, nickname: '', avatar: '', reason: '',
+        /* 803 刚确认登录的时间：1.2s 后再问 /status 时，边车可能还没把会话
+           落盘/让上游生效，不能把刚画上的「已登录」又刷回未登录。 */
+        justLogged: 0,
+        recheckTimer: 0,
+        /* /status 在宽限期内没能确认这次登录：等延迟复查回来，若结论和 803
+           不一致再补一次大厅通知，别让大厅一直停在错的登录态。 */
+        unconfirmed: false,
       };
       /* 账号行头像：只有真实头像才显示（汽水 /status 现在会带 medium_avatar_url）；
          加载失败就收回占位，绝不留破图。 */
@@ -3431,6 +7132,28 @@
     }
 
     const meta = (id) => SOURCES.find((s) => s.id === id) || { id, label: id, note: '' };
+    /* 概念版行复用 kugou 的接口，只多带一个 profile 参数 */
+    const srcOf = (id) => { const s = meta(id); return s.apiBase || s.id; };
+    const profOf = (id) => { const s = meta(id); return s.profile ? { profile: s.profile } : undefined; };
+
+    /** 酷狗两行的状态文字：普通版行说「当前实际在用哪一版 + 该版 VIP」，
+        概念版行只说它自己的登录 / VIP。不再写「普通版 VIP 优先」这种自动选路文案。 */
+    function kugouRowText(id) {
+      const r = rows[id];
+      const normal = r.normal || { loggedIn: false, vip: false };
+      const lite = r.lite || { loggedIn: false, vip: false };
+      if (id === 'kugou') {
+        if (!normal.loggedIn && !lite.loggedIn) return '未连接';
+        const active = r.platform === 'lite' ? 'lite' : 'normal';
+        const cur = active === 'lite' ? lite : normal;
+        const name = active === 'lite' ? '概念版' : '普通版';
+        /* 登录态失效时 VIP 字段不可信，如实说失效，别把「无 VIP」当成结论 */
+        const tail = cur.loggedIn ? (cur.vip ? 'VIP' : '无 VIP') : '登录态失效';
+        return `当前使用：${name} · ${tail}`;
+      }
+      if (!lite.loggedIn) return r.tip || '未连接';
+      return `概念版 · ${lite.vip ? 'VIP' : '无 VIP'}`;
+    }
 
     function paint(id) {
       const r = rows[id];
@@ -3438,6 +7161,7 @@
       const waiting = active === id && timer;
       let text;
       if (r.reason) text = r.reason;                       // 不可用及原因，明着写
+      else if (id === 'kugou' || id === 'kugou-lite') text = waiting ? '等待扫码' : kugouRowText(id);
       else if (r.logged) text = '已登录' + (r.nickname ? ' ' + r.nickname : '');
       else if (waiting) text = '等待扫码';
       else text = id === 'spotify' ? '未授权' : '未连接';
@@ -3452,11 +7176,29 @@
       /* 有头像时让它吃掉 auto margin，状态文字紧贴头像；没头像时把 auto 还给状态文字 */
       r.state.style.marginLeft = ava ? '0' : '';
       /* 登录键的显示规则：已登录就藏；「node 版本不足」这种硬失败也藏（点了也没用）；
-         其它情况（包括缺 Client ID）**要留着**，让用户点一下能看到到底缺什么、怎么补。 */
+         其它情况（包括缺 Client ID）**要留着**，让用户点一下能看到到底缺什么、怎么补。
+         酷狗两行各看各的版本：普通版行只按 normal 藏登录键，概念版行只按 lite。 */
       const hardFail = r.reason === '本机 node 版本不足（需 ≥24）';
-      r.login.hidden = r.logged || hardFail;
+      if (id === 'kugou') {
+        /* 两版合并成一行之后：登录键常驻（用来加另一个版本），
+           退出键只要任一侧登录就显示；退出时两边一起退。 */
+        const on = !!(r.normal && r.normal.loggedIn);
+        const liteOn = !!(r.lite && r.lite.loggedIn);
+        r.login.hidden = hardFail;
+        r.logout.hidden = !(on || liteOn);
+      } else if (id === 'kugou-lite') {
+        const on = !!(r.lite && r.lite.loggedIn);
+        r.login.hidden = on || hardFail;
+        r.logout.hidden = !on;
+      } else {
+        r.login.hidden = r.logged || hardFail;
+        r.logout.hidden = !r.logged;
+      }
       r.login.textContent = waiting ? '换一张' : (id === 'spotify' ? '去授权' : '登录');
-      r.logout.hidden = !r.logged;
+      if (id === 'kugou' && !waiting
+        && ((r.normal && r.normal.loggedIn) || (r.lite && r.lite.loggedIn))) {
+        r.login.textContent = '登录另一版';
+      }
     }
 
     function stop() {
@@ -3474,6 +7216,7 @@
     function pause() {
       stop();
       if (qr.wrap) qr.wrap.hidden = true;
+      if (qr.ch) qr.ch.hidden = true;
       active = '';
       Object.keys(rows).forEach(paint);
     }
@@ -3481,8 +7224,11 @@
     /** 读一家状态。后端 502 时（比如 node 版本不足）要把原因显示出来，不是「未连接」 */
     async function refresh(id) {
       const r = rows[id];
+      const was = !!r.logged;
+      let failed = false;
+      let corrected = false;
       try {
-        const h = await API.srcHealth(id);
+        const h = await API.srcHealth(srcOf(id), profOf(id));
         if (h && h.ok === false) {
           if (h.reason === 'node-version') r.reason = '本机 node 版本不足（需 ≥24）';
           else if (id === 'spotify' && !h.hasClientId) r.reason = '未配置 Client ID';
@@ -3495,24 +7241,69 @@
           paint(id);
           return;
         }
-        const d = await API.srcStatus(id);
-        r.logged = !!(d && d.loggedIn);
+        const d = await API.srcStatus(srcOf(id), profOf(id));
+        let fresh = !!(d && d.loggedIn);
+        /* 酷狗两行共用同一个 /status：里面带着两侧的 loggedIn/vip 和服务端选中的 active。
+           普通版行按「任一侧登录」算已连接，概念版行只看 lite。 */
+        if (id === 'kugou' || id === 'kugou-lite') {
+          if (d && d.normal && d.lite) {
+            r.normal = d.normal;
+            r.lite = d.lite;
+            /* 服务端按「最后成功登录」决定当前版本；VIP 只影响显示 */
+            r.platform = d.activeProfile || d.platform;
+            r.profileSource = d.profileSource || '';
+            fresh = id === 'kugou'
+              ? !!(d.normal.loggedIn || d.lite.loggedIn)
+              : !!d.lite.loggedIn;
+            r.tip = '';
+          }
+        }
+        /* 803 刚说成功、1.2s 后的 /status 却说未登录：多半是边车会话还没落盘
+           （或上游还没生效），不是用户掉线。15s 内保持 803 的结论，之后再验一次；
+           logout() 会清掉 justLogged 和定时器，所以不会挡住真实的退出。 */
+        if (!fresh && r.justLogged && Date.now() - r.justLogged < 15000) {
+          r.unconfirmed = true;
+          if (!r.recheckTimer) {
+            r.recheckTimer = setTimeout(() => {
+              r.recheckTimer = 0;
+              if (rows[id] && rows[id].logged) refresh(id);
+            }, 15500);
+          }
+          return;
+        }
+        corrected = r.unconfirmed;        // 延迟复查回来了：结论若变了要补发大厅通知
+        r.unconfirmed = false;
+        r.justLogged = 0;
+        r.logged = fresh;
         r.nickname = (d && d.nickname) || '';
         r.avatar = (d && d.avatar) || '';
         /* Spotify 没登录但配了 Client Secret 也能搜（客户端凭证），别显示成「不可用」 */
         r.reason = (d && d.error && id === 'spotify' && !d.mode) ? '未配置 Client ID' : '';
         if (id === 'spotify' && r.logged && /客户端凭证/.test(r.nickname)) { r.logged = true; r.nickname = ''; }
       } catch (e) {
+        failed = true;
         r.reason = /node/i.test(e.message) ? '本机 node 版本不足（需 ≥24）' : '边车不可用';
       }
       paint(id);
+      /* 概念版不是独立平台：它的登录态并进酷狗那一行，通知只发一次 kugou */
+      if (id !== 'kugou-lite' && corrected) notifyAuthChanged(r.logged ? 'login' : 'logout', id);
+      /* 和 QQ 同一条：首次刷新只记基线；之后只要登录态翻转就要通知大厅。
+         （手机在别的 App 里完成扫码、回到前台才第一次查到已登录时，原来这里
+         只改了设置页那一行，大厅仍停旧状态，重启才自愈。） */
+      else if (!failed && id !== 'kugou-lite' && r.known && r.logged !== was) {
+        notifyAuthChanged(r.logged ? 'login' : 'logout', id);
+      }
+      if (!failed) r.known = true;
     }
 
     function refreshAll() { for (const s of SOURCES) refresh(s.id); }
+    /** 酷狗两行总是一起刷新：当前版本、VIP、登录态都在同一个 /status 里 */
+    function refreshKugouPair() { return Promise.all([refresh('kugou'), refresh('kugou-lite')]); }
 
     function closeQr() {
       stop();                                    // 里面会连酷我的 Cookie 浮层一起收
       if (qr.wrap) qr.wrap.hidden = true;
+      if (qr.ch) qr.ch.hidden = true;
       active = '';
       Object.keys(rows).forEach(paint);
     }
@@ -3527,14 +7318,26 @@
       qr.status.className = 'qq-qr__status';
       qr.status.textContent = `正在连 ${meta(id).label}…`;
       qr.note.textContent = meta(id).note;
+      /* 酷狗：同一个二维码面板里放两个版本页签，切一下重新取码 */
+      if (qr.ch) {
+        const kg = id === 'kugou' || id === 'kugou-lite';
+        qr.ch.hidden = !kg;
+        if (kg) {
+          for (const b of qr.ch.querySelectorAll('[data-kg]')) {
+            const on = b.getAttribute('data-kg') === id;
+            b.classList.toggle('is-on', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          }
+        }
+      }
       paint(id);
 
       let k = null;
       let c = null;
       try {
-        k = await API.srcQrKey(id);
+        k = await API.srcQrKey(srcOf(id), profOf(id));
         if (!k || !k.key) throw new Error((k && (k.error || k.message)) || '拿不到二维码 key');
-        c = await API.srcQrCreate(id, k.key);
+        c = await API.srcQrCreate(srcOf(id), k.key, profOf(id));
         if (!c || !c.qrimg) throw new Error((c && (c.error || c.message)) || '二维码生成失败');
       } catch (e) {
         qr.box.innerHTML = '<span>拿不到二维码</span>';
@@ -3549,7 +7352,7 @@
       img.onload = () => { qr.box.innerHTML = ''; qr.box.appendChild(img); };
       img.onerror = () => { qr.box.innerHTML = '<span>二维码图片加载失败</span>'; };
       img.src = c.qrimg;                          // data:image/png;base64,...
-      qr.status.textContent = `用 ${meta(id).label} App 扫码`;
+      qr.status.textContent = id === 'qishui' ? '用抖音 App 扫码' : `用 ${meta(id).label} App 扫码`;
       timer = setInterval(() => check(id), 2200);
       paint(id);
     }
@@ -3558,25 +7361,62 @@
       if (!key || checking || active !== id) return;
       checking = true;
       try {
-        const d = await API.srcQrCheck(id, key);
+        const d = await API.srcQrCheck(srcOf(id), key, profOf(id));
         const code = Number(d && d.code);
         if (code === 803) {
+          const r = rows[id];
           stop();
-          rows[id].logged = true;
-          rows[id].nickname = (d && d.nickname) || '';
-          rows[id].avatar = (d && d.avatar) || '';
+          r.logged = true;
+          r.nickname = (d && d.nickname) || '';
+          r.avatar = (d && d.avatar) || '';
+          r.reason = '';
+          r.justLogged = Date.now();
+          r.unconfirmed = false;
+          if (id === 'kugou' || id === 'kugou-lite') {
+            if (d && d.normal) r.normal = d.normal;
+            if (d && d.lite) r.lite = d.lite;
+            /* 服务端已经把 active 设成这次成功登录的版本，界面上立即跟着走 */
+            r.platform = (d && (d.activeProfile || d.platform)) || (id === 'kugou-lite' ? 'lite' : 'normal');
+            r.profileSource = (d && d.profileSource) || 'login';
+            if (id === 'kugou' && d) r.normal = { ...(r.normal || {}), loggedIn: true, vip: !!d.vip };
+            if (id === 'kugou-lite' && d) {
+              r.lite = { ...(r.lite || {}), loggedIn: true, vip: !!d.vip };
+              r.tip = '';
+            }
+          }
           qr.box.innerHTML = '<span>已登录</span>';
-          qr.status.textContent = '登录成功' + (rows[id].nickname ? '：' + rows[id].nickname : '');
+          qr.status.textContent = '登录成功' + (r.nickname ? '：' + r.nickname : '');
           qr.status.className = 'qq-qr__status is-ok';
           paint(id);
-          setTimeout(() => {
+          setTimeout(async () => {
             if (!rows[id].logged) return;
             qr.wrap.hidden = true;
-            refresh(id);          // 老边车不带头像时，登录后再问一次 /status
+            /* 803 已经是「确认成功」。先通知大厅当场刷新，不再等这次 /status：
+               手机切到平台 App 扫码时 WebView 的定时器被挂起，/status 可能
+               还没落盘，等它会把这次登录整条漏掉（大厅停在未登录，只能重启）。
+               justLogged 的 15s 宽限会在 refresh 里挡住临时的 loggedIn:false。 */
+            if (id === 'kugou' || id === 'kugou-lite') {
+              notifyAuthChanged('login', 'kugou');
+              /* 服务端已经把 active 切到这次登录的版本；两行一起重读，
+                 把「当前使用：哪一版 · 该版 VIP」画对。VIP 不再触发换版本。 */
+              await refreshKugouPair();
+              return;
+            }
+            notifyAuthChanged('login', id);
+            await refresh(id);    // 老边车不带头像 / 会话还没落盘时补一次校正
           }, 1200);
           return;
         }
         if (code === 800) {
+          /* 上游明确拒绝（设备数超限等）：说原因、不自动换码，见 qrLoginHint 的注释 */
+          const why = qrLoginHint(d);
+          if (why) {
+            stop();
+            qr.status.textContent = why;
+            qr.status.className = 'qq-qr__status is-error';
+            paint(id);
+            return;
+          }
           if (++expired > 3) {
             stop();
             qr.status.textContent = '二维码反复过期，稍后再点「登录」';
@@ -3600,7 +7440,7 @@
           qr.status.className = 'qq-qr__status is-error';
           return;
         }
-        qr.status.textContent = `用 ${meta(id).label} App 扫码`;
+        qr.status.textContent = id === 'qishui' ? '用抖音 App 扫码' : `用 ${meta(id).label} App 扫码`;
         qr.status.className = 'qq-qr__status';
         expired = 0;
       } catch { /* 网络抖一下，下一轮再试 */ }
@@ -3647,11 +7487,29 @@
     }
 
     async function logout(id) {
-      try { await API.srcLogout(id); } catch { /* 服务端没清掉也要把界面收回来 */ }
-      rows[id].logged = false;
-      rows[id].nickname = '';
+      try { await API.srcLogout(srcOf(id), profOf(id)); } catch { /* 服务端没清掉也要把界面收回来 */ }
+      const r = rows[id];
+      r.logged = false;
+      r.nickname = '';
+      r.avatar = '';
+      r.justLogged = 0;
+      r.unconfirmed = false;
+      clearTimeout(r.recheckTimer);
+      r.recheckTimer = 0;
+      if (id === 'kugou' || id === 'kugou-lite') {
+        if (id === 'kugou') r.normal = { ...(r.normal || {}), loggedIn: false, vip: false };
+        else { r.lite = { ...(r.lite || {}), loggedIn: false, vip: false }; r.tip = ''; }
+      }
       if (active === id) closeQr();
       else paint(id);
+      if (id === 'kugou' || id === 'kugou-lite') {
+        notifyAuthChanged('logout', 'kugou');
+        /* 退出只清这一版；如果退的是当前使用的那一版，服务端会切到另一个
+           已登录版本（两边都没有则 normal 匿名）。两行一起重读才能画对。 */
+        await refreshKugouPair();
+      } else {
+        notifyAuthChanged('logout', id);
+      }
     }
 
     /** 酷我：只有 Cookie 登录。浮层关掉就收手，成功后重读 /status 再收面板 */
@@ -3674,6 +7532,9 @@
       qr.box.innerHTML = '<span>已保存</span>';
       qr.status.textContent = '已保存 Cookie';
       qr.status.className = 'qq-qr__status is-ok';
+      /* 服务端已确认 Cookie 可用：先通知大厅，再重读 /status（refresh 的
+         翻转检测会在状态确认时再补一次，不会漏）。 */
+      notifyAuthChanged('login', id);
       await refresh(id);
       setTimeout(() => { if (seq === loginSeq && active === id) closeQr(); }, 1200);
     }
@@ -3685,12 +7546,118 @@
         else if (key && active === s.id && timer) startQr(s.id);   // 「换一张」
         else startQr(s.id);
       });
-      rows[s.id].logout.addEventListener('click', () => logout(s.id));
+      rows[s.id].logout.addEventListener('click', () => {
+        /* 酷狗行合并了两个版本：退出 = 两边都退。
+           否则只登录了概念版时，界面上没有任何退出入口。 */
+        if (s.id === 'kugou') {
+          if (rows['kugou-lite'].lite && rows['kugou-lite'].lite.loggedIn) logout('kugou-lite');
+          if (rows['kugou'].normal && rows['kugou'].normal.loggedIn) logout('kugou');
+          return;
+        }
+        logout(s.id);
+      });
       paint(s.id);
+    }
+
+    /* 酷狗版本页签：点哪版就为哪版重新取一张码（两版 appid 不同） */
+    if (qr.ch) {
+      qr.ch.addEventListener('click', (e) => {
+        const b = e.target && e.target.closest ? e.target.closest('[data-kg]') : null;
+        if (!b) return;
+        const id = b.getAttribute('data-kg');
+        if ((id === 'kugou' || id === 'kugou-lite') && id !== active) startQr(id);
+      });
     }
 
     return { refreshAll, refresh, pause, closeQr, get active() { return active; } };
   })();
+
+  /* ================================================================== *
+   * 登录态变化的统一收尾（QQ / 网易云 / 酷狗 / 汽水 / 波点共用）
+   *
+   *   各入口自己的设置行 paint/refresh 只管设置页那一行；大厅的「我的」卡、
+   *   铺色态平台长条靠的是 Hall 里的 platRows + meCache，只有 Hall.refreshMe()
+   *   会跳过缓存重查五家并重画。2026-11-11 之前只有网易云 afterLogin 调了它，
+   *   其它音源扫码成功后大厅一直拿着旧 platRows / 旧 meCache：
+   *     · 已登录 A 再登录 B → 设置页 B 显示已登录，铺色长条里 B 不出现；
+   *     · 退出到没有平台登录 → 铺色态还停在旧平台，内容只剩公开接口。
+   *   重进应用时才因为 Hall.mount() 走一次 paintMe() 重新查询而「自愈」。
+   *
+   *   这里只发一次通知，不轮询、不重复请求：
+   *     1) Hall.refreshMe(mode, src)：失效 meCache，强制重查并重画「我的」/平台长条；
+   *        退出用 'clear'，先把退出的这一家按未登录画，旧平台不留在铺色态里多停几秒。
+   *     2) lizi:platforms：设置页背景色盘等监听者跟着当前平台重画。
+   *
+   *   src 是 LIZI_ACCOUNTS 里已下线的平台（酷我 / Spotify）时直接不发：
+   *   大厅没有那一行，没必要为它重查五家。
+   * ================================================================== */
+  function notifyAuthChanged(mode, src) {
+    try {
+      const accounts = window.LIZI_ACCOUNTS || [];
+      if (src && accounts.length && !accounts.some((a) => a && a.id === src)) return;
+    } catch { /* 账号注册表还没加载：照常通知 */ }
+    try { Hall.refreshMe(mode === 'logout' ? 'clear' : 'keep', src); } catch { /* Hall 还没初始化 */ }
+    try {
+      document.dispatchEvent(new CustomEvent('lizi:platforms', { bubbles: true, detail: { authChanged: true } }));
+    } catch { /* 老环境 */ }
+  }
+
+  /* ================================================================== *
+   * 从后台回来：补一次登录态复查
+   *
+   * 手机扫码要把 LIZI 切到后台（QQ / 酷狗 / 汽水 / 波点的码都在平台 App 里扫），
+   * WebView 的后台定时器会被系统挂起，扫码确认很可能发生在「隐藏」这段时间里。
+   * 回前台后原来只有 QQ 设置面板自己的 visibilitychange 会补一次 check，
+   * 其它几家要等下一轮 interval（被挂起过，可能要很久），大厅更要重启才重查。
+   * 这里统一补一次：QQ / 其余四家状态 + 网易云会话。只在离开 ≥4s 时做，
+   * 10s 内不重复，避免来回切标签页刷接口。
+   * ================================================================== */
+  const authBootAt = Date.now();
+  let authHiddenAt = 0;
+  let authRecheckAt = 0;
+
+  async function revalidateAuthAfterResume() {
+    const now = Date.now();
+    if (now - authRecheckAt < 10000) return;
+    authRecheckAt = now;
+
+    try { QQ.refresh(); } catch { /* QQ 还没初始化 */ }
+    try { Sources.refreshAll(); } catch { /* Sources 还没初始化 */ }
+
+    try {
+      const s = await API.session();
+      const on = !!(s && s.loggedIn);
+      if (on) {
+        const p = s.profile;
+        const same = !!(profile && profile.userId && p && String(profile.userId) === String(p.userId));
+        if (!same) await afterLogin(s);     // 后台里刚登录 / 换了账号：资料、歌单、大厅一次刷新
+        else { profile = bareProfile(p); paintAccount(); }
+      } else if (profile) {
+        profile = null;
+        paintAccount();
+        renderPlaylists([]);
+        notifyAuthChanged('logout', 'netease');
+      }
+    } catch { /* 网络还没恢复：等下一次回前台再查 */ }
+  }
+
+  function authResumeMaybe(force) {
+    if (document.hidden) { authHiddenAt = Date.now(); return; }
+    /* 启动后 8s 内忽略「隐藏 → 显示」的抖动（浏览器新建标签页时常有），
+       免得开屏本来就有的那轮查询再打一遍。壳子显式调 __liziAuthResume 不受限。 */
+    if (!force && Date.now() - authBootAt < 8000) return;
+    const away = authHiddenAt ? Date.now() - authHiddenAt : 0;
+    if (!force && away < 4000) return;
+    authHiddenAt = 0;
+    revalidateAuthAfterResume();
+  }
+
+  document.addEventListener('visibilitychange', () => authResumeMaybe(false));
+  /* 少数安卓 WebView 在 Activity onResume 时只补 focus、不补 visibilitychange */
+  window.addEventListener('focus', () => { if (authHiddenAt) authResumeMaybe(false); });
+  window.addEventListener('pageshow', (e) => { if (e.persisted) authResumeMaybe(true); });
+  /* 安卓壳如果以后在 onResume 里主动叫页面，走同一条：window.__liziAuthResume() */
+  window.__liziAuthResume = () => authResumeMaybe(true);
 
   /* ==================================================================
      设置（整页视图 #view-settings）
@@ -3716,13 +7683,20 @@
   /* 网易云那行下面「粘贴 MUSIC_U Cookie」备选入口：登录后点了也没反应
      （openLoginModal 会直接 return），跟着行尾的「登录」一起收起。 */
   const setLinks = document.querySelector('.setpage__links');
+  /* 2026-11-22：老服务端 / 老热补丁可能把 { loggedIn, profile } 整包塞进
+     profile（803 扫码收 cookie 的 harvest 契约 bug）。这里统一解一层，
+     让已经在内存里的嵌套对象也能立刻自愈，不用重启。 */
+  function bareProfile(p) {
+    return (p && p.loggedIn === true && p.profile) ? p.profile : p;
+  }
   function paintAccount() {
-    const on = !!profile;
+    profile = bareProfile(profile);
+    const on = !!(profile && (profile.userId != null || profile.nickname));
     /* 头像直接读 profile.avatar，不从 DOM 里取 */
-    const av = on && profile && profile.avatar ? API.img(profile.avatar, 96) : '';
+    const av = on && profile.avatar ? API.img(profile.avatar, 96) : '';
     const name = $('set-account');
     const sub = $('set-account-sub');
-    if (name) name.textContent = on && profile.nickname ? profile.nickname : '未登录';
+    if (name) name.textContent = on ? (profile.nickname || '已登录') : '未登录';
     if (sub) sub.textContent = on ? '已登录 · 歌单与收藏已同步' : '登录后可同步歌单与收藏';
     if (setAvatar) {
       if (av) { setAvatar.setAttribute('src', av); setAvatar.hidden = false; }
@@ -3885,6 +7859,55 @@
   $('set-plat-avatar').addEventListener('click', () => setPlatAvatar(!platAvatarOn()));
   paintPlatAvatarSwitch();
 
+  /* ---- 歌词模糊（lizi.lyric.blur）----
+     默认开：播放页每一行挂 filter: blur(3px)，只有 .is-active 清掉，所以
+     "除了正在唱的那句，别的一律糊"。关掉时给 <html> 挂 .lyric-blur-off
+     （app.css 末尾那段），播放页和首页 hero 的歌词一起变清晰 —— 两边必须同步，
+     它们靠 FLIP 平移飞进播放页，只关一边飞过去会从糊跳成清晰。
+     设置页「播放页排版」和播放页抽屉「调整参数」各有一个开关，同读同写；
+     用 data-lyric-blur 批量绑，两处不共 id。只改观感，不动排版/滚动/播放。 */
+  const LYRIC_BLUR_KEY = 'lizi.lyric.blur';
+  function lyricBlurOn() {
+    try { return localStorage.getItem(LYRIC_BLUR_KEY) !== '0'; } catch { return true; }
+  }
+  function paintLyricBlurSwitches() {
+    const on = lyricBlurOn();
+    document.documentElement.classList.toggle('lyric-blur-off', !on);
+    document.querySelectorAll('[data-lyric-blur]').forEach((sw) =>
+      sw.setAttribute('aria-checked', String(on)));
+  }
+  function setLyricBlur(on) {
+    on = !!on;
+    try { localStorage.setItem(LYRIC_BLUR_KEY, on ? '1' : '0'); } catch { /* 隐私模式：本次仍生效 */ }
+    paintLyricBlurSwitches();
+  }
+  document.querySelectorAll('[data-lyric-blur]').forEach((sw) =>
+    sw.addEventListener('click', () => setLyricBlur(!lyricBlurOn())));
+  paintLyricBlurSwitches();
+
+  /* ---- VIP 提示（lizi.playbackTip）----
+     默认开；'0' 才是关。关掉后 vip-notice.js 不再弹右下角
+     「当前 XX 平台账号未开通 VIP，仅支持试听」，并立刻收起已经显示的。 */
+  const VIP_TIP_KEY = 'lizi.playbackTip';
+  function vipTipOn() {
+    try { return localStorage.getItem(VIP_TIP_KEY) !== '0'; } catch { return true; }
+  }
+  function paintVipTipSwitch() {
+    const sw = $('set-vip-tip');
+    if (sw && sw.setAttribute) sw.setAttribute('aria-checked', String(vipTipOn()));
+  }
+  function setVipTip(on) {
+    on = !!on;
+    try { localStorage.setItem(VIP_TIP_KEY, on ? '1' : '0'); } catch { /* 隐私模式：本次仍生效 */ }
+    paintVipTipSwitch();
+    if (!on) {
+      document.querySelectorAll('.vip-tip.is-on').forEach((el) => el.classList.remove('is-on'));
+    }
+  }
+  const vipTipSwitch = $('set-vip-tip');
+  if (vipTipSwitch) vipTipSwitch.addEventListener('click', () => setVipTip(!vipTipOn()));
+  paintVipTipSwitch();
+
   /* ---- 大厅铺色来源（lizi.hall.platColor）----
      默认关：铺色态取**当前专辑封面**经 C 算法算出的 5 档（找不到封面才退回平台色）；
      打开后回到旧的平台品牌色。设置页的自定义色优先级仍在这两者之上。
@@ -3908,6 +7931,430 @@
   if (platColorSwitch) platColorSwitch.addEventListener('click', () => setPlatColor(!platColorOn()));
   paintPlatColorSwitch();
 
+  /* ==================================================================
+     平台管理（设置页「平台管理」分区）
+     ------------------------------------------------------------------
+     五家平台各一个开关 + 自定义音源；写 lizi.platforms.v1（见顶部 PlatVis）。
+     关掉的平台从大厅 / 手机导航 / 搜索页签里消失，但设置页「平台账号」的
+     登录行保留 —— 否则关了以后没法登录、也没法再打开。
+     ================================================================== */
+  const PLAT_MANAGE = [
+    { id: 'netease', name: '网易云音乐', hint: '登录后可同步歌单与收藏' },
+    { id: 'qq', name: 'QQ 音乐', hint: '第三方协议 · 播放需登录' },
+    { id: 'kugou', name: '酷狗音乐', hint: '播放需登录' },
+    { id: 'qishui', name: '汽水音乐', hint: '未登录只有 30 秒试听' },
+    { id: 'bodian', name: '波点音乐', hint: '未登录只有 30 秒试听 · 仅大陆网络' },
+  ];
+
+  function platSwitchHtml(id, on) {
+    return `<button class="setpage__switch" type="button" role="switch"
+      aria-checked="${on ? 'true' : 'false'}" aria-label="显示这个平台"
+      data-plat-toggle="${id}"><span class="setpage__switch-knob" aria-hidden="true"></span></button>`;
+  }
+
+  /* 平台小图标（品牌色圆角块 + 白色 logo）：和「平台账号」行、大厅顶部那排
+     共用同一套 PLAT_LOGO / PLAT_BG，通过 Hall 的公开方法取，别在这里另抄
+     一份路径或品牌 hex（2026-11-16）。
+     Hall 在本文件后面才求值，模块跑完前第一次绘制取不到（try 兜住），
+     所以 paintPlatManage 末尾还有一次 setTimeout 补画。 */
+  function platMarkHtml(id) {
+    let bg = '', logo = '';
+    try { bg = Hall.platColor(id) || ''; logo = Hall.platLogo(id) || ''; } catch { /* Hall 未就绪 */ }
+    return `<span class="setpage__src-chip"${bg ? ` style="--src-chip:${bg}"` : ''} aria-hidden="true">`
+      + (logo ? `<img src="${logo}" alt="">` : '') + '</span>';
+  }
+
+  function paintPlatManage() {
+    const box = $('plat-manage-list');
+    if (!box || box.textContent === undefined) return;
+    const on = PlatVis.get();
+    box.innerHTML = PLAT_MANAGE.map((p) => `
+      <div class="setpage__row setpage__row--switch">
+        ${platMarkHtml(p.id)}
+        <span class="setpage__label-group">
+          <span class="setpage__label">${p.name}</span>
+          <span class="setpage__hint">${p.hint}</span>
+        </span>
+        ${platSwitchHtml(p.id, on.has(p.id))}
+      </div>`).join('');
+    /* 自定义音源那一行是静态 HTML（要和导入区一起保留状态），只同步开关 */
+    const lsw = document.querySelector('[data-plat-toggle="local"]');
+    if (lsw) lsw.setAttribute('aria-checked', String(on.has(PlatVis.LOCAL)));
+  }
+
+  /* ---- 自定义音源：导入 / 列表 / 补歌词 ----
+     2026-11-16 导入区重做：原来两行「选择音频 / 选择歌词」按钮换成一个文件夹
+     造型的大卡片，点卡片选文件，或把音频 / 歌词 / 封面混着拖进来，按扩展名
+     分流。卡片右侧三行状态（音乐 / 封面 / 歌词）每次从 LIZI_LOCAL.list()
+     现算，不另存计数。封面支持用户自己给图（lib.setCoverFile）。 */
+  const LocalUI = (() => {
+    const lib = () => (window.LIZI_LOCAL || null);
+    const box = () => document.getElementById('local-box');
+    const dropEl = () => document.getElementById('local-drop');
+    const busyEl = () => document.getElementById('local-drop-busy');
+    const statusEl = () => document.getElementById('local-status');
+    const listEl = () => document.getElementById('local-list');
+    const stateEl = () => document.getElementById('local-state');
+    let tracks = [];
+    let importIn = null, oneIn = null, pendingLyricId = '';
+    let importing = false;       // 同一时间只跑一批，避免拖两次叠着写库
+
+    /* 分流只认这几组扩展名（和需求里列的一致）；认不出的原样报名字，不猜。
+       音频同时接受 audio/*，有些系统给 .m4a 的 type 是空的，扩展名兜底。 */
+    const AUDIO_RE = /\.(mp3|flac|wav|m4a|ogg|aac|opus)$/i;
+    const LYRIC_RE = /\.(lrc|yrc|txt)$/i;
+    const IMAGE_RE = /\.(jpe?g|png|webp)$/i;
+    function kindOf(file) {
+      const n = (file && file.name) || '';
+      const t = (file && file.type) || '';
+      if (AUDIO_RE.test(n) || /^audio\//.test(t)) return 'audio';
+      if (LYRIC_RE.test(n)) return 'lyric';
+      if (IMAGE_RE.test(n) || /^image\/(jpeg|png|webp)$/.test(t)) return 'cover';
+      return '';
+    }
+
+    function say(msg) {
+      const s = stateEl();
+      if (!s) return;
+      s.textContent = msg || '';
+      s.hidden = !msg;
+    }
+    /** 导入期间：卡片底部跑一条不确定进度条，卡片本身加 .is-busy */
+    function busy(on) {
+      const el = busyEl();
+      if (el) el.hidden = !on;
+      const d = dropEl();
+      if (d) d.classList.toggle('is-busy', !!on);
+    }
+    function fmtMs(ms) {
+      const s = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    }
+    const escHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g,
+      (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function ensureInputs() {
+      if (importIn || !box()) return;
+      /* 一个 input 全收：点卡片时用户可能想选音频，也可能想选歌词 / 封面，
+         不让用户先选类型；选完统一按扩展名分流（拖拽走同一条 importFiles）。 */
+      importIn = document.createElement('input');
+      importIn.type = 'file';
+      importIn.accept = 'audio/*,.mp3,.flac,.wav,.m4a,.ogg,.aac,.opus,' +
+        '.lrc,.yrc,.txt,text/plain,image/jpeg,image/png,image/webp,' +
+        '.jpg,.jpeg,.png,.webp';
+      importIn.multiple = true;
+      importIn.hidden = true;
+      importIn.addEventListener('change', () => {
+        const files = [...(importIn.files || [])];
+        importIn.value = '';
+        importFiles(files);
+      });
+      box().appendChild(importIn);
+
+      oneIn = document.createElement('input');
+      oneIn.type = 'file';
+      oneIn.accept = '.lrc,.yrc,.txt,text/plain';
+      oneIn.hidden = true;
+      oneIn.addEventListener('change', () => {
+        const f = oneIn.files && oneIn.files[0];
+        oneIn.value = '';
+        if (f && pendingLyricId) setOneLyric(pendingLyricId, f);
+        pendingLyricId = '';
+      });
+      box().appendChild(oneIn);
+    }
+
+    /** 同名配对：文件名去扩展名后对 fileName 或 name（和原 addLyrics 一致），
+        配不上返回 null —— 让调用方明确报名字，不猜 */
+    function findTrackFor(all, fileName) {
+      const base = String(fileName || '').replace(/\.[^.]+$/, '').trim().toLowerCase();
+      if (!base) return null;
+      return all.find((x) =>
+        String(x.fileName || '').replace(/\.[^.]+$/, '').trim().toLowerCase() === base)
+        || all.find((x) => String(x.name || '').trim().toLowerCase() === base)
+        || null;
+    }
+
+    /** 导入总入口：点击选的文件和拖进来的文件都走这里，按扩展名分流。
+        顺序固定「音频 → 歌词 → 封面」：后两类按同名配对，得先有曲目记录。 */
+    async function importFiles(files) {
+      const l = lib();
+      const arr = [...(files || [])];
+      if (!l) { say('当前环境不支持本地存储'); return; }
+      if (!arr.length) return;
+      if (importing) { say('上一批文件还在导入，等它完成再试'); return; }
+
+      const buckets = { audio: [], lyric: [], cover: [] };
+      const skipped = [];
+      arr.forEach((f) => {
+        const k = kindOf(f);
+        if (k) buckets[k].push(f);
+        else skipped.push(f.name || '未命名文件');
+      });
+      const total = buckets.audio.length + buckets.lyric.length + buckets.cover.length;
+      if (!total) {
+        const names = skipped.slice(0, 3).join('、') + (skipped.length > 3 ? ' 等' : '');
+        say(`没识别到可导入的文件：${names}（支持音频 / LRC / YRC / TXT / JPG / PNG / WEBP）`);
+        return;
+      }
+
+      importing = true;
+      busy(true);
+      const parts = [];
+
+      /* 音频：一首一首导，进度写到状态条；单首失败不打断后面的 */
+      let okAudio = 0;
+      for (let i = 0; i < buckets.audio.length; i++) {
+        say(`正在导入音频 ${i + 1}/${buckets.audio.length}：${buckets.audio[i].name}`);
+        try {
+          await l.addFile(buckets.audio[i]);
+          okAudio++;
+        } catch (e) {
+          console.warn('[local] 音频导入失败', buckets.audio[i].name, e);
+        }
+      }
+      if (okAudio) parts.push(`音频 +${okAudio}`);
+      /* 导入成功 = 想用它：第一次导入顺手把「自定义音源」打开 */
+      if (okAudio && !PlatVis.has(PlatVis.LOCAL)) {
+        PlatVis.toggle(PlatVis.LOCAL, true);
+        paintPlatManage();
+      }
+
+      /* 配对表要在音频写完后再取，才能把刚导入的歌也配上歌词 / 封面 */
+      const all = await l.list().catch(() => []);
+      const miss = [];
+      const failed = [];
+
+      if (buckets.lyric.length) {
+        let hit = 0;
+        for (let i = 0; i < buckets.lyric.length; i++) {
+          const f = buckets.lyric[i];
+          say(`正在配对歌词 ${i + 1}/${buckets.lyric.length}：${f.name}`);
+          const t = findTrackFor(all, f.name);
+          if (!t) { miss.push(f.name); continue; }
+          try { await l.setLyricFile(t.id, f); hit++; }
+          catch (e) { console.warn('[local] 歌词导入失败', f.name, e); failed.push(f.name); }
+        }
+        if (hit) parts.push(`歌词 +${hit}`);
+      }
+
+      if (buckets.cover.length) {
+        let hit = 0;
+        for (let i = 0; i < buckets.cover.length; i++) {
+          const f = buckets.cover[i];
+          say(`正在配对封面 ${i + 1}/${buckets.cover.length}：${f.name}`);
+          const t = findTrackFor(all, f.name);
+          if (!t) { miss.push(f.name); continue; }
+          try { await l.setCoverFile(t.id, f); hit++; }
+          catch (e) { console.warn('[local] 封面导入失败', f.name, e); failed.push(f.name); }
+        }
+        if (hit) parts.push(`封面 +${hit}`);
+      }
+
+      await refresh();
+      importing = false;
+      busy(false);
+      let msg;
+      if (parts.length) msg = `已导入：${parts.join(' · ')}`;
+      else msg = '没有文件导入成功';
+      const audioBad = buckets.audio.length - okAudio;
+      if (audioBad > 0) msg += `；${audioBad} 个音频没导进来（可能超过 300 MB 或本机存储已满）`;
+      if (skipped.length) msg += `；跳过 ${skipped.length} 个不支持的文件`;
+      if (miss.length) {
+        msg += `；没找到同名歌曲：${miss.join('、')}（文件名去掉扩展名后要和歌曲同名）`;
+      }
+      if (failed.length) msg += `；读取失败：${failed.join('、')}`;
+      say(msg);
+    }
+
+    async function setOneLyric(id, file) {
+      const l = lib();
+      if (!l) return;
+      try {
+        await l.setLyricFile(id, file);
+        await refresh();
+        say(`已给「${(tracks.find((t) => t.id === id) || {}).name || '这首歌'}」补上歌词`);
+      } catch (e) {
+        say('歌词读取失败：' + ((e && e.message) || e));
+      }
+    }
+
+    async function refresh() {
+      const l = lib();
+      if (!l) return;
+      tracks = await l.list().catch(() => []);
+      render();
+    }
+
+    /* 状态面板图标：和设置页其它图标一样走描边 + currentColor */
+    const STAT_ICONS = {
+      audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>',
+      cover: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="m5 17 4.6-4.2 3.2 2.8 2.7-2.4L20 17"/></svg>',
+      lyric: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z"/><path d="M8 9h8M8 12.5h8M8 16h5"/></svg>',
+    };
+
+    function statRow(kind, label, have, total) {
+      const ok = have > 0;
+      const pct = total ? Math.round((have / total) * 100) : 0;
+      const badge = ok
+        ? '<span class="local-status__badge is-ok">✓ 已导入</span>'
+        : '<span class="local-status__badge">— 未导入</span>';
+      return `
+        <div class="local-status__row${ok ? ' is-ok' : ''}" data-kind="${kind}">
+          <span class="local-status__ic" aria-hidden="true">${STAT_ICONS[kind]}</span>
+          <span class="local-status__main">
+            <span class="local-status__head">
+              <span class="local-status__name">${label}</span>${badge}
+            </span>
+            <span class="local-status__track"><i style="width:${pct}%"></i></span>
+          </span>
+          <span class="local-status__num"><b>${have}</b><span>/${total}</span></span>
+        </div>`;
+    }
+
+    /** 三行状态全部由 list() 现算：不存第二份计数，删歌 / 补文件后自然对上。
+        音乐文件用曲目总数：lib.addFile 是「音频 blob 写成功才写曲目记录」，
+        有记录就一定有音频，不需要再存 hasAudio 字段（也就没动 IndexedDB schema）。 */
+    function renderStatus() {
+      const el = statusEl();
+      if (!el) return;
+      const total = tracks.length;
+      const haveAudio = total;
+      const haveCover = tracks.reduce((n, t) => n + (t.cover ? 1 : 0), 0);
+      const haveLyric = tracks.reduce((n, t) => n + ((t.hasLrc || t.hasYrc) ? 1 : 0), 0);
+      el.innerHTML = statRow('audio', '音乐文件', haveAudio, total)
+        + statRow('cover', '封面图片', haveCover, total)
+        + statRow('lyric', '歌词文件', haveLyric, total);
+    }
+
+    function render() {
+      renderStatus();
+      const boxEl = listEl();
+      if (!boxEl) return;
+      if (!tracks.length) {
+        boxEl.innerHTML = '<p class="setpage__note">还没有导入歌曲。点上面的文件夹卡片，或把音频拖进去开始。</p>';
+        return;
+      }
+      boxEl.innerHTML = tracks.map((t) => `
+        <div class="setpage__row local-row" data-id="${escHtml(t.id)}">
+          <span class="setpage__label-group">
+            <span class="setpage__label">${escHtml(t.name || '未命名')}</span>
+            <span class="setpage__hint">本地文件 · ${fmtMs(t.duration)} · ${t.hasYrc ? 'YRC 逐字' : t.hasLrc ? 'LRC 歌词' : '无歌词'}</span>
+          </span>
+          <button class="setpage__act" type="button" data-local-lyric="${escHtml(t.id)}">补歌词</button>
+          <button class="setpage__act" type="button" data-local-del="${escHtml(t.id)}">删除</button>
+        </div>`).join('');
+    }
+
+    function bind() {
+      ensureInputs();
+      renderStatus();            // lib 不可用时也让三行状态有 0/0 的骨架
+      const drop = dropEl();
+      if (drop && !drop.dataset.bound) {
+        drop.dataset.bound = '1';
+        const openPicker = () => {
+          if (drop.classList.contains('is-busy')) return;   // 导入中再点会叠一次选择框
+          ensureInputs();
+          if (importIn) importIn.click();
+        };
+        /* dragenter / dragleave 会从子元素一路冒泡上来，直接 toggle 会在
+           挪过文字时疯狂闪烁；用进出计数，回到 0 才收掉高亮 */
+        let dragDepth = 0;
+        const setDrag = (on) => drop.classList.toggle('is-drag', on);
+        /** 只接管「拖文件」；拖选中的文字 / 链接不抢默认行为 */
+        const hasFiles = (e) => {
+          const dt = e.dataTransfer;
+          if (!dt) return false;
+          try { return Array.prototype.indexOf.call(dt.types || [], 'Files') >= 0; }
+          catch (err) { return true; }
+        };
+
+        drop.addEventListener('click', openPicker);
+        drop.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+            e.preventDefault();
+            openPicker();
+          }
+        });
+        drop.addEventListener('dragenter', (e) => {
+          if (!hasFiles(e)) return;
+          e.preventDefault();
+          dragDepth++;
+          setDrag(true);
+        });
+        drop.addEventListener('dragover', (e) => {
+          if (!hasFiles(e)) return;
+          e.preventDefault();       // 不 preventDefault 浏览器会直接打开文件
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+          if (!dragDepth) setDrag(true);
+        });
+        drop.addEventListener('dragleave', (e) => {
+          if (dragDepth > 0) dragDepth--;
+          /* relatedTarget 已经出了卡片（或拖出窗口为 null）就强制归零，
+             防止某些浏览器漏发 dragleave 导致高亮卡住 */
+          const to = e.relatedTarget;
+          if (!to || !drop.contains(to)) dragDepth = 0;
+          if (!dragDepth) setDrag(false);
+        });
+        drop.addEventListener('drop', (e) => {
+          e.preventDefault();
+          dragDepth = 0;
+          setDrag(false);
+          const dt = e.dataTransfer;
+          if (!dt) return;
+          const files = [...(dt.files || [])];
+          if (files.length) importFiles(files);
+          else say('没有拿到文件；如果拖的是文件夹，请打开后再拖里面的文件');
+        });
+      }
+      const list = listEl();
+      if (list && !list.dataset.bound) {
+        list.dataset.bound = '1';
+        list.addEventListener('click', async (e) => {
+          const del = e.target.closest('[data-local-del]');
+          if (del) {
+            const id = del.dataset.localDel;
+            const t = tracks.find((x) => x.id === id);
+            const tip = t && t.ref
+              ? `从列表移除「${t.name || '这首歌'}」？手机里的原文件不会被删除。`
+              : `删除「${(t && t.name) || '这首歌'}」？音频文件也会一起删掉。`;
+            if (!confirm(tip)) return;
+            await (lib() || {}).remove?.(id);
+            await refresh();
+            say('已删除');
+            return;
+          }
+          const ly = e.target.closest('[data-local-lyric]');
+          if (ly) {
+            ensureInputs();
+            pendingLyricId = ly.dataset.localLyric;
+            if (oneIn) oneIn.click();
+          }
+        });
+      }
+    }
+
+    return { refresh, bind, say };
+  })();
+
+  document.addEventListener('click', (e) => {
+    const sw = e.target.closest('[data-plat-toggle]');
+    if (!sw) return;
+    const id = sw.dataset.platToggle;
+    const next = sw.getAttribute('aria-checked') !== 'true';
+    PlatVis.toggle(id, next);
+    paintPlatManage();
+    LocalUI.refresh();
+  });
+  document.addEventListener('lizi-local-change', () => LocalUI.refresh());
+  document.addEventListener('lizi:platforms', () => paintPlatManage());
+  paintPlatManage();
+  /* Hall 模块在本文件后面才求值：上面这一次只画得出标签和开关，
+     色块底色 / logo 要等模块跑完再补画一遍（2026-11-16）。 */
+  setTimeout(() => { try { paintPlatManage(); } catch { /* 还没就绪就等下次事件 */ } }, 0);
+  LocalUI.bind();
+  LocalUI.refresh();
+
   /* ---- 大厅内容轨（lizi.hall.rail）----
      默认开。'0' 才是旧交互（四张卡跳浏览页）；缺省 / '1' = 精选/喜欢/收藏/电台
      直接在跑马带里切换。切换时让大厅立刻重画，不等重进大厅。 */
@@ -3928,6 +8375,129 @@
   $('set-hall-rail').addEventListener('click', () => setHallRail(!hallRailOn()));
   paintHallRailSwitch();
 
+  /* ---- 字体来源（lizi.font.system）----
+     默认关：安卓壳把宿主 UI 的字族令牌指到本地字体（assets/fonts/lizi-fonts.css
+     的 Geist + Noto Sans SC），并把 system-ui 从链尾拿掉 —— 手机「主题商店」
+     换的是系统字体，碰不到文档里自带的 @font-face，字号 / 行距 / 描边不再跟着变。
+     开：撤掉 .lizi-font-system，回到 tokens.css 的系统字体链（主题字体生效）。
+     桌面 / 浏览器没有 __liziAndroid：不加 .is-lizi-android，视觉与改前完全一致。
+     形态页（stages/*.html）是独立 iframe，有自己的字体栈，吃不到这个开关。 */
+  const FONT_SYSTEM_KEY = 'lizi.font.system';
+  const isLiziAndroid = !!window.__liziAndroid;
+  /* 本地字体表只在安卓壳里加载：桌面版的 Google Fonts 链路 / 视觉一个字都不动。
+     @font-face 是文档自带资源，主题商店替换系统字体碰不到它，这是「关」能真的
+     拦住主题字体的前提（系统族名如 Noto Sans CJK SC 在原生 fonts.xml 里没有名字，
+     靠 CSS 指不到；详见 lizi-fonts.css 顶部的说明）。 */
+  if (isLiziAndroid && !document.getElementById('lizi-fonts-css')) {
+    const fontLink = document.createElement('link');
+    fontLink.id = 'lizi-fonts-css';
+    fontLink.rel = 'stylesheet';
+    fontLink.href = 'assets/fonts/lizi-fonts.css';
+    document.head.appendChild(fontLink);
+  }
+  function fontSystemOn() {
+    try { return localStorage.getItem(FONT_SYSTEM_KEY) === '1'; } catch { return false; }
+  }
+  function paintFontSystemSwitch() {
+    const sw = $('set-font-system');
+    if (sw && sw.setAttribute) sw.setAttribute('aria-checked', String(fontSystemOn()));
+  }
+  function applyFontSystem() {
+    const root = document.documentElement;
+    if (!root) return;
+    /* .is-lizi-android 只给安卓壳：桌面默认关时字体链不变 */
+    root.classList.toggle('is-lizi-android', isLiziAndroid);
+    /* .lizi-font-system = 「跟随系统」开；关着时 lizi-fonts.css 的强制字族生效 */
+    root.classList.toggle('lizi-font-system', fontSystemOn());
+    paintFontSystemSwitch();
+  }
+  function setFontSystem(on) {
+    on = !!on;
+    try { localStorage.setItem(FONT_SYSTEM_KEY, on ? '1' : '0'); } catch { /* 隐私模式：本次仍生效 */ }
+    /* 只切 class，不做 font-family 过渡：WebView 里长过渡会冻 */
+    applyFontSystem();
+  }
+  $('set-font-system').addEventListener('click', () => setFontSystem(!fontSystemOn()));
+  applyFontSystem();
+
+  /* ---- 形态歌词：原文 / 双文 / 译文（只影响形态 iframe，默认原文）---- */
+  function paintStageLyricMode() {
+    const box = $('set-stage-lyric');
+    if (!box || !box.querySelectorAll) return;
+    const mode = stageLyricMode();
+    box.querySelectorAll('[data-mode]').forEach((b) => {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+  $('set-stage-lyric').addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('[data-mode]') : null;
+    if (!b) return;
+    try { localStorage.setItem(STAGE_LYRIC_KEY, b.dataset.mode); } catch { /* 隐私模式：本次仍生效 */ }
+    paintStageLyricMode();
+    StageHost.refresh();      // 正在放的话立刻按新模式重发一遍歌词
+    StageSubtitle.refresh();  // 字幕只读自己的模式，但两处设置挨着，顺手重画一次
+  });
+  paintStageLyricMode();
+
+  /* ---- 形态底部电影字幕设置：开关 + 单语 / 双语（2026-11-19）----
+     显示逻辑在文件前面的 StageSubtitle；这里只负责读写 localStorage 和画控件。
+     改完立刻 refresh，正在形态页的话下一帧就能看到。 */
+  function paintStageSubtitleSettings() {
+    const sw = $('set-stage-subtitle');
+    if (sw && sw.setAttribute) sw.setAttribute('aria-checked', String(stageSubtitleOn()));
+    const box = $('set-stage-submode');
+    if (!box || !box.querySelectorAll) return;
+    const mode = stageSubtitleMode();
+    box.querySelectorAll('[data-submode]').forEach((b) => {
+      const on = b.dataset.submode === mode;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+  $('set-stage-subtitle').addEventListener('click', () => {
+    try { localStorage.setItem(STAGE_SUBTITLE_KEY, stageSubtitleOn() ? '0' : '1'); } catch { /* 隐私模式：本次仍生效 */ }
+    paintStageSubtitleSettings();
+    StageSubtitle.refresh();
+  });
+  $('set-stage-submode').addEventListener('click', (e) => {
+    const b = e.target && e.target.closest ? e.target.closest('[data-submode]') : null;
+    if (!b) return;
+    const mode = b.dataset.submode === 'trans' ? 'trans' : 'both';
+    try { localStorage.setItem(STAGE_SUBTITLE_MODE_KEY, mode); } catch { /* 隐私模式：本次仍生效 */ }
+    paintStageSubtitleSettings();
+    StageSubtitle.refresh();
+  });
+  paintStageSubtitleSettings();
+
+  /* ---- 形态页按钮大小：0.8× / 1× / 1.25× / 1.5× / 2×（2026-11-17）----
+     复用 .setpage__seg 那套三选一控件的样式和选中态（is-on + aria-checked）。
+     点一下立刻写 localStorage 并改 --stage-btn-scale，不需要刷新；形态页回来就是新尺寸。 */
+  function paintStageBtnSize() {
+    const box = $('set-stage-btnsize');
+    if (!box || !box.querySelectorAll) return;
+    const cur = stageBtnSize();
+    box.querySelectorAll('[data-scale]').forEach((b) => {
+      const on = parseFloat(b.dataset.scale) === cur;
+      b.classList.toggle('is-on', on);
+      b.setAttribute('aria-checked', String(on));
+    });
+  }
+  const stageBtnSizeBox = $('set-stage-btnsize');
+  if (stageBtnSizeBox && stageBtnSizeBox.addEventListener) {
+    stageBtnSizeBox.addEventListener('click', (e) => {
+      const b = e.target && e.target.closest ? e.target.closest('[data-scale]') : null;
+      if (!b) return;
+      const n = parseFloat(b.dataset.scale);
+      if (!STAGE_BTNSIZES.includes(n)) return;
+      try { localStorage.setItem(STAGE_BTNSIZE_KEY, String(n)); } catch { /* 隐私模式：本次仍生效 */ }
+      paintStageBtnSize();
+      applyStageBtnSize();
+    });
+  }
+  paintStageBtnSize();
+
   function openSettings() {
     show('settings');
     audioSummary();          // 「音质 · 预设」每次进来刷一次
@@ -3938,7 +8508,10 @@
     paintPlatAvatarSwitch(); // 「平台头像」同理：默认关，别的标签页改过也能对上
     paintPlatColorSwitch();  // 「用平台颜色铺色」默认关，别的标签页改过也能对上
     paintHallRailSwitch();   // 「大厅内容轨」默认开，别的标签页改过也能对上
+    paintFontSystemSwitch(); // 「跟随系统字体」默认关，别的标签页改过也能对上
+    paintStageSubtitleSettings(); // 「形态字幕」/ 单语·双语：每次进来重读一次存档
     setupSettingsConsole();  // 控制台导航 / 观察器（幂等）
+    if (window.LIZI_DIAG) window.LIZI_DIAG();   // 「关于」里的运行环境诊断行
     setActiveSection('set-sec-account', false);
     /* 「跟随平台」的色盘初值取决于**当前大厅平台**，而平台可能在设置页关着的
        时候被换掉（大厅里点方块）。重新走一遍 paintBgFx，别拿上次打开时的旧色。 */
@@ -3946,6 +8519,165 @@
     const v = el.viewSettings;
     if (v && v.scrollTo) v.scrollTo({ top: 0 });
   }
+
+  /* ==================================================================
+     离开设置页的静默软刷新（2026-11-16）
+     ------------------------------------------------------------------
+     用户要求：从设置回来时静默刷新整个程序，音乐不能断、画面不能闪。
+     为什么用「快照对比」而不是给每个控件挂脏标记：设置页的控件分散在
+     本文件各处（还有 eq-engine / player-layouts / studio 这些外部模块），
+     逐个挂钩子既容易漏，也会和并行改动打架。进页面时把设置页会写到的
+     localStorage 键拍一份快照，离开时再读一遍，值没变就什么都不做 ——
+     没过设置这一趟的退出绝不会白跑重绘。
+     登录态（cookie）和本地曲库（IndexedDB）不落 localStorage，快照看不见，
+     所以额外听两个既有事件补脏：lizi:platforms 的 authChanged、lizi-local-change。
+     所有重绘合并到一次 requestAnimationFrame：不 reload、不碰音频、
+     不切当前视图、不弹提示；调用也都是既有函数 / 既有 lizi:* 事件。
+     ================================================================== */
+  const SETTINGS_SNAPSHOT_KEYS = [
+    'lizi.platforms.v1',          // 平台可见性白名单（PlatVis）
+    'lizi.hall.platAvatar',       // 平台头像
+    'lizi.hall.platColor',        // 用平台颜色铺色
+    'lizi.hall.rail',             // 大厅内容轨
+    'lizi.font.system',           // 跟随系统字体
+    'lizi.lyric.blur',            // 歌词模糊
+    'lizi.hall.me.bg',            // 主页背景
+    'lizi.myAlbums.form',         // 我的专辑展示形态
+    'lizi.hall.marq.speed',       // 推荐跑马带速度
+    'lizi.hall.srcSize',          // 铺色态来源选择器大小
+    'lizi.hall.look',             // 铺色面板外观（含配色 / 预设）
+    'lizi.hall.bgfx',             // 大厅背景效果
+    'lizi.hall.bgfx.colors',      // 大厅背景自定义色
+    'lizi.stage.edition',         // 形态版本（发行版 / 开发者版）
+    'lizi.stage.lyricMode',       // 形态歌词原文 / 双文 / 译文
+    'lizi.stage.subtitle',        // 形态底部电影字幕开关（2026-11-19）
+    'lizi.stage.subtitleMode',    // 字幕单语 / 双语（2026-11-19）
+    'lizi.stage.btnsize',         // 形态页顶栏按钮大小（2026-11-17）
+    'lizi.picture.v1',            // 全局画质（比例 / 饱和 / 亮度 / 帧率）
+    'lizi.win.round',             // 桌面窗口圆角开关
+    'lizi.now.layout',            // 播放页版式
+    'lizi.eq.v1',                 // 音效 / 均衡器
+  ];
+  let settingsSnapshot = null;
+  let settingsEventDirty = false;   // 登录 / 退出这类不写 localStorage 的改动
+  let settingsLocalDirty = false;   // 本地曲库导入 / 删除（IndexedDB）
+
+  function readSettingsSnapshot() {
+    const out = {};
+    for (let i = 0; i < SETTINGS_SNAPSHOT_KEYS.length; i++) {
+      const k = SETTINGS_SNAPSHOT_KEYS[i];
+      try { out[k] = localStorage.getItem(k); } catch { out[k] = null; }
+    }
+    return out;
+  }
+  function snapshotSettingsState() {
+    settingsSnapshot = readSettingsSnapshot();
+    settingsEventDirty = false;
+    settingsLocalDirty = false;
+  }
+  function settingsChangedKeys() {
+    if (!settingsSnapshot) return [];
+    const now = readSettingsSnapshot();
+    return SETTINGS_SNAPSHOT_KEYS.filter((k) => now[k] !== settingsSnapshot[k]);
+  }
+  /* 只在设置页停留期间记脏；别处发生的同名事件不算这一趟设置。 */
+  document.addEventListener('lizi:platforms', (e) => {
+    if (view !== 'settings') return;
+    if (e && e.detail && e.detail.authChanged) settingsEventDirty = true;
+  });
+  document.addEventListener('lizi-local-change', () => {
+    if (view === 'settings') settingsLocalDirty = true;
+  });
+
+  function softRefreshAfterSettings() {
+    const changed = settingsChangedKeys();
+    const authDirty = settingsEventDirty;
+    const localDirty = settingsLocalDirty;
+    const dirty = changed.length > 0 || authDirty || localDirty;
+    /* 先把这一趟的快照 / 标记清掉：下面 rAF 里 dispatch 的事件还会经过本段
+       的监听器，不清就可能把「已经处理过」的改动再记一次脏。 */
+    settingsSnapshot = null;
+    settingsEventDirty = false;
+    settingsLocalDirty = false;
+    if (!dirty) return;
+
+    const has = (k) => changed.indexOf(k) >= 0;
+    /* 平台可见性 / 内容轨 / 登录态才会改变大厅平台面、图标行和铺色主题；
+       只有它们值得重画大厅。平台头像的开关在 setPlatAvatar 里已经调过
+       Hall.refreshMe()，这里不再重复，避免无关地把跑马带位置归零。
+       其它设置（跑马带速度、外观滑块等）改的时候就已经即时生效，
+       离开时只补必要的那一项，不全量重画。 */
+    const platformDirty = has(PlatVis.KEY) || has(HALL_RAIL_KEY) || authDirty;
+
+    requestAnimationFrame(() => {
+      /* 用户极快地又点回设置页：这一帧跳过；下次真正离开时会重新比快照。 */
+      if (view === 'settings') return;
+
+      /* 平台管理列表：白名单 / 登录态可能刚变，离开时按最新值重画一遍
+         （页面已隐藏，不会闪；下次进来也是对的）。 */
+      try { paintPlatManage(); } catch { /* 设置 DOM 不在也不该拦住后面的刷新 */ }
+
+      /* 平台可见性白名单 / 平台头像 / 内容轨 / 登录态：
+         复用既有事件。大厅的 refreshPlatformUI 会重画「我的」、
+         调 paintPlatBar、再走 restoreHallTheme（必要时 applyHallTheme）；
+         搜索音源页签、手机导航（m.js）也各自监听这一个事件。 */
+      if (platformDirty) {
+        try { document.dispatchEvent(new CustomEvent('lizi:platforms', { bubbles: true })); } catch { /* 老环境 */ }
+      }
+
+      /* 本地音乐：导入 / 补歌词 / 删除都发 lizi-local-change；离开时重读曲库，
+         LocalUI.refresh() 内会连带 renderStatus() 重画 #local-status。 */
+      if (localDirty) {
+        try { LocalUI.refresh(); } catch { /* IndexedDB 不可用 */ }
+      }
+
+      /* 形态版本变化：选择器 / 球面 / 抽屉三处都监听这两个既有事件。 */
+      if (has(STAGE_EDITION_KEY)) {
+        try { document.dispatchEvent(new CustomEvent('lizi:stage-edition', { detail: stageEdition })); } catch { /* 老环境 */ }
+        try { document.dispatchEvent(new CustomEvent('lizi:stages-refresh')); } catch { /* 老环境 */ }
+      }
+
+      /* 我的专辑展示形态：架子那边就地重排（用 localStorage 里的新值）。 */
+      if (has(MA_FORM_KEY)) {
+        try { document.dispatchEvent(new CustomEvent('lizi:ma-form', { detail: { form: maForm() } })); } catch { /* 老环境 */ }
+      }
+
+      /* 跑马带速度：改的时候已经即时生效，这里按存档再对齐一次，防止
+         设置页开着时大厅没挂载 / 被重置过。 */
+      if (has(MARQ_SPEED_KEY)) {
+        try { Hall.setMarqSpeed(marqSpeedStored()); } catch { /* Hall 还没初始化 */ }
+      }
+
+      /* 主页背景：按最新存档重铺「我的」卡横幅（不重拉接口）。 */
+      if (has(ME_BG_KEY)) {
+        const bg = mebgRead();
+        try {
+          document.dispatchEvent(new CustomEvent('lizi:mebg', {
+            detail: { kind: bg ? bg.kind : '', url: bg ? bg.url : '' },
+          }));
+        } catch { /* 老环境 */ }
+      }
+
+      /* 铺色来源切换：只重刷颜色，不重放铺色块展开动画。 */
+      if (has(PLAT_COLOR_KEY)) {
+        try { Hall.refreshThemeColors(); } catch { /* 大厅还没挂载 */ }
+      }
+
+      /* 铺色面板外观 / 背景效果：色盘与当前铺色主题按新参数再取一次色。 */
+      if (has(LOOK_KEY) || has('lizi.hall.bgfx') || has('lizi.hall.bgfx.colors')) {
+        try { document.dispatchEvent(new CustomEvent('lizi:bgfx-change')); } catch { /* 老环境 */ }
+        try {
+          document.dispatchEvent(new CustomEvent('lizi:palette-mode', {
+            detail: { mode: lookState.paletteMode },
+          }));
+        } catch { /* 老环境 */ }
+      }
+
+      /* 播放条（player-bar-next）当前没有加载：index.html 是 body.pbn-off，
+         整条栏都不在 DOM 里。以后若接回来，在这里补它的刷新入口即可。 */
+    });
+  }
+
   /* ---------------------------------------------------------------
      顶栏左键「一个按钮两种身份」
        大厅：齿轮 → 进设置页（设置只从大厅进）
@@ -3993,7 +8725,7 @@
 
   /* 同一时间只留一块二维码：QQ 和「其它音源」是两套独立轮询，各自不会关对方。
      这两个监听注册在模块自己的监听**之后**，所以刚点开的那块不会被自己关掉。 */
-  ['qq-login', 'kugou-login', 'qishui-login', 'bodian-login'].forEach((id) => {
+  ['qq-login', 'kugou-login', 'kugou-lite-login', 'qishui-login', 'bodian-login'].forEach((id) => {
     $(id).addEventListener('click', () => {
       if (id === 'qq-login') { try { Sources.closeQr(); } catch { /* 还没定义 */ } }
       else { try { QQ.pause(); } catch { /* 还没定义 */ } }
@@ -4042,6 +8774,33 @@
   });
   paintMaForm();
 
+  /* ---- 扫码登录失败的真实原因（2026-11-14）----
+     800 不等于「二维码过期」：手机点完确认之后，边车还要拿票据去上游换身份，那一步可能
+     被直接拒（实测最常见 20279 = auth.device-limit，账号登录设备数已满）。上游把诊断字段
+     放在 800 里，server.mjs 原样透传给前端，这里按 failureHint.key 翻成中文。
+     返回空串 = 真的只是过期，调用方照旧换码。 */
+  const QR_FAIL_TEXT = {
+    'login.device-limit': '该账号的登录设备数已达上限，请在手机 QQ 音乐里删掉一个旧设备后再扫',
+    'login.wrong-scan-app': '扫码用的 App 不对：换成手机 QQ 扫，或在登录方式里选「QQ 音乐 App」',
+    'login.rate-limited': '登录尝试太频繁了，等一会儿再扫',
+    'login.account-restricted': '该账号被限制登录，暂时登不了',
+    'login.account-banned': '该账号已被封禁，无法登录',
+    'login.account-binding': '该账号的绑定状态有问题，请到手机 QQ 音乐里检查',
+    'login.rejected': 'QQ 音乐拒绝了这次登录，请重试',
+  };
+  function qrLoginHint(d) {
+    if (!d) return '';
+    const hint = d.failureHint || null;
+    if (hint && QR_FAIL_TEXT[hint.key]) return QR_FAIL_TEXT[hint.key];
+    /* 认不出的拒绝：原文是英文，但比「过期」准确，照说；连原文都没有才退回通用句 */
+    if (hint && hint.message) return String(hint.message);
+    if (d.failureReason === 'upstream-rejected') {
+      const code = d.upstreamCode ?? (d.primaryFailure && d.primaryFailure.upstreamCode);
+      return `QQ 音乐拒绝了这次登录${code ? `（上游 ${code}）` : ''}，请重试`;
+    }
+    return '';
+  }
+
   /* ---- 大厅铺色态「每日推荐」跑马带速度 ----
      0–100 的滑杆，存 localStorage['lizi.hall.marq.speed']，默认 24（≈0.36 px/帧）。
      真正跑的是 Hall 里的 marqSpeedPx；这里只管写值 + 通知 Hall 立刻换速度
@@ -4059,21 +8818,92 @@
     return MARQ_SPEED_DEFAULT;
   }
   const marqSpeedLabel = (v) => (v < 34 ? '慢' : v < 68 ? '标准' : '快');
+  /* 0–100 → 实际滚动速度（px/帧）。设置页的读数和大厅的 rAF 共用这一份，
+     免得两边公式各写一遍、以后改一边忘一边。默认 24 ≈ 0.364 px/帧（60fps ≈ 22px/s）。 */
+  function marqSpeedPxOf(v) {
+    const n = Number(v);
+    const k = Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : MARQ_SPEED_DEFAULT;
+    return 0.10 + k * 0.011;
+  }
+  /* 右值 = 档位 + 相对默认的倍数（1.0× 就是默认）。倍数让「这是连续可调的」一眼看得出来，
+     光写慢/标准/快会被当成只有三档。 */
+  const marqSpeedText = (v) => {
+    const r = marqSpeedPxOf(v) / marqSpeedPxOf(MARQ_SPEED_DEFAULT);
+    return `${marqSpeedLabel(v)} · ${r.toFixed(1)}×`;
+  };
   function paintMarqSpeed() {
     const v = marqSpeedStored();
     const i = $('set-marq-speed');
     const t = $('set-marq-speed-val');
     if (i && i.value !== undefined) i.value = String(v);
-    if (t && t.textContent !== undefined) t.textContent = marqSpeedLabel(v);
+    if (t && t.textContent !== undefined) t.textContent = marqSpeedText(v);
   }
   $('set-marq-speed').addEventListener('input', (e) => {
     const v = Math.max(0, Math.min(100, Math.round(Number(e.target.value) || 0)));
     try { localStorage.setItem(MARQ_SPEED_KEY, String(v)); } catch { /* 只影响下次启动 */ }
     const t = $('set-marq-speed-val');
-    if (t && t.textContent !== undefined) t.textContent = marqSpeedLabel(v);
+    if (t && t.textContent !== undefined) t.textContent = marqSpeedText(v);
     Hall.setMarqSpeed(v);              // 大厅那边下一帧就按新速度走
   });
   paintMarqSpeed();
+
+  /* ---- 大厅铺色态左上角来源选择器大小 ----
+     16–40px，默认 28（原来固定 13px）。只写 :root 上的 --src-size，app.css 里
+     来源标签 / 面包屑 / 来源滚轮的倍率都吃它，回到大厅不用重画长条。
+     拖滑杆时给下面的预览条挂 is-pressed（放大 1.214 倍，和按住标题一致），
+     松手 / 取消 / 失焦就摘掉，预览回到设定值。 */
+  const SRC_SIZE_KEY = 'lizi.hall.srcSize';
+  const SRC_SIZE_DEFAULT = 28;
+  const SRC_SIZE_MIN = 16;
+  const SRC_SIZE_MAX = 40;
+  function srcSizeStored() {
+    try {
+      const raw = localStorage.getItem(SRC_SIZE_KEY);
+      /* 没存过时 getItem 是 null，Number(null) === 0 —— 不先挡住会被夹到最小值 */
+      if (raw === null || raw === '') return SRC_SIZE_DEFAULT;
+      const v = Number(raw);
+      if (Number.isFinite(v)) {
+        return Math.round(Math.max(SRC_SIZE_MIN, Math.min(SRC_SIZE_MAX, v)));
+      }
+    } catch { /* 隐私模式：用默认值 */ }
+    return SRC_SIZE_DEFAULT;
+  }
+  function applySrcSize(v) {
+    document.documentElement.style.setProperty('--src-size', String(v));
+  }
+  function paintSrcSize() {
+    const v = srcSizeStored();
+    const i = $('set-src-size');
+    const t = $('set-src-size-val');
+    if (i && i.value !== undefined) i.value = String(v);
+    if (t && t.textContent !== undefined) t.textContent = v + 'px';
+    applySrcSize(v);
+  }
+  {
+    const i = $('set-src-size');
+    const stage = $('set-src-size-stage');
+    const pressEnd = () => stage?.classList.remove('is-pressed');
+    if (i) {
+      i.addEventListener('pointerdown', () => stage?.classList.add('is-pressed'));
+      i.addEventListener('pointerup', pressEnd);
+      i.addEventListener('pointercancel', pressEnd);
+      i.addEventListener('change', pressEnd);
+      i.addEventListener('blur', pressEnd);
+      /* 指针在滑杆外松开也要收（原生 range 不一定把 pointerup 送回 input）；
+         窗口失焦收不到 pointerup，补一个 blur 兜底，避免预览一直停在放大态。 */
+      addEventListener('pointerup', pressEnd);
+      addEventListener('blur', pressEnd);
+      i.addEventListener('input', (e) => {
+        const v = Math.max(SRC_SIZE_MIN,
+          Math.min(SRC_SIZE_MAX, Math.round(Number(e.target.value) || SRC_SIZE_DEFAULT)));
+        try { localStorage.setItem(SRC_SIZE_KEY, String(v)); } catch { /* 只影响下次启动 */ }
+        const t = $('set-src-size-val');
+        if (t && t.textContent !== undefined) t.textContent = v + 'px';
+        applySrcSize(v);
+      });
+    }
+    paintSrcSize();
+  }
 
   /* ---- 铺色面板外观（lizi.hall.look）----
      设置页「外观」里的可视化层级编辑器：左边 5 层合成栈，右边选中层参数，
@@ -4632,31 +9462,15 @@
       const open = $('queue').hidden;       // 当前收起 → 这次是打开
       setDrawer(false);                     // 抽屉先收回去，别和面板叠着
       setQueuePane(open);
+      /* 竖屏的歌词面板是抽屉式的（默认收起，靠 .is-lyrics-open 拉起来），
+         #queue 就住在它里面：只把 #queue 显示出来，面板还是收着的，看起来
+         就是「点了播放队列什么也没发生」。打开队列时顺手把面板拉起来。 */
+      if (open) setLyricsOpen(true);
     });
   }
   updateQueueCount();
   /* 「音质 · 预设」那一行：启动时先填一次，之后每次进设置页由 openSettings() 刷（见上） */
   audioSummary();
-
-  /* ---- 形态渲染分辨率：iframe 缩小再放大，像素数按 s² 掉 ----
-     形态都按视口建 canvas，改不了它们内部，这是唯一通用的降负载开关。 */
-  {
-    const box = $('stage-quality');
-    const KEY = 'lizi.stageQuality';
-    const apply = (q) => {
-      const v = Math.min(1, Math.max(0.45, Number(q) || 1));
-      document.documentElement.style.setProperty('--stage-scale', String(v));
-      try { localStorage.setItem(KEY, String(v)); } catch { /* 忽略 */ }
-      box.querySelectorAll('button').forEach((b) =>
-        b.classList.toggle('is-on', Math.abs(Number(b.dataset.q) - v) < 0.01));
-    };
-    box.addEventListener('click', (e) => {
-      const b = e.target.closest('button');
-      if (b) apply(b.dataset.q);
-    });
-    /* 画质固定 100%（用户要求：默认就是原生分辨率，不再给选） */
-    apply(1);
-  }
 
   /* ---- DIY：播放页四个滑杆，值写进 :root 的自定义属性并存 localStorage ---- */
   document.querySelectorAll('.diy').forEach((box) => {
@@ -4724,6 +9538,13 @@
   let PICK_STAGES = stageMenuList(false);
   let pickedStage = new Map(PICK_STAGES.map((s) => [s.id, s]));
   document.addEventListener('lizi:stage-edition', () => {
+    PICK_STAGES = stageMenuList(false);
+    pickedStage = new Map(PICK_STAGES.map((s) => [s.id, s]));
+    if (typeof updatePickSub === 'function') updatePickSub(PICK_STAGES.length);
+    if (pickOpen) applyPickFilter();
+  });
+  /* AI 工坊存/删形态：球面也要重排（新形态排在最前几格，一进来就看得到） */
+  document.addEventListener('lizi:stages-refresh', () => {
     PICK_STAGES = stageMenuList(false);
     pickedStage = new Map(PICK_STAGES.map((s) => [s.id, s]));
     if (typeof updatePickSub === 'function') updatePickSub(PICK_STAGES.length);
@@ -5443,15 +10264,18 @@
   }
 
   function fillPreviewMeta(s) {
-    pickPreviewNum.textContent = s.id;
-    pickPreviewId.textContent = s.id;
+    pickPreviewNum.textContent = s.user ? '我的' : s.id;
+    pickPreviewId.textContent = s.user ? '我的形态' : s.id;
     pickPreviewName.textContent = s.name;
     pickPreviewDesc.textContent = s.desc;
     fillPreviewSong();
   }
 
   function mountHero(s) {
-    if (!previewing || !s || !s.url) return;
+    /* 用户自建形态（AI 工坊）也要能大预览：它没有 url，内容走 srcdoc。
+       ready 信号仍然只认 postMessage（previewSources 按 e.source 路由），
+       沙箱跨域不影响这套 —— 只有 contentDocument 读不到，这里也不读。 */
+    if (!previewing || !s || (!s.url && !s.user)) return;
     unmountHero();
     pickPreviewStage.classList.remove('is-live', 'is-failed');
     pickPreviewFail.hidden = true;
@@ -5464,7 +10288,16 @@
     heroEntry = entry;
     const win = pickPreviewFrame.contentWindow;
     if (win) previewSources.set(win, entry);
-    pickPreviewFrame.src = s.url;
+    if (s.user) {
+      const S = window.LIZI_STUDIO;
+      pickPreviewFrame.setAttribute('sandbox', 'allow-scripts');
+      pickPreviewFrame.removeAttribute('src');
+      pickPreviewFrame.srcdoc = (S && typeof S.srcdoc === 'function') ? S.srcdoc(s.html) : String(s.html || '');
+    } else {
+      pickPreviewFrame.removeAttribute('sandbox');
+      pickPreviewFrame.removeAttribute('srcdoc');
+      pickPreviewFrame.src = s.url;
+    }
     fitEntry(entry);
     entry.timeout = setTimeout(() => {
       if (!heroEntry || heroEntry !== entry || entry.ready) return;
@@ -5482,12 +10315,14 @@
     entry.ready = false;
     try { previewSources.delete(entry.iframe.contentWindow); } catch { /* 忽略 */ }
     try { entry.iframe.removeAttribute('src'); } catch { /* 忽略 */ }
+    try { entry.iframe.removeAttribute('srcdoc'); } catch { /* 忽略 */ }
+    try { entry.iframe.removeAttribute('sandbox'); } catch { /* 忽略 */ }
     pickPreviewStage.classList.remove('is-live', 'is-failed', 'is-loading');
     pickPreviewFail.hidden = true;
   }
 
   function openPreview(s) {
-    if (!pickOpen || !s || !s.url) return;
+    if (!pickOpen || !s || (!s.url && !s.user)) return;
     if (previewing && previewing.id === s.id) { enterPreviewed(); return; }
     previewing = s;
     /* 大预览盖住球面时把格子里的预览全部卸掉：省 CPU，也让 hero 独占并发 */
@@ -5644,6 +10479,10 @@
   }
 
   function applyStage(id, fromHall) {
+    /* 「我用过的」= 用户真正进入过的形态（2026-11-16）：所有换形态入口最后都走
+       这里，统一在这一处记一笔，避免每个入口各记一份、口径不一致。
+       classic（传统播放器）不是形态，不记。 */
+    stageHistoryPush(id);
     /* 记来源：形态长廊面传 true，舞台操作条的返回键据此决定回大厅还是回播放器；
        其余入口（播放器里的形态菜单 / 整页画廊）不传，保持原路回播放器。 */
     stageFromHall = !!fromHall;
@@ -5734,12 +10573,16 @@
   function paintStageMenuList() {
     stageList.innerHTML = stageMenuList(true).map((s) => `
       <button class="stage-item" data-id="${s.id}" role="option" aria-selected="false">
-        ${stageEdition === 'dev' ? `<span class="stage-item__id">${s.id === 'classic' ? '—' : s.id}</span>` : ''}
+        ${stageEdition === 'dev' ? `<span class="stage-item__id">${s.user ? '我的' : (s.id === 'classic' ? '—' : s.id)}</span>` : ''}
         <span class="stage-item__name">${s.name}</span>
       </button>`).join('');
   }
   paintStageMenuList();
   document.addEventListener('lizi:stage-edition', () => {
+    paintStageMenuList();
+    if (!stageMenu.hidden) setStageMenu(true);
+  });
+  document.addEventListener('lizi:stages-refresh', () => {
     paintStageMenuList();
     if (!stageMenu.hidden) setStageMenu(true);
   });
@@ -5854,80 +10697,34 @@
   setDrawer(false);
 
   /* ---- 播放页抽屉里的「进入形态」：点开就是下拉，直接选 ----
-     原来点一下只是进当前形态，选不了 —— 现在复用设置面板那份列表（暗场配色）。 */
+     和形态页「形态」按钮共用 createStagePicker 分类目录选择器。 */
   const drawerStageList = $('drawer-stage-list');
-  /* 抽屉里的形态列表：用户 2026-11-08 要求与形态页「形态」下拉保持同步，
-     所以这里不再画 forms-labs/previews/<id>.jpg 缩略图墙，改成同一份纯文字行
-     （classic 的 id 用 —，开发者版才显示 id），样式复用 .stage-item。
-     每项仍保留 data-id / data-name / data-search，搜索、隐藏 / 空态、
-     is-on 同步和点击委托（applyStage）全部沿用原逻辑。 */
-  let drawerStageQ = null;
-  let drawerStageItems = [];
-  function paintDrawerStageList() {
-    const drawStageItems = stageMenuList(true).map((s) => `
-      <button class="stage-item" data-id="${toolsEsc(s.id)}" data-name="${toolsEsc(s.name)}" data-search="${toolsEsc(s.name.toLowerCase())}" role="option" aria-selected="false">
-        ${stageEdition === 'dev' ? `<span class="stage-item__id">${s.id === 'classic' ? '—' : toolsEsc(s.id)}</span>` : ''}
-        <span class="stage-item__name">${toolsEsc(s.name)}</span>
-      </button>`).join('');
-    drawerStageList.innerHTML = `
-      <div class="dstages__search">
-        <svg class="ico" aria-hidden="true"><use href="#i-search"/></svg>
-        <input id="drawer-stage-q" type="search" placeholder="搜索形态" aria-label="搜索形态" autocomplete="off" spellcheck="false">
-      </div>
-      <div class="dstages__grid dstages__grid--text" role="listbox" aria-label="选择形态">${drawStageItems}</div>
-      <p class="dstages__empty" hidden>没有匹配的形态</p>`;
-    drawerStageQ = $('drawer-stage-q');
-    drawerStageItems = Array.from(drawerStageList.querySelectorAll('.stage-item'));
-    if (drawerStageQ) {
-      drawerStageQ.addEventListener('input', () => filterDrawerStages(drawerStageQ.value));
-      drawerStageQ.value = '';
-    }
-    filterDrawerStages('');
-  }
-  paintDrawerStageList();
-  document.addEventListener('lizi:stage-edition', () => {
-    paintDrawerStageList();
-    if (!drawerStageList.hidden) setDrawerStages(true);
+  const drawerPicker = createStagePicker(drawerStageList, {
+    searchId: 'drawer-stage-q',
+    onPick: (item, id) => {
+      setDrawerStages(false);
+      setDrawer(false);
+      irisSwitch(item, () => applyStage(id));
+    },
   });
-  function filterDrawerStages(q) {
-    const needle = String(q || '').trim().toLowerCase();
-    let shown = 0;
-    drawerStageItems.forEach((b) => {
-      const hit = !needle || (b.dataset.search || '').includes(needle);
-      b.hidden = !hit;
-      if (hit) shown++;
-    });
-    const grid = drawerStageList.querySelector('.dstages__grid');
-    const empty = drawerStageList.querySelector('.dstages__empty');
-    if (grid) grid.hidden = shown === 0;
-    if (empty) empty.hidden = shown > 0;
-  }
-  drawerStageQ?.addEventListener('input', () => filterDrawerStages(drawerStageQ.value));
+  drawerPicker.paint();
+  document.addEventListener('lizi:stage-edition', () => {
+    drawerPicker.paint();
+    if (!drawerStageList.hidden) drawerPicker.sync(true);
+  });
+  /* AI 工坊存/删形态：抽屉里这份列表也是 init 时画一次的，要跟着重画 */
+  document.addEventListener('lizi:stages-refresh', () => {
+    drawerPicker.paint();
+    if (!drawerStageList.hidden) drawerPicker.sync(true);
+  });
   function setDrawerStages(open) {
     drawerStageList.hidden = !open;
     $('btn-stage').setAttribute('aria-expanded', String(open));
-    if (!open) return;
-    /* 每次展开先清过滤：当前项一定在，不会被上一次的搜索词藏起来 */
-    if (drawerStageQ) drawerStageQ.value = '';
-    filterDrawerStages('');
-    const curId = StageHost.current ? StageHost.current.id : 'classic';
-    drawerStageList.querySelectorAll('.stage-item').forEach((b) => {
-      const on = b.dataset.id === curId;
-      b.classList.toggle('is-on', on);
-      b.setAttribute('aria-selected', String(on));
-    });
+    if (open) drawerPicker.sync(true);
   }
   $('btn-stage').addEventListener('click', (e) => {
     e.stopPropagation();
     setDrawerStages(drawerStageList.hidden);
-  });
-  drawerStageList.addEventListener('click', (e) => {
-    const item = e.target.closest('.stage-item');
-    if (!item) return;
-    const id = item.dataset.id;
-    setDrawerStages(false);
-    setDrawer(false);
-    irisSwitch(item, () => applyStage(id));
   });
 
   function renderPeek(lines, active) {
@@ -6060,6 +10857,10 @@
     let platExitSeq = 0;             // 退场动画的序号：期间又进来一次，旧的收尾就别再动 DOM
     let marqRaf = 0, marqX = 0, marqHalf = 0;
     let marqPaused = false, marqDrag = null, marqMoved = false;
+    /* 普通（非铺色）大厅的公开跑马带：同一个 #hall-marq 节点被挪进
+       #hall-public-slot，数据走匿名 personalized。进铺色态再挪回 #hall-plat。 */
+    let publicMarqOn = false;
+    let marqDragEnd = null;             // 拖动进行中的收尾函数（切视图 / 失焦时兜底调用）
     /* 铺色态上一次写进 #hall-plat 的卡宽（0 = 还没量过）：高度没变就不重排、不重量 */
     let platCardW = 0;
     /* ---------- 铺色态左侧页签（2026-11-08） ----------
@@ -6108,12 +10909,9 @@
        seek 期间不叠加自动滚动；结束/被取消后照常从当前位置走。 */
     let marqSeek = null;
     /* 跑马带速度：0–100 → 0.10–1.20 px/帧（设置页「外观 → 推荐跑马带速度」）。
-       默认 24 ≈ 0.36，比最初写死的 0.6 慢四成。读库/写在设置页那一段（marqSpeedStored）。 */
-    const marqSpeedOf = (v) => {
-      v = Number(v);
-      if (!Number.isFinite(v)) v = 24;
-      return 0.10 + Math.max(0, Math.min(100, v)) * 0.011;
-    };
+       默认 24 ≈ 0.36，比最初写死的 0.6 慢四成。换算公式和设置页读数共用
+       marqSpeedPxOf（函数声明，已提升），读库/写在设置页那一段（marqSpeedStored）。 */
+    const marqSpeedOf = (v) => marqSpeedPxOf(v);
     let marqSpeedPx = marqSpeedOf(marqSpeedStored());
 
     const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g,
@@ -6128,6 +10926,7 @@
       lock: $('hall-hero-lock'),
       tools: $('hall-tools'), me: $('hall-me'),
       rail: $('hall-rail'), plat: $('hall-plat'),
+      pub: $('hall-public'), pubSlot: $('hall-public-slot'),
       platBar: $('hall-plat-bar'),
       srcMenu: $('hall-src-menu'),          // 左上角「每日推荐」的悬停来源浮层
       marq: $('hall-marq'),
@@ -6457,12 +11256,26 @@
     }
     const heroLineAt = (t) => lineAt(hLyric.lines, t);
 
+    /* 试听片段的时间换算（2026-11-15）。
+       汽水的 VIP 歌只给 30 秒，而且是从**高潮**那一截开始给的：audio.currentTime
+       从片段开头算 0，歌词时间轴却是整曲的。Player.lyricAt 里已经补了这个偏移
+       （state.clipStartMs），海报这边原来漏了，所以片段在播时指着中间某一首的词。
+       只有「海报这首正是当前在播的那首」才补，别的歌没有这个偏移。 */
+    function heroLyricTime(t) {
+      const s = Player.state;
+      const cur = s.queue[s.index];
+      if (!cur || !s.clipStartMs) return t;
+      if (String(cur.id) !== String(hLyric.id)) return t;
+      if ((cur.source || 'netease') !== (hLyric.src || 'netease')) return t;
+      return t + s.clipStartMs / 1000;
+    }
+
     /** 播放头如果正停在海报这首上，就从那一句展开；否则从第 1 行起 */
     function heroActiveIndex(id, n) {
       const s = Player.state;
       const cur = s.queue[s.index];
       if (!cur || String(cur.id) !== String(id)) return 0;
-      const i = lineAt(hLyric.lines, Player.audio.currentTime || 0);
+      const i = lineAt(hLyric.lines, heroLyricTime(Player.audio.currentTime || 0));
       return i < 0 ? 0 : Math.min(n - 1, i);
     }
 
@@ -6506,7 +11319,7 @@
     /** 直接跳到当前行（seek / 换歌 / 刚悬停）：绝不从上一行一路滑过去 */
     function heroSnap() {
       cancelHeroEase();
-      const i = heroLineAt(Player.audio.currentTime || 0);
+      const i = heroLineAt(heroLyricTime(Player.audio.currentTime || 0));
       hLyric.active = i < 0 ? 0 : i;
       paintHeroLyrics();                    // 重建 5 行窗口 + 立即落位
     }
@@ -6515,7 +11328,7 @@
     function heroFollow(t) {
       const lines = hLyric.lines;
       if (!lines.length) return;
-      const idx = heroLineAt(t);
+      const idx = heroLineAt(heroLyricTime(t));
       if (idx < 0 || idx === hLyric.active) return;      // 同一句：一个节点都不动
       if (idx === hLyric.active + 1) {
         /* 下一句本来就在窗口里（±2 行）：先换高亮，再把整块往上滚一行 ——
@@ -6618,13 +11431,20 @@
           : src === 'netease'
             ? await API.lyric(t.id)
             : await API.srcLyric(t);
-        if (token !== hLyricReq) return;
+        /* 旧响应不得覆盖新歌词：序号对上还不够 —— 换歌时若没在悬停，
+           saveTrack 只是清空 hLyric、不会 ++hLyricReq，在途的旧请求仍能落回来。
+           所以再核对一次「请求的是不是现在海报上的这首」。 */
+        if (token !== hLyricReq
+            || String((last && last.id) || '') !== id
+            || ((last && last.source) || 'netease') !== src) return;
         const lines = (Player.parseLyrics(d || {}) || {}).lines || [];
         const bogus = !lines.length
           || /^(暂无歌词|纯音乐)/.test((lines[0].text || '').trim());
         hLyric = { id, src, key, lines: bogus ? [] : lines, active: 0, state: bogus ? 'none' : 'ok' };
       } catch {
-        if (token !== hLyricReq) return;
+        if (token !== hLyricReq
+            || String((last && last.id) || '') !== id
+            || ((last && last.source) || 'netease') !== src) return;
         hLyric = { id, src, key, lines: [], active: 0, state: 'none' };
       }
       if (hLyric.state === 'ok') {
@@ -6788,10 +11608,11 @@
       };
     }
 
-    /* ---------- 每日推荐（铺色态跑马带的数据） ----------
+    /* ---------- 每日推荐 / 公开推荐（跑马带的数据） ----------
        登录账号的「每日推荐」（recommend/songs：30+ 首，带推荐理由）。
        拿不到（没登录 / 边车没起）就退回匿名 personalized 那 3 条，不至于空着。
-       只存数据，渲染交给 renderMarq()——跑马带只在铺色态出现。 */
+       只存数据：铺色态交给 renderMarq()，普通大厅交给 renderPublicMarq()。
+       匿名也能走同一条数据路，所以「先不登录」的大厅不会没有跑马带。 */
     async function paintDaily() {
       let tracks = [];
       try {
@@ -6821,6 +11642,8 @@
       }
 
       dailyTracks = tracks.slice(0, 40);
+      /* 普通大厅：公开流直接复用这份匿名兜底数据 */
+      if (!platMode && publicMarqOn) { renderPublicMarq(); return; }
       /* 这份数据只服务网易云；已经下钻到别的层级也不重画（避免打断/重复请求）。
          回到每日推荐时 renderDailyMarq 会直接用这份数据。 */
       if (platMode === 'netease' && railNode().kind === 'daily') renderMarq();
@@ -6901,6 +11724,16 @@
         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3h6"/><path d="M10 3v6.5L4.9 18.2A1.9 1.9 0 0 0 6.5 21h11a1.9 1.9 0 0 0 1.6-2.8L14 9.5V3"/><path d="M7.3 14.5h9.4"/></svg>`,
       box: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7.5" width="18" height="12.5" rx="2"/><path d="M8 7.5V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1.5"/><path d="M3 12.5h18"/><path d="M10 12.5v2.5h4v-2.5"/></svg>`,
+      /* 2026-11-15 AI 工坊：扳手 + 星芒 */
+      studio: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+        stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a3.7 3.7 0 0 0 4.9 4.9l-9 9a2.4 2.4 0 0 1-3.4-3.4z"/><path d="M8.5 4.2 9.6 6.7l2.5 1.1-2.5 1.1L8.5 11.4 7.4 8.9 4.9 7.8l2.5-1.1z"/></svg>`,
+      /* 2026-11-18：歌单搬运 / 空间音频也挂进这一面 —— 铺色态工具箱面只列
+         hallEntries() 里除 box 以外的条目，只写进 TOOLBOX 的整页数组会看不到。
+         图标直接复用整页的 TOOL_ICONS，两边保持一致。
+         2026-11-21：歌单世界杯同理，整页和铺色态两边都要有。 */
+      worldcup: TOOL_ICONS.worldcup,
+      migrate: TOOL_ICONS.migrate,
+      spatial: TOOL_ICONS.spatial,
     };
 
     function hallEntries() {
@@ -6925,11 +11758,25 @@
       };
 
       return [
+        /* 2026-11-18：两个新工具放最前。铺色态左侧第 4 个键点开的「工具箱面」
+           只列这份数组（buildToolsFace / activateToolsFace），不会去读 TOOLBOX；
+           只写进 TOOLBOX 的整页数组，用户在这一面永远看不到。
+           2026-11-21：歌单世界杯也放最前。 */
+        { id: 'worldcup', name: '歌单世界杯', desc: '淘汰赛选出最爱', act: () => window.LIZI_WORLDCUP && window.LIZI_WORLDCUP.open() },
+        { id: 'migrate', name: '歌单搬运', desc: '跨平台迁移', devOnly: true, act: () => window.MIGRATE && window.MIGRATE.open() },
+        { id: 'spatial', name: '空间音频', desc: '360° 声场', act: () => window.LIZI_SPATIAL && window.LIZI_SPATIAL.open() },
         { id: 'stage', name: '形态长廊', desc: PICK_STAGES.length + ' 种', act: openStages },
         { id: 'myalbums', name: '我的专辑', desc: '收藏', need: 'view-myalbums', act: openMyAlbums },
         { id: 'lab', name: '音乐实验室', desc: '双 deck · 混音台', act: () => Lab.open('dj') },
-        { id: 'box', name: '工具箱', desc: TOOLBOX.length + ' 项', act: () => show('tools') },
-      ];
+        /* 2026-11-15：AI 自定义工坊。
+           为什么摆在这一面：铺色态左侧第 4 个键点开的就是「工具箱面」，
+           而这一面只列 hallEntries 里除 box 以外的条目 —— 之前工坊只挂在
+           TOOLBOX 数组里（那是 #view-tools 整页，从这一面已经进不去了），
+           结果用户点开工具箱只能看到三张卡。摆在同一条数组里，
+           桌面和手机都能直接点到。 */
+        { id: 'studio', name: 'AI 工坊', desc: '自己做形态', devOnly: true, act: () => window.LIZI_STUDIO && window.LIZI_STUDIO.open() },
+        { id: 'box', name: '工具箱', desc: visibleToolbox().length + ' 项', act: () => show('tools') },
+      ].filter((x) => !x.devOnly || stageEdition === 'dev');
     }
 
     /** 视图还没上 = 这张卡置灰（paintTools 用；铺色态已换成左侧竖向页签） */
@@ -6990,6 +11837,17 @@
     const ME_MIN = 150, ME_MAX = 330;   /* 封面 150 → 330，行程 180px = 卡片自己长出来的量 */
     let meCards = [];                 // [{ id, name, accent, model }]
     let meIdx = 0, meToken = 0, meLastH = -1;
+    /* 冷启动时六家边车（Node 服务）可能还没起来，状态请求会集体超时。
+       这时不能把「查不到」当成「没登录」写进缓存，否则大厅会先显示
+       「还没有登录任何平台」，而且这份错误状态还会被下次启动秒出。
+       所以带 0.8/1.6/3.2s 三次重查，查不全时不落缓存。 */
+    let meRetryLeft = 3;
+    /* 上一次真正完成（或失败）的登录态查询时间：回大厅 / 回前台时据此判断
+       要不要补查一次，避免每次视图切换都打五个接口。 */
+    let meCheckedAt = 0;
+    /* 大厅还没挂载时收到的「登录态已变」：记住模式和来源，等 mount 时直接强制重查，
+       别让初次 paintMe() 又拿 meCache 的旧值先把铺色态画错一遍。 */
+    let mePendingRefresh = null;          // { mode: 'keep'|'clear', src }
     let meScrollOn = false, meRaf = 0, mePin = 0;   // mePin = 吸底线（视口坐标），卡片底边钉在这
 
     /* ---------- 主页背景：自定义（图片 / 视频） → 网易云自己的背景 → 默认渐变 ----------
@@ -7383,6 +12241,8 @@
       kugou: 'assets/platforms/kugou-mark.svg',
       qishui: 'assets/platforms/qishui.svg',
       bodian: 'assets/platforms/bodian.svg',
+      /* 自定义音源（本地导入）：不是账号，没有登录态 */
+      local: 'assets/platforms/local.svg',
     };
     /* 酷我 / Spotify 已下线（见 SOURCES 那处注释），logo 也不再登记。 */
 
@@ -7395,10 +12255,14 @@
       qq:      { bg: '#F8C913', ink: '#1A1A1A', hint: 'rgba(26,26,26,.62)',    plus: 'rgba(26,26,26,.86)', tone: 'light' },
       /* 酷狗：底色是白（图标本身是蓝字白圆），K 保持原来的蓝，不再改 SVG */
       kugou:   { bg: '#3D8BFA', ink: '#FFFFFF', hint: 'rgba(255,255,255,.74)', plus: 'rgba(255,255,255,.92)', tone: 'dark' },
+      /* 概念版设置行也取同一个品牌色块（没有大厅方块，只给 --src-chip 用） */
+      'kugou-lite': { bg: '#3D8BFA', ink: '#FFFFFF', hint: 'rgba(255,255,255,.74)', plus: 'rgba(255,255,255,.92)', tone: 'dark' },
       qishui:  { bg: '#111111', ink: '#FFFFFF', hint: 'rgba(255,255,255,.62)', plus: 'rgba(255,255,255,.86)', tone: 'dark' },
       /* 波点：用它自己的渐变（#D4FC79 → #45E3FF），logo 里的渐变底会融进去，白色 b 浮出来 */
       /* 波点：新图标自带 #04E3B4 圆角绿底，方块就用同一个绿，logo 会「融」进去 */
       bodian:  { bg: '#04E3B4', ink: '#062A24', hint: 'rgba(6,42,36,.62)', plus: 'rgba(6,42,36,.86)', tone: 'light' },
+      /* 自定义音源：中性石墨色，不抢平台的品牌色 */
+      local:   { bg: '#3A3A3E', ink: '#FFFFFF', hint: 'rgba(255,255,255,.7)', plus: 'rgba(255,255,255,.9)', tone: 'dark' },
       spotify: { bg: '#1ED75F', ink: '#0D0D0D', hint: 'rgba(13,13,13,.60)',    plus: 'rgba(13,13,13,.86)', tone: 'light' },
       /* 酷我：底色用图标自带的黄 #F4D329，K 的橙色留给粒子 */
       kuwo:    { bg: '#F4D329', ink: '#1A1A1A', hint: 'rgba(26,26,26,.62)', plus: 'rgba(26,26,26,.86)', tone: 'light' },
@@ -7414,6 +12278,7 @@
       kugou:   ['#05132A', '#0F3160', '#1F57A6', '#3D8BFA', '#AED6FF'],
       qishui:  ['#050506', '#17171A', '#303036', '#57575F', '#A7A7B2'],
       bodian:  ['#02211B', '#045545', '#039E82', '#04E3B4', '#D6FFF7'],
+      local:   ['#0B0B0D', '#1B1B1F', '#2C2C32', '#45454D', '#B9B9C4'],
       spotify: ['#031F0E', '#084220', '#0F7F37', '#1ED75F', '#C9FFD9'],
       kuwo:    ['#2B2403', '#5C4D05', '#A38A07', '#F4D329', '#FFF6B8'],
     };
@@ -7628,6 +12493,12 @@
     let cardQrKey = '';
     let cardQrExpired = 0;
     let cardQrBusy = false;
+    /* QQ 二维码约 120s 有效：和设置页同一条逻辑，到期前主动换码（见 renewQr 注释） */
+    let cardQrAt = 0;
+    let cardQrLastCode = 0;
+    let cardQrRenewTimer = 0;
+    let cardQrRenewing = false;
+    let cardQrResumeHold = false;  // 刚从后台回来：先保留手里截图那张，接近有效期再换
 
     /** 只画背面的二维码小块。o = { src, logo, ph, msg, kind } */
     function cardQrPaint(cell, o) {
@@ -7655,9 +12526,14 @@
     function cardQrStop() {
       cardQrSeq++;
       if (cardQrTimer) { clearInterval(cardQrTimer); cardQrTimer = 0; }
+      clearTimeout(cardQrRenewTimer);
+      cardQrRenewTimer = 0;
+      cardQrRenewing = false;
+      cardQrResumeHold = false;
       cardQrBusy = false;
       cardQrExpired = 0;
       cardQrKey = '';
+      cardQrLastCode = 0;
     }
 
     function cardQrClose() {
@@ -7701,11 +12577,86 @@
       }, 700);
     }
 
+    function scheduleCardQrRenew(seq) {
+      clearTimeout(cardQrRenewTimer);
+      cardQrRenewTimer = 0;
+      if (document.hidden || !cardQrTimer || cardQrId !== 'qq') return;   // 切去扫码时不动码
+      /* 回前台后的第一张码不按 105s 提前换：留到接近 120s，给手里截图留时间 */
+      const target = cardQrResumeHold ? 118 * 1000 : 105 * 1000;
+      const left = target - (Date.now() - cardQrAt);
+      cardQrRenewTimer = setTimeout(() => cardQrRenew(seq, 'auto'), Math.max(1000, left));
+    }
+
+    /* 只给 QQ 用：另外几家的二维码有效期/刷新方式不一样，不能套同一套。
+       旧码还在 waiting 时边车会直接抢占、不记失败；802（已扫码等确认）时绝不换。
+       和设置页同一条规则：document.hidden 时绝不主动换码；回前台时按
+       cardQrAt 判断截图那张是否已过 120s，未过就保留原码只轮询。 */
+    async function cardQrRenew(seq, why) {
+      cardQrRenewTimer = 0;
+      if (document.hidden) return;
+      if (seq !== cardQrSeq || cardQrId !== 'qq' || !cardQrKey || !cardQrTimer) return;
+      if (cardQrRenewing || cardQrLastCode === 802 || cardQrLastCode === 803) return;
+      /* 这一拍正好在轮询：等它回来再换，别两边同时动 cardQrKey */
+      if (cardQrBusy) {
+        cardQrRenewTimer = setTimeout(() => cardQrRenew(seq, why), 2000);
+        return;
+      }
+      cardQrRenewing = true;
+      try {
+        const d = await API.qqQrKey();
+        if (seq !== cardQrSeq || !cardQrTimer) return;
+        if (cardQrLastCode === 802) return;   // 等图期间手机扫了旧码：别抢
+        if (!d || !d.key || !d.qrimg) {
+          const wait = d && d.retryAfterMs ? d.retryAfterMs + 500 : 15000;
+          if (!document.hidden) cardQrRenewTimer = setTimeout(() => cardQrRenew(seq, why), wait);
+          return;
+        }
+        cardQrKey = d.key;
+        cardQrAt = Date.now();
+        cardQrLastCode = 0;
+        cardQrExpired = 0;
+        cardQrResumeHold = false;
+        cardQrPaint(cardQrEl, {
+          src: d.qrimg,
+          msg: why === 'resume' ? '已换新码，请重新截图扫码' : '二维码已自动刷新，请继续扫码',
+        });
+        scheduleCardQrRenew(seq);
+      } catch {
+        if (!document.hidden && seq === cardQrSeq && cardQrTimer) {
+          cardQrRenewTimer = setTimeout(() => cardQrRenew(seq, why), 15000);
+        }
+      } finally { cardQrRenewing = false; }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        clearTimeout(cardQrRenewTimer);
+        cardQrRenewTimer = 0;
+        return;
+      }
+      if (cardQrId !== 'qq' || !cardQrKey || !cardQrTimer) return;
+      const seq = cardQrSeq;
+      if (Date.now() - cardQrAt < 120 * 1000) {
+        cardQrResumeHold = true;   // 还不到有效期：原码不动，等接近 120s 再换
+        cardQrPoll('qq', seq);
+        scheduleCardQrRenew(seq);
+        return;
+      }
+      if (cardQrLastCode === 802 || cardQrLastCode === 803) { cardQrPoll('qq', seq); return; }
+      cardQrResumeHold = false;
+      cardQrRenew(seq, 'resume');
+    });
+
     async function cardQrStart(id) {
       const seq = ++cardQrSeq;
       const cell = cardQrEl;
       cardQrExpired = 0;
       cardQrKey = '';
+      cardQrLastCode = 0;
+      cardQrAt = 0;
+      cardQrResumeHold = false;
+      clearTimeout(cardQrRenewTimer);
+      cardQrRenewTimer = 0;
       cardQrSrc = '';
       cardQrBusy = false;
       cardQrPaint(cell, { ph: '⋯', msg: '正在获取二维码…' });
@@ -7731,8 +12682,10 @@
           if (seq !== cardQrSeq) return;
           if (!d || !d.key || !d.qrimg) {
             const wait = d && d.retryAfterMs ? Math.max(1, Math.ceil(d.retryAfterMs / 1000)) : 0;
-            throw new Error((d && (d.error || d.message))
+            const err = new Error((d && (d.error || d.message))
               || (wait ? `上游冷却中，${wait} 秒后再点一次` : '拿不到二维码'));
+            err.retryAfterMs = Number(d && d.retryAfterMs) || 0;
+            throw err;
           }
           cardQrKey = d.key;
           src = d.qrimg;
@@ -7749,31 +12702,55 @@
       } catch (e) {
         if (seq !== cardQrSeq) return;
         cardQrPaint(cell, { ph: '×', msg: String((e && e.message) || e), kind: 'err' });
+        /* QQ 撞上 15s 冷却时自己等过去再取一次，不用用户再点一下卡片 */
+        if (id === 'qq' && e && e.retryAfterMs) {
+          setTimeout(() => { if (seq === cardQrSeq) cardQrStart(id); }, e.retryAfterMs + 500);
+        }
         return;
       }
 
       if (seq !== cardQrSeq) return;
-      cardQrPaint(cell, { src, msg: `用 ${QR_LABEL[id] || id} App 扫码` });
+      cardQrPaint(cell, { src, msg: id === 'qishui' ? '用抖音 App 扫码' : `用 ${QR_LABEL[id] || id} App 扫码` });
+      cardQrAt = Date.now();
       cardQrTimer = setInterval(() => cardQrPoll(id, seq), 2200);
+      if (id === 'qq') scheduleCardQrRenew(seq);
     }
 
     async function cardQrPoll(id, seq) {
       if (seq !== cardQrSeq || cardQrBusy || !cardQrKey) return;
+      /* QQ：切到平台 App 扫码时不要轮询，免得后台回 800 自动换码、把截图那张作废 */
+      if (id === 'qq' && document.hidden) return;
+      const pollKey = cardQrKey;
       cardQrBusy = true;
       let d = null;
       try {
-        d = id === 'netease' ? await API.qrCheck(cardQrKey)
-          : id === 'qq' ? await API.qqQrCheck(cardQrKey)
-            : await API.srcQrCheck(id, cardQrKey);
+        d = id === 'netease' ? await API.qrCheck(pollKey)
+          : id === 'qq' ? await API.qqQrCheck(pollKey)
+            : await API.srcQrCheck(id, pollKey);
       } catch { cardQrBusy = false; return; }     // 网络抖一下，下一轮再试
       cardQrBusy = false;
-      if (seq !== cardQrSeq) return;
+      if (seq !== cardQrSeq || pollKey !== cardQrKey) return;   // 期间换过码：旧响应作废
 
       const cell = cardQrEl;
       const code = Number(d && d.code);
+      cardQrLastCode = code;
       if (code === 803) { cardQrSuccess(id, seq, d); return; }
 
       if (code === 800) {
+        /* 上游明确拒绝（设备数超限、风控、账号受限…）：把原因说出来并且**停手**。
+           不换码 —— 换一张新码还是会被同一张名单拒，用户只会看到二维码自己闪一下。 */
+        const why = qrLoginHint(d);
+        if (why) {
+          if (cardQrTimer) { clearInterval(cardQrTimer); cardQrTimer = 0; }
+          clearTimeout(cardQrRenewTimer);
+          cardQrRenewTimer = 0;
+          cardQrPaint(cell, { ph: '×', msg: why, kind: 'err' });
+          return;
+        }
+        /* 主动换码时旧 key 已被边车抢占：这一拍 800 是预期内的，别把轮询停掉 */
+        if (cardQrRenewing) return;
+        /* 已经切走：后台不要换码，回前台再按有效期处理 */
+        if (id === 'qq' && document.hidden) return;
         if (++cardQrExpired > 3) {
           if (cardQrTimer) { clearInterval(cardQrTimer); cardQrTimer = 0; }
           cardQrPaint(cell, { ph: '×', msg: '二维码反复过期，点一下卡片重试', kind: 'err' });
@@ -7781,22 +12758,28 @@
         }
         cardQrPaint(cell, { src: cardQrSrc, msg: '二维码过期，换一张…', kind: 'err' });
         if (cardQrTimer) { clearInterval(cardQrTimer); cardQrTimer = 0; }
+        clearTimeout(cardQrRenewTimer);
+        cardQrRenewTimer = 0;
         setTimeout(() => { if (seq === cardQrSeq) cardQrStart(id); }, 600);
         return;
       }
 
       if (code === 802) {
+        clearTimeout(cardQrRenewTimer);
+        cardQrRenewTimer = 0;
         cardQrPaint(cell, { src: cardQrSrc, msg: '已扫码，请在手机上确认', kind: 'ok' });
         return;
       }
       if (code === 801) {
         cardQrExpired = 0;
-        cardQrPaint(cell, { src: cardQrSrc, msg: `用 ${QR_LABEL[id] || id} App 扫码` });
+        cardQrPaint(cell, { src: cardQrSrc, msg: id === 'qishui' ? '用抖音 App 扫码' : `用 ${QR_LABEL[id] || id} App 扫码` });
         return;
       }
 
       /* 其它（500 / 风控 / 空响应）如实说，别装还在等确认 */
       if (cardQrTimer) { clearInterval(cardQrTimer); cardQrTimer = 0; }
+      clearTimeout(cardQrRenewTimer);
+      cardQrRenewTimer = 0;
       cardQrPaint(cell, {
         src: cardQrSrc, kind: 'err',
         msg: (d && (d.error || d.message)) || `登录接口返回 ${code || '空响应'}，点一下卡片重试`,
@@ -7805,6 +12788,8 @@
 
     async function cardQrSuccess(id, seq, d) {
       if (cardQrTimer) { clearInterval(cardQrTimer); cardQrTimer = 0; }
+      clearTimeout(cardQrRenewTimer);
+      cardQrRenewTimer = 0;
       const cell = cardQrEl;
       cardQrPaint(cell, {
         src: cardQrSrc, kind: 'ok',
@@ -7830,6 +12815,17 @@
         if (seq !== cardQrSeq) return;
         /* 顶栏 / 设置页 / 大厅个人卡一起换成登录态 */
         try { await afterLogin(); } catch { /* 登录态已经到手，资料刷不出来不该挡着 */ }
+      }
+
+      if (id !== 'netease') {
+        /* 非网易云的卡片扫码原来只在这里 paintMe(true)，没有走统一的
+           notifyAuthChanged：设置页那一行（QQ / 酷狗 / 汽水 / 波点）会一直
+           停在「未连接」，大厅「我的」也要等重启重查才更新。补同一条收尾。 */
+        try {
+          if (id === 'qq') QQ.refresh();
+          else Sources.refresh(id);
+        } catch { /* 模块还没初始化 */ }
+        notifyAuthChanged('login', id);
       }
 
       if (seq !== cardQrSeq) return;
@@ -7874,26 +12870,16 @@
     }
 
     /* ================== 平台筛选（lizi.platforms.v1） ==================
-       开场多选 / 设置「平台管理」写入数组；没存过 = 全部 7 个（老用户不丢卡片）。
-       只影响「我的」方块和铺色态顶部平台条，不碰登录、播放、音频。 */
-    const PLATS_KEY = 'lizi.platforms.v1';
-
-    function platIdsSelected() {
-      try {
-        const raw = localStorage.getItem(PLATS_KEY);
-        if (!raw) return null;
-        const arr = JSON.parse(raw);
-        if (!Array.isArray(arr)) return null;
-        const ids = [...new Set(arr)].filter((id) => !!PLAT_LOGO[id]);
-        return ids.length ? ids : null;
-      } catch { return null; }
-    }
+       设置页「平台管理」写入数组；没存过 = 五家全开、自定义音源关。
+       只影响展示（「我的」卡 / 铺色态顶部平台条 / 手机导航 / 搜索页签），
+       不碰登录、播放、音频。已登录平台也听用户的：显式隐藏优先。 */
+    const platIdsSelected = () => PlatVis.get();
 
     /* 极端兜底：账号列表还没到、或当前 rows 里一个都匹配不上时，不能让大厅
-       变成空网格。这里用平台 logo 表补出 7 个未登录行。 */
+       变成空网格。这里用平台 logo 表补出未登录行。 */
     function platFallbackRows() {
       const acc = Array.isArray(window.LIZI_ACCOUNTS) ? window.LIZI_ACCOUNTS : [];
-      return Object.keys(PLAT_LOGO).map((id) => {
+      return PlatVis.ALL.map((id) => {
         const a = acc.find((x) => x && x.id === id);
         return {
           id,
@@ -7908,11 +12894,26 @@
       const list = Array.isArray(rows) ? rows : [];
       if (!list.length) return list;
       const ids = platIdsSelected();
-      if (!ids) return list;
-      const vis = list.filter((r) => ids.includes(r.id));
-      /* 保存的 id 和当前账号行完全不匹配（账号还没加载/平台改名）：回退全部，
-         绝不把「我的」渲染成空网格。 */
-      return vis.length ? vis : list;
+      /* 纯白名单：关掉的平台（含已登录的）一律不画。
+         空数组 = 用户把全部平台都关了，返回空，由大厅的空态兜底接手。 */
+      return list.filter((r) => r && ids.has(r.id));
+    }
+
+    /** 把「自定义音源」当成一条无登录态的展示行插进平台列表。
+        它不是账号，不参与 LIZI_ACCOUNTS / 登录查询；只在平台管理开关打开时
+        出现在长条和铺色态里，点击由 applyHallTheme('local') 进入本地曲库。 */
+    function withLocalRow(rows) {
+      const list = Array.isArray(rows) ? rows.slice() : [];
+      if (PlatVis.has(PlatVis.LOCAL) && !list.some((r) => r && r.id === PlatVis.LOCAL)) {
+        list.push({
+          id: PlatVis.LOCAL,
+          name: '本地音乐',
+          accent: '#3A3A3E',
+          loggedIn: false,
+          isLocal: true,
+        });
+      }
+      return list;
     }
 
     /* 2026-11-08：大厅不再展示这排平台大色块（登录后直接进铺色态），
@@ -7942,15 +12943,45 @@
       </div>`;
     }
 
+    /* 用户在「平台管理」里把五家平台全关了：不能显示「还没有登录任何平台」
+       （明明登录了，只是被隐藏），给一条回设置的路。 */
+    function hallHiddenHtml() {
+      return `<div class="hall-cta">
+        <div class="hall-cta__text">
+          <b>所有平台都隐藏了</b>
+          <span>去「设置 → 平台管理」把要用的平台打开；也可以在那里导入本地音乐。</span>
+        </div>
+        <button class="hall-cta__btn" type="button" data-hall-plat-manage>去平台管理</button>
+      </div>`;
+    }
+
+    /* 铺色态是不是真的铺开了：类名 + 面板有尺寸都成立才算。
+       收起态（is-plat-folded）算「铺开」—— 那是用户自己收的，面板零高是正常的。 */
+    function platModeShowing() {
+      if (!platMode) return false;
+      if (!H.rail || !H.rail.classList.contains('is-plat')) return false;
+      const hallEl = document.getElementById('view-hall');
+      if (hallEl && hallEl.classList.contains('is-plat-folded')) return true;
+      return !!(H.plat && !H.plat.hidden && H.plat.offsetWidth > 0);
+    }
+
     /** 「我的」：只画已登录的平台；一个都没有就给引导，绝不画一排未登录方块。 */
     function meHallHtml(rows, checking) {
       const list = Array.isArray(rows) ? rows : [];
       const vis = platRowsVisible(list);
-      const shown = (vis.length ? vis : list).filter((r) => r && r.loggedIn);
+      /* 有账号行、但白名单一个都没留下：用户显式隐藏了全部平台 */
+      if (list.length && !vis.length) return hallHiddenHtml();
+      const shown = vis.filter((r) => r && r.loggedIn);
       if (!shown.length) return hallLoginHtml(checking);
       /* 2026-11-08：有已登录平台就直接进铺色态，普通态不再画平台大色块。
-         旧网格（meGridHtml）留着但厅内不再调用。 */
-      return '';
+         旧网格（meGridHtml）留着但厅内不再调用。
+         2026-11-14：只有铺色态**确实显示着**才交白卷。以前无条件返回 ''，一旦随后
+         applyHallTheme 没把面板铺开（尺寸/账号数据抖动时偶发），大厅就停在
+         「中间整块空白 + 平台图标堆到左上角」的半切状态，而 .hall-cell--me 又被
+         syncHallMeCell 隐掉，谁都没有内容可画。兜底用引导：铺色态下
+         .hall-rail.is-plat > .hall-cell 本来是 display:none，正常用户看不到它。 */
+      if (platModeShowing()) return '';
+      return hallLoginHtml(checking);
     }
 
     /* 「我的」容器跟着内容显隐：登录后内容为空时别在普通态留一条空内边距/分割线。 */
@@ -7968,6 +12999,21 @@
       /* 等 show() 的类切换落定再滚；openSettings 自己会把滚动位置归零 */
       requestAnimationFrame(() => scrollToSection('set-sec-account'));
     }
+
+    /** 平台管理入口（大厅空态 / 自定义音源页的「导入」都走这里） */
+    function openPlatManageSettings() {
+      srcCloseMenu();
+      openSettings();
+      requestAnimationFrame(() => scrollToSection('set-sec-platform'));
+    }
+    document.addEventListener('lizi:open-platform-manage', openPlatManageSettings);
+
+    /** 本地音乐页入口（手机导航「本地」/ 桌面平台图标条都走这里）：压栈，返回键回大厅 */
+    function openLocalMusicPage() {
+      srcCloseMenu();
+      Pages.openLocal();
+    }
+    document.addEventListener('lizi:open-local', openLocalMusicPage);
 
     /** 把 6 个平台摊成 rows；没缓存就全是「未登录」态 */
     function meGridRows(accounts, cachedRows) {
@@ -8022,6 +13068,9 @@
       const cross = paletteCrossOn();
       const base = cross ? crossBase(bg, id) : bg;
       H.plat.style.setProperty('--plat-bg', base.bg);
+      /* 同一份底色写到轨道上：拖跑马带时 #hall-plat 的合成表面万一被丢掉，
+         轨道本身仍是一块平台色（见 app.css 的 .hall-rail.is-plat 兜底）。 */
+      H.rail.style.setProperty('--plat-bg', base.bg);
       H.plat.style.setProperty('--plat-ink', base.ink);
       H.plat.style.setProperty('--plat-hint', base.hint);
       H.plat.style.setProperty('--plat-plus', base.plus);
@@ -8040,6 +13089,7 @@
       const ink = shown.inkFixed ? shown.ink
         : (shown.field === 'light' && typeof shown.fieldLum === 'number' && shown.fieldLum < 0.62) ? '#F7F7FA' : shown.ink;
       H.plat.style.setProperty('--plat-bg', bg);
+      H.rail.style.setProperty('--plat-bg', bg);   // 轨道同色兜底，见 paintThemeBase
       H.plat.style.setProperty('--plat-ink', ink);
       /* 面板玻璃、来源滚轮等都从 ink 派生；这里给两档透明度的同色 */
       H.plat.style.setProperty('--plat-hint', `color-mix(in oklab, ${ink} 74%, transparent)`);
@@ -8184,6 +13234,44 @@
       }).catch(() => { /* cancel 会拒绝 finished，忽略 */ });
     }
 
+    /* 退场 / 进出动画只在内联样式里留这些属性；--plat-* / --marq-* 不在此列。
+       2026-11-13：以前每次切台都整串 cssText 清空再重设，清掉 80 张卡片整棵子树
+       依赖的自定义属性、再设回去 —— 连点平台 dock 时一次点击就能掀起两次全子树
+       样式重算（实测 24 次连点有 589 次 RecalcStyle、1.26s 样式时间）。只清真正
+       属于退场动画的几个属性，保留尺寸/配色变量，让 fitPlatScale 能正常早退。 */
+    const PLAT_TRANSIENT_PROPS = ['position', 'left', 'top', 'width', 'height',
+      'margin', 'z-index', 'pointer-events', 'transition', 'clip-path', 'opacity'];
+    function clearPlatTransientStyle() {
+      const s = H.plat && H.plat.style;
+      if (!s) return;
+      for (const k of PLAT_TRANSIENT_PROPS) s.removeProperty(k);
+    }
+
+    /* 连点平台 dock：300ms 内又换台算「快速连点」。第一次照常立刻重画，
+       之后的连点只做轻量反馈（高亮 + 平台色），把跑马带 / 取色 / 资讯轨重排
+       合并成停手后的一次。实测 24 次连点 25 个 longtask（最长 127ms）→ 1 个。 */
+    let platSwitchAt = 0, platCommitT = 0, platCommitSeq = 0;
+
+    /* 2026-11-13：已登录平台点击保护（桌面/手机共用）。
+       背景：铺色态顶部 dock 上的平台图标，点「当前平台」原本会 applyHallTheme('')。
+       但登录后「我的」里不再画平台方块（meHallHtml 返回空），退场动画找不到收缩目标，
+       就跳过收缩直接 hidden；普通态又只剩海报，.hall-rail 空着露出 #view-hall 的
+       白底 —— 单击已登录的当前平台图标，下方立刻全白。
+       用户要求：已登录平台不再触发重新登录/重拉/重进铺色态。因此：
+         · 当前平台（已经铺开、已经登录）的点击直接无副作用，不再退出铺色；
+         · 同一平台 600ms 内的第二次点击一律吞掉，防止「切过去再点一下」被当成退出。
+       注意按平台 id 记时间戳：快速切不同平台仍然放行，只拦同一张卡。 */
+    const PLAT_CLICK_GAP = 600;
+    const platClickAt = new Map();
+    function platClickAllowed(pid) {
+      if (!pid) return false;
+      const now = performance.now();
+      const last = platClickAt.get(pid) || 0;
+      if (now - last < PLAT_CLICK_GAP) return false;
+      platClickAt.set(pid, now);
+      return true;
+    }
+
     /** 传 id 进入铺色态，传 '' / null 退出。
         fromEl 给了就做「方块长成整块」的 clip-path 展开动画（恢复时没有起点，直接出现）。 */
     function applyHallTheme(id, fromEl) {
@@ -8194,6 +13282,8 @@
         /* 退场也做动效：整块沿 clip-path 收回那张平台方块里，底下普通态同时露出来。
            量目标方块得先把 is-plat 摘掉（普通态才会把工具箱/我的放回布局）。
            期间又点进来就靠 platExitSeq 作废旧动画，别把新块藏掉。 */
+        /* 连点换台后立刻退出：撤掉还没落地的合并重画，别在普通大厅里补画。 */
+        clearTimeout(platCommitT); platCommitT = 0; platCommitSeq++;
         const leaving = platMode;
         const seq = ++platExitSeq;
         const live = !!leaving && !H.plat.hidden && H.plat.offsetWidth > 0;
@@ -8208,6 +13298,10 @@
           }
         }
         const shrink = !!(r1 && tile);
+        /* 收缩动画期间撤掉 22px 模糊 / 活动面 filter：流色已暂停，模糊没内容可看，
+           却是最容易在低端 GPU 上丢合成表面的那层（与拖拽期的处理同一个理由）。 */
+        if (live) H.plat.classList.add('is-plat-leaving');
+        else H.plat.classList.remove('is-plat-leaving');
 
         platMode = '';
         themeSeq++;                   // 作废还没回来的封面取色
@@ -8235,6 +13329,9 @@
         platFolded = false;
         resetHeroFold();             // 手机的海报折叠同理：退出铺色就恢复完整分屏
         try { localStorage.removeItem(HALL_THEME_KEY); } catch {}
+        /* 退回普通大厅：把同一个跑马带节点挪进公开区，喂匿名数据。
+           铺色面板还在做收缩动画时它就已经在下面接上了。 */
+        mountPublicMarq();
 
         if (shrink) {
           const rail = H.rail.getBoundingClientRect();
@@ -8262,24 +13359,36 @@
           setTimeout(() => {
             if (seq !== platExitSeq) return;
             H.plat.hidden = true;
-            H.plat.style.cssText = '';
+            H.plat.classList.remove('is-plat-leaving');
+            clearPlatTransientStyle();
           }, 450);
           return;
         }
 
         H.plat.hidden = true;
-        H.plat.style.cssText = '';
+        H.plat.classList.remove('is-plat-leaving');
+        clearPlatTransientStyle();
         return;
       }
 
       platExitSeq++;                     // 退场没走完又点回来：作废旧收尾
-      H.plat.style.cssText = '';         // 清掉退场留在块上的浮层样式（含 --plat-*），再按新台重设
-      platCardW = 0;                     // 上面把 --marq-card-w 也清了：下次进入必须重新算
+      /* 退场没走完又点回来：撤掉 leaving 的减负状态，模糊/滤镜立刻恢复。 */
+      H.plat.classList.remove('is-plat-leaving');
+      /* 只清退场那一层的内联样式；--plat-* / --marq-* 保留，面板尺寸没变时
+         fitPlatScale 才能早退（连点换台不再整棵子树重算两遍样式）。 */
+      clearPlatTransientStyle();
       const wasOn = platMode === id && !H.plat.hidden;
       const bg = platBg(id);
       const r0 = fromEl && fromEl.getBoundingClientRect ? fromEl.getBoundingClientRect() : null;
 
       const prevPlat = platMode;
+      /* 连点判据只看「上一次切台到这一次」的间隔；同台刷新（prevPlat === id）不算连点。 */
+      const now = performance.now();
+      const rapid = !!prevPlat && prevPlat !== id && now - platSwitchAt < 300;
+      platSwitchAt = now;
+      /* 每次换台都作废上一条还没落地的合并重画（包括 300ms 后恢复正常节奏的情况）。 */
+      clearTimeout(platCommitT); platCommitT = 0;
+      const commitToken = ++platCommitSeq;
       platMode = id;
       platOptOut = false;                // 进铺色 = 清掉上次「主动退出」的静默
       /* 真的换台才收来源浮层：同台账号刷新重画长条时别把它关掉 */
@@ -8291,6 +13400,8 @@
         marqSeq++;
         railReset();
       }
+      /* 进铺色态：先把跑马带从公开区挪回面板，再按平台数据重画 */
+      unmountPublicMarq();
       H.plat.hidden = false;
       H.rail.classList.add('is-plat');
       el.viewHall.classList.add('is-plat-mode');
@@ -8310,24 +13421,43 @@
       if (mobileHeroFoldOn()) syncFoldBtn();
 
       paintPlatBar();
-      fitPlatScale();                    // 面板已铺开：先按可用高度定卡宽，renderMarq 直接用它
-      renderMarq();
-      /* 三层优先级：自定义色 > 「用平台颜色铺色」> 专辑封面。 */
-      beginHallPalette(id, bg);
-      /* 铺色态里换台：旧台底色向右收走、新色从左露出来；进入/退出/减弱动效不扫。 */
-      if (prevPlat && prevPlat !== id && !reduceMotion) sweepPlatColor(prevPlat);
+      if (rapid) {
+        /* 连点换台：只更新图标高亮 + 平台底色，旧跑马带先停住不动。
+           跑马带重画 / 封面色 / 资讯轨重排合并成停手后的一次（200ms）。 */
+        marqStop();
+        paintThemeBase(id, bg);
+        platCommitT = setTimeout(() => {
+          platCommitT = 0;
+          if (commitToken !== platCommitSeq || platMode !== id) return;
+          fitPlatScale();
+          renderMarq();
+          beginHallPalette(id, bg);
+          document.dispatchEvent(new CustomEvent('lizi:bgfx-change'));
+          if (!platFolded) marqStart();
+          applySideTab(sideTab, false);
+        }, 200);
+      } else {
+        fitPlatScale();                  // 面板已铺开：先按可用高度定卡宽，renderMarq 直接用它
+        renderMarq();
+        /* 三层优先级：自定义色 > 「用平台颜色铺色」> 专辑封面。 */
+        beginHallPalette(id, bg);
+      }
+      /* 铺色态里换台：旧台底色向右收走、新色从左露出来；进入/退出/减弱动效不扫。
+         连点时扫色/展开动画一律不做（下一点马上会接管，做了也看不见）。 */
+      if (prevPlat && prevPlat !== id && !reduceMotion && !rapid) sweepPlatColor(prevPlat);
       if (H.platFx) {
         /* 调色板已由 beginHallPalette 设好；这里只负责把 leave() 暂停的流色续上 */
         if (document.body.dataset.view === 'hall') {
           try { H.platFx.setPaused(false); } catch { /* noop */ }
         }
       }
-      /* 平台换了 = 「跟随平台」的色盘两端也换了：让设置页（若已初始化）自己重画 */
-      document.dispatchEvent(new CustomEvent('lizi:bgfx-change'));
+      /* 平台换了 = 「跟随平台」的色盘两端也换了：让设置页（若已初始化）自己重画。
+         连点时等合并重画那一步再发，别每点一次都通知一遍。 */
+      if (!rapid) document.dispatchEvent(new CustomEvent('lizi:bgfx-change'));
 
       /* 从方块（或长条里的小图标）长成整块：测量必须在隐藏普通方块之前做，
          这里 r0 已经量好了；r1 是切换后的目标块。 */
-      if (r0 && r0.width > 4 && !reduceMotion) {
+      if (r0 && r0.width > 4 && !reduceMotion && !rapid) {
         const r1 = H.plat.getBoundingClientRect();
         if (r1.width > 10 && r1.height > 10) {
           const t = Math.max(0, r0.top - r1.top);
@@ -8351,10 +13481,12 @@
         H.plat.style.clipPath = '';
       }
 
-      if (!platFolded) marqStart();   // 收起态（同台刷新重入）面板不可见，别开跑马带
-      /* 进入铺色态 / 换平台：按持久化的侧键页签恢复内容；同台账号刷新保留当前层级 */
-      /* 进入铺色态 / 换平台：按持久化的侧键页签恢复对应的面；直接落位不翻滚 */
-      applySideTab(sideTab, false);
+      /* 连点：跑马带 / 页签面等停手后在合并重画里补，不在这里开。 */
+      if (!rapid) {
+        if (!platFolded) marqStart();   // 收起态（同台刷新重入）面板不可见，别开跑马带
+        /* 进入铺色态 / 换平台：按持久化的侧键页签恢复对应的面；直接落位不翻滚 */
+        applySideTab(sideTab, false);
+      }
       try { localStorage.setItem(HALL_THEME_KEY, id); } catch {}
 
       /* 铺色态必须真的铺出来：600ms 后 #hall-plat 仍被藏/零高（账号刷新或开场收尾
@@ -8377,11 +13509,17 @@
     function restoreHallTheme(rows) {
       /* 账号/平台行还没到：不要因为“查不到”就退出当前铺色态 */
       if (!Array.isArray(rows) || !rows.length) return;
-      const vis = platRowsVisible(rows);
+      const vis = platRowsVisible(withLocalRow(rows));
       const logged = vis.filter((r) => r && r.loggedIn);
+      const localOn = vis.some((r) => r && r.id === PlatVis.LOCAL && r.isLocal);
       const stored = hallThemeStored();
-      const want = (stored && vis.some((r) => r.id === stored && r.loggedIn)) ? stored
-        : (platOptOut ? '' : ((logged.find((r) => r.id === 'netease') || logged[0] || {}).id || ''));
+      /* 本地曲库不是登录态，但它是用户上次真正铺开的台：存了就恢复。
+         没有登录平台、又打开了自定义音源时，也直接进本地曲库 ——
+         否则导入完回到大厅只能看到一个「去登录」的普通态。 */
+      const want = (stored === PlatVis.LOCAL && localOn) ? PlatVis.LOCAL
+        : (stored && vis.some((r) => r.id === stored && r.loggedIn)) ? stored
+          : (platOptOut ? '' : ((logged.find((r) => r.id === 'netease') || logged[0] || {}).id
+            || (localOn ? PlatVis.LOCAL : '')));
       if (want) { applyHallTheme(want); return; }
       /* 主题平台被筛掉 / 掉线：正在铺色就先退回普通态；没在铺色则保留记忆不打扰 */
       if (platMode) applyHallTheme('');
@@ -8412,6 +13550,19 @@
       if (!platFolded && H.rail.classList.contains('is-plat') && (H.plat.hidden || H.plat.offsetHeight < 8)) {
         console.warn('[Hall] 检测到半切的铺色态，退回普通大厅。');
         applyHallTheme('');
+      }
+
+      /* 2026-11-14 兜底之二：中间整块空白 —— 「我的」被清空，铺色面板却没铺开。
+         收起与否看真实类名 is-plat-folded（platFolded 这个量有不同步的时候，
+         拿它当门会把该救的情况挡掉）；别的一条只看用户到底收没收。 */
+      const hallEl = document.getElementById('view-hall');
+      const foldedNow = !!(hallEl && hallEl.classList.contains('is-plat-folded'));
+      const meEmpty = !(H.me && (H.me.textContent || '').trim());
+      if (!foldedNow && meEmpty && !platModeShowing()) {
+        console.warn('[Hall] 检测到空网格且铺色面板没铺开，重画大厅引导。');
+        if (platMode) applyHallTheme('');
+        H.me.innerHTML = hallLoginHtml(false);
+        syncHallMeCell();
       }
     }
 
@@ -8514,7 +13665,9 @@
     function paintPlatBar() {
       const base = platRows.length ? platRows
         : (window.LIZI_ACCOUNTS || []).map((a) => ({ id: a.id, name: a.name, loggedIn: false }));
-      const all = base.length ? base : platFallbackRows();
+      /* 自定义音源不是账号：withLocalRow 只在平台管理开关打开时补一行，
+         点它和别的平台一样进铺色态（内容是本机导入的曲目）。 */
+      const all = withLocalRow(base.length ? base : platFallbackRows());
       const rows = platRowsVisible(all);
       const cur = rows.find((r) => r.id === platMode);
       /* 内容轨模式下左上角是面包屑（不是平台名）。只有根段（i=0）是滚轮换来源的
@@ -8559,13 +13712,18 @@
       const selEnd = focused ? s.input.selectionEnd : null;
       H.platBar.innerHTML = `
         ${nameHtml}
-        <span class="pstrip__icons">${rows.map((r) => `
-          <button class="pstrip__i${r.loggedIn ? '' : ' is-off'}${r.id === platMode ? ' is-on' : ''}"
-            data-plat="${esc(r.id)}"${r.loggedIn ? '' : ' aria-disabled="true"'}
-            title="${esc(r.name)}${r.loggedIn ? '' : ' · 未登录，点它去设置里登录'}"
+        <span class="pstrip__icons">${rows.map((r) => {
+          /* 2026-11-16：自定义音源不是账号、没有登录态，不能按 loggedIn 置灰；
+             本地音乐行由 paintPlatBar 从 PlatVis 白名单补进来（见上面 isLocal）。 */
+          const off = !r.loggedIn && !r.isLocal;
+          return `
+          <button class="pstrip__i${off ? ' is-off' : ''}${r.id === platMode ? ' is-on' : ''}"
+            data-plat="${esc(r.id)}"${off ? ' aria-disabled="true"' : ''}
+            title="${esc(r.name)}${off ? ' · 未登录，点它去设置里登录' : ''}"
             style="--i-bg:${esc(platBg(r.id).bg)}">
             <img src="${esc(PLAT_LOGO[r.id] || '')}" alt="${esc(r.name)}">
-          </button>`).join('')}</span>`;
+          </button>`;
+        }).join('')}</span>`;
       /* 第三列：搜索。持久节点 append 回来，聚焦中的输入不丢文字/光标 */
       s.input.placeholder = `搜索${cur ? cur.name : '当前平台'}`;
       H.platBar.appendChild(s.root);
@@ -8623,7 +13781,23 @@
       /* 手机字号有下限，桌面 1.29 的卡高比例不成立：同样的面板高推出来的卡
          会比带子高，底部歌手名被 #hall-plat 裁掉。这里按手机真实卡高再反解
          一个上限，只收不放；桌面（非安卓壳 / 细指针）数值一个像素不变。 */
-      if (isPhoneMarq()) cardW = Math.min(cardW, phoneMarqMaxCardW(panelH));
+      if (isPhoneMarq()) {
+        if (innerWidth > innerHeight) {
+          /* 横屏是固定 1280 的视口（页面整体缩到 ~0.62），上面那套反解是按
+             竖屏 CSS 像素、字号 14/12.5px 下限推的，横屏会一路压到 96，
+             卡片肉眼可见地变小（旧版是 156 那一档）。横屏直接回到 156 封顶；
+             放得下由 app.css 里横屏 420:520 的比例保证（面板 ≈250 高）。
+             竖屏仍走反解，桌面仍不进来。
+             2026-11-14：这里原本是 Math.min(cardW, 156)，可 base 公式
+             (panelH-28)*0.578 是从面板高度反解卡宽的 —— 海报一加高、面板
+             一矮，卡就跟着缩回 128，海报和卡片互相抢空间。横屏干脆不让
+             面板高度决定卡宽：卡永远是 156（卡高 195），面板不够高由
+             app.css 的比例让位。 */
+          cardW = 156;
+        } else {
+          cardW = Math.min(cardW, phoneMarqMaxCardW(panelH));
+        }
+      }
       const gap = Math.round(Math.max(16, Math.min(32, cardW * 0.1026)));
       if (cardW === platCardW) return;         // 高度没变：别重复重量/重排
       platCardW = cardW;
@@ -8932,11 +14106,17 @@
       srailRelease();
       const y = srailLocalY(e);
       if (!d.live) {
-        if (Math.abs(y - d.y0) <= SRAIL_SLOP && d.slot !== srail.committed) {
-          const from = srail.committed;
-          srailCommit(d.slot);
-          if (reduceMotion) srailJumpTo(d.slot);
-          else srailTravel(from, d.slot);
+        if (Math.abs(y - d.y0) <= SRAIL_SLOP) {
+          if (d.slot !== srail.committed) {
+            const from = srail.committed;
+            srailCommit(d.slot);
+            if (reduceMotion) srailJumpTo(d.slot);
+            else srailTravel(from, d.slot);
+          } else {
+            /* 2026-11-13 用户要求：再点一次已选中的页签 = 重新加载当前面。
+               以前这里直接 return，点了没反应，用户会以为「我的喜欢」这种入口不存在。 */
+            reloadSideTab(SIDE_TABS[d.slot]);
+          }
         }
         return;
       }
@@ -8991,6 +14171,10 @@
       if (prev === 'stage' && key !== 'stage') deactivateStageFace();
       if (prev === 'myalbums' && key !== 'myalbums') scheduleAlbumsRestore(rolling);
 
+      /* 切离歌曲面：来源滚轮不能跟着翻过去，回来时会停在旧坐标上。
+         滚轮属于 .hall-rail，不属于任何一个面。 */
+      if (key !== 'song') srcCloseMenu();
+
       if (key === 'song') {
         if (prev !== 'song') railGoSource('liked');
         marqPaused = false;
@@ -9024,6 +14208,27 @@
         railPath = [{ kind: 'playlists', name: RAIL_SOURCE_NAME.playlists }];
       }
       railEnterAlbums();
+    }
+
+    /* 2026-11-13：再点一次已选中的页签 = 重新加载当前面。
+       起因：用户点「我的喜欢」页签没反应（同槽位直接 return），以为酷狗没有这个入口。
+       只重取歌曲面；形态 / 我的专辑 / 工具箱三面各有幂等入口，重挂 iframe 代价太大，这里不动。
+       连点按 400ms 去抖，避免又打出一次重画风暴（和平台 dock 那条治理同一个原因）。 */
+    let sideReloadAt = 0;
+    function reloadSideTab(key) {
+      if (!platMode || !H.plat) return;
+      if (key !== 'song') return;
+      const now = Date.now();
+      if (now - sideReloadAt < 400) return;
+      sideReloadAt = now;
+      clearMarqSearch(false);
+      if (!railPath.length) railReset();
+      /* 每日推荐那层有缓存，重进会直接画旧的；用户点「重载」就是要新数据，这里清掉 */
+      if (railPath[0] && railPath[0].kind === 'daily') { try { delete marqCache[platMode]; } catch { /* 忽略 */ } }
+      marqSeq++;
+      paintPlatBar();
+      renderMarq();
+      if (!marqPaused && document.body.dataset.view === 'hall') marqStart();
     }
 
     /* ---------------- 长方体：DOM / 翻滚 ---------------- */
@@ -9092,6 +14297,9 @@
       prismBox.style.transform = boxTransform();
       document.addEventListener('lizi:hall-release-albums', releaseAlbumsFace);
       document.addEventListener('lizi:stage-edition', onStageEditionChange);
+      /* AI 工坊存/删形态：这一面是一次性 build 的，不重画就永远看不到新形态
+         （用户反馈「保存完在形态里找不到」就是这里） */
+      document.addEventListener('lizi:stages-refresh', onStageEditionChange);
       syncFaceState();
     }
 
@@ -9116,15 +14324,22 @@
         prismBox.style.transition = 'none';
         faceAngle = -idx * 90;
         prismBox.style.transform = boxTransform();
+        srcFlushWanted();
         return;
       }
       prism.classList.add('is-rolling');
+      /* 翻面时把来源滚轮收掉：它挂在 .hall-rail 上，不属于任何一个面。 */
+      srcCloseMenu();
       prismBox.style.transition = 'transform 420ms cubic-bezier(.3, .7, .2, 1)';
       faceAngle -= delta * 90;
       prismBox.style.transform = boxTransform();
       prismRollT = setTimeout(() => {
         prism.classList.remove('is-rolling');
         prismBox.style.transition = '';
+        /* 落位后再展开来源滚轮：翻滚中悬停根段只记了 srcWantOpen，
+           等长方角停稳、标签 rect 回到真实位置再量，否则会偏到下面封面上。 */
+        srcFlushWanted();
+        if (srcOpen) srcPlaceWheel();
       }, 440);
     }
 
@@ -9276,10 +14491,15 @@
         const fav = stageFavs.has(s.id);
         const dev = stageEdition === 'dev';
         const title = dev ? `${s.id} · ${s.name}` : s.name;
+        /* 用户自建形态没有预览图（forms-labs/previews/ 里那 600 多张是内置形态的
+           构建产物，而且 id 里带冒号），直接给一块「我做的」占位，别让它去 404 */
+        const art = s.user
+          ? '<span class="hall-stage__img hall-stage__img--mine">我做的</span>'
+          : `<img class="hall-stage__img" data-src="forms-labs/previews/${esc(s.id)}.jpg" alt="" loading="lazy" decoding="async" draggable="false">`;
         return `<div class="hall-stage__cell" data-stage-id="${esc(s.id)}" data-search="${esc((s.name + ' ' + (s.desc || '') + ' ' + s.id).toLowerCase())}">
           <button class="hall-stage__i" type="button" data-stage="${esc(s.id)}" title="${esc(title)}" aria-label="${esc(s.name)}">
             <span class="hall-stage__art">
-              <img class="hall-stage__img" data-src="forms-labs/previews/${esc(s.id)}.jpg" alt="" loading="lazy" decoding="async" draggable="false">
+              ${art}
             </span>
             <span class="hall-stage__cap">
               <i class="hall-stage__mark" aria-hidden="true"></i>
@@ -9945,7 +15165,7 @@
         : (window.LIZI_ACCOUNTS || []).map((a) => ({ id: a.id, name: a.name, accent: a.accent, loggedIn: false }));
       /* 账号数据还没到也不能把「我的」写成空；先用兜底行占位，
          有已登录平台才画卡，一个都没有就画登录引导（meHallHtml）。 */
-      const all = base.length ? base : platFallbackRows();
+      const all = withLocalRow(base.length ? base : platFallbackRows());
       const vis = platRowsVisible(all);
       const flat = !!(ev && ev.detail && ev.detail.flat);
       if (platMode && (flat || !vis.some((r) => r.id === platMode))) applyHallTheme('');
@@ -9978,6 +15198,8 @@
       { id: 'radio', name: '电台' },
     ];
     let srcOpen = false, srcHi = -1, srcCloseT = 0, srcHideT = 0, srcFadeT = 0;
+    /* 翻滚中悬停到根段时先记一笔，等长方角落位再展开（见 srcOpenMenu / movePrismTo）。 */
+    let srcWantOpen = false;
     let srcWheel = null;
     /* 滚轮上次定位所依据的来源 kind。只有 railRootKind() 和它不一致（外部重置 /
        换平台）时才重新归位；重画长条造成的 transient close→reopen 不再覆盖滚轮
@@ -9985,7 +15207,10 @@
     let srcWheelRoot = '';
     /* 滚轮表现层（2026-11-08，移植 ReactBits Option Wheel）：
        pos / target / 拖拽物理都收在 hall/option-wheel.js 里，只通过 onChange
-       把「居中项」交回 srcPick；语义真值仍然只有 srcHi 一个。 */
+       把「居中项」交回 srcPick；语义真值仍然只有 srcHi 一个。
+       2026-11-20：外观放大不在这里做 —— .psrc 在 >560px 用 transform: scale()
+       按 --src-size / 13 整体放大（默认 28，约 2.15 倍，见 app.css），布局
+       数学仍按 13px / 170×160 算，这样竖屏 glide-select 借用滚轮时不会跟着变大。 */
     const SRC_WHEEL_H = 160;          // 容器高 160，五项在中间 ±2 行（约 5 行可见）
 
     const srcKindOf = (c) => RAIL_KIND[c.id] || c.id;
@@ -10023,9 +15248,24 @@
       H.platBar.classList.toggle('is-src-open', srcOpen);
     }
 
+    /** 翻滚 / 翻面落位后，把「翻滚中悬停过根段」的待开请求补上。
+        必须等长方角停稳再量标签：翻滚中的 rect 是 3D 投影，会往面板中心偏。 */
+    function srcFlushWanted() {
+      if (!srcWantOpen) return;
+      const host = H.platBar && H.platBar.querySelector('.pstrip__src');
+      const want = !!host
+        && (host.matches(':hover') || host.contains(document.activeElement));
+      srcWantOpen = false;
+      if (want && sideTab === 'song') srcOpenMenu();
+    }
+
     /** 把滚轮宿主钉在当前标签上：左沿对齐标签文字，纵向以标签行为中心。 */
     function srcPlaceWheel() {
       if (!H.srcMenu || !H.rail || !H.platBar) return;
+      /* 翻滚中 / 不在歌曲面时，标签的 rect 是 3D 投影或翻走后的位置；
+         照它定位会把滚轮钉到下面封面上（形态长廊 → 工具箱 → 歌曲可复现）。 */
+      if (prism && (prism.classList.contains('is-rolling')
+        || faceIndex !== SIDE_TABS.indexOf('song'))) return;
       const host = H.platBar.querySelector('.pstrip__src');
       if (!host) return;
       const hr = host.getBoundingClientRect();
@@ -10045,6 +15285,13 @@
       clearTimeout(srcFadeT);
       H.platBar.classList.remove('is-src-fading');
       if (!srcOpen) {
+        /* 翻面还没落位：先记下「想开」，等 movePrismTo 的落位回调再开。
+           翻滚中的标签 rect 会往面板中心偏，直接开会把滚轮放到封面上去。 */
+        if (prism && (prism.classList.contains('is-rolling')
+          || faceIndex !== SIDE_TABS.indexOf('song'))) {
+          srcWantOpen = true;
+          return;
+        }
         ensureSrcWheel();
         /* 只有来源真的变了（外部 railReset / 换平台）才让滚轮重新居中；
            否则保留它当前的位置 —— 修「松手后被长条重画打回每日推荐」。 */
@@ -10067,6 +15314,7 @@
     }
 
     function srcCloseMenu() {
+      srcWantOpen = false;
       clearTimeout(srcCloseT);
       if (!srcOpen) {
         if (H.srcMenu) H.srcMenu.hidden = true;
@@ -10126,12 +15374,13 @@
        精选      网易云 → 推荐歌单（和每日推荐不是一回事）· QQ → 推荐歌单
                  酷狗 → 新歌速递 · 汽水 → 推荐流 · 波点/Spotify → 如实说没有
        我的喜欢  网易云 → 我喜欢的音乐 · QQ → 我喜欢（要登录）
-                 酷狗/汽水/波点/Spotify → 没有开放这个接口，如实说
+                 酷狗 → 账号歌单里的「我喜欢」系统歌单（要登录）· 汽水/波点/Spotify → 没有开放这个接口，如实说
        我收藏的歌单 网易云 → 收藏歌单 · QQ/酷狗 → 我的歌单（要登录）
        电台      上游要么没开放、要么只给登录态，先如实说
        全部落在 #view-browse 的 .track 行，点行就播（Player 按 track.source 选音源）。 */
     const PLAT_NICE = {
-      netease: '网易云', qq: 'QQ 音乐', kugou: '酷狗', qishui: '汽水', bodian: '波点', spotify: 'Spotify', kuwo: '酷我音乐',
+      netease: '网易云', qq: 'QQ 音乐', kugou: '酷狗', qishui: '汽水', bodian: '波点',
+      local: '本地音乐', spotify: 'Spotify', kuwo: '酷我音乐',
     };
     const platNice = (id) => PLAT_NICE[id] || id;
     const fmtNum = (n) => {
@@ -10148,6 +15397,14 @@
     const platFail = (d, fallback) => (d && Number(d.code) === 404
       ? '接口已接好，重启 LIZI 后生效'
       : ((d && d.error) || fallback));
+    /* 酷狗的「我喜欢」是账号歌单里的系统歌单（name=「我喜欢」/ id=collection_…_2_0），
+       归「我的喜欢」入口；「我收藏的歌单」里不再重复列它。 */
+    const isKugouLikedPlaylist = (p) => {
+      if (!p) return false;
+      const name = String(p.name || '');
+      return name === '我喜欢' || name === '我喜欢的音乐'
+        || /collection_[^_]+_[^_]+_2_0$/.test(String(p.id || ''));
+    };
 
     async function openPlatCard(pid, kind) {
       const name = platNice(pid);
@@ -10263,7 +15520,12 @@
           return;
         }
         if (pid === 'kugou') {
-          emptyList('酷狗包里没有「我喜欢的音乐」列表接口（只有搜索、榜单、歌单）—— 不编内容');
+          const d = await API.kugouLikedSongs(100);
+          if (!platAlive(seq)) return;
+          const t = (d && d.tracks) || [];
+          if (!t.length) { emptyList(platFail(d, '酷狗的「我喜欢」是空的（在酷狗 App 里点几首红心再回来）')); return; }
+          hint(`酷狗 · 我的喜欢 · ${t.length} 首`);
+          renderTracks(t);
           return;
         }
         if (pid === 'qishui') {
@@ -10351,8 +15613,12 @@
         if (pid === 'kugou') {
           const d = await API.kugouUserPlaylists();
           if (!platAlive(seq)) return;
-          const list = (d && d.playlists) || [];
-          if (!list.length) { emptyList((d && d.error) || '酷狗没有返回歌单'); return; }
+          /* 「我喜欢」是系统歌单，已经归「我的喜欢」入口，这里不再列一遍 */
+          const list = ((d && d.playlists) || []).filter((p) => !isKugouLikedPlaylist(p));
+          if (!list.length) {
+            emptyList((d && d.error) || '酷狗账号下还没有收藏的歌单（「我喜欢」在「我的喜欢」那项）');
+            return;
+          }
           hint(`酷狗 · 我的歌单 · ${list.length} 个`);
           renderPlaylistRows(list, 'kugou', '我收藏的歌单');
           return;
@@ -10397,10 +15663,10 @@
       try {
         const d = src === 'kuwo'
           ? await (p.rank ? API.kuwoRankTracks(p.id, 50) : API.kuwoPlaylistTracks(p.id, 100))
-          : src === 'qq' ? await API.qqPlaylistDetail(p.id)
-            : src === 'kugou' ? await API.kugouPlaylistTracks(p.id)
+          : src === 'qq' ? await API.qqPlaylistDetail(p.id, p.dirId)
+            : src === 'kugou' ? await API.kugouPlaylistTracksAll(p.id)
               : src === 'qishui' ? await API.qishuiPlaylistTracks(p.id)
-                : src === 'bodian' ? await API.bodianPlaylistTracks(p.id, 50, p.sourceType)
+                : src === 'bodian' ? await API.bodianPlaylistTracks(p.id, 50, p.sourceType, p.trackCount)
                   : await API.playlistDetail(p.id);
         if (!platAlive(seq)) return;
         const tr = (d && d.tracks) || [];
@@ -10617,6 +15883,9 @@
          波点 / Spotify 没有这个接口 → 空态如实说
        拿到过就按平台缓存，换台回来秒出。 */
     let marqTracks = [];
+    /* 本地曲库在设置页里导入 / 删除时，大厅可能正被设置页盖住；
+       先记脏，回到大厅再重画跑马带，别让用户手动刷新。 */
+    let localDirty = false;
     /* ---------- 大厅内容轨（2026-11-08）----------
        铺色态不再只有「每日推荐」：四张卡把跑马带切成层级内容。
        状态机：
@@ -10664,7 +15933,9 @@
     function railOn() {
       try { return localStorage.getItem(RAIL_MODE_KEY) !== '0'; } catch { return true; }
     }
-    function railDailyNode() { return { kind: 'daily', name: '每日推荐' }; }
+    function railDailyNode() {
+      return { kind: 'daily', name: platMode === PlatVis.LOCAL ? '本地曲库' : '每日推荐' };
+    }
     function railReset() {
       railPath = [railDailyNode()];
       /* 换来源 / 退出内容轨 = 搜索作废，跑马带回到「每日推荐」 */
@@ -10677,7 +15948,24 @@
 
     const marqCache = Object.create(null);
 
+    /** 登录 / 退出后，同一平台能取到的内容就换了一份（账号的每日推荐、我的喜欢、
+        精选歌单）。可 marqCache / railCache / dailyTracks 的键只有平台（和层级），
+        从来不区分账号；不改这些缓存的话，刚登录后跑马带仍会画未登录时取到的那份
+        「公共内容」，只有重启（Hall.mount → paintDaily 重新取数）才会正常。
+        这里按平台整体作废：marqCache 的键是 pid，railCache 的键是 `pid|kind|id`。 */
+    function dropAuthCaches(pid) {
+      const drop = (map) => {
+        for (const k in map) {
+          if (!pid || k === pid || k.startsWith(pid + '|')) delete map[k];
+        }
+      };
+      drop(marqCache);
+      drop(railCache);
+      if (!pid || pid === 'netease') dailyTracks = [];
+    }
+
     const MARQ_NOTE = {
+      local: '来自本机导入的曲目',
       netease: '来自网易云「每日推荐」',
       qq: '登录后为 QQ 音乐「每日推荐」；现在显示匿名可用的「雷达推荐」',
       kugou: '来自酷狗「每日推荐」（匿名可用）',
@@ -10688,6 +15976,22 @@
     };
 
     function marqSource(pid) {
+      /* 自定义音源：直接把 IndexedDB 里的曲目摊成播放器认得的形状。
+         不经过 server.mjs，也不伪造「每日推荐」；导入 / 删除后由
+         lizi-local-change 作废 marqCache.local 再重画。 */
+      if (pid === PlatVis.LOCAL) {
+        const l = window.LIZI_LOCAL;
+        if (!l) return Promise.resolve([]);
+        return l.list().then((rows) => (rows || []).map((t) => ({
+          id: t.id,
+          source: 'local',
+          name: t.name || '未命名',
+          artists: t.artists || '未知歌手',
+          album: t.album || '本地文件',
+          duration: t.duration || 0,
+          cover: t.cover || '',
+        })));
+      }
       if (pid === 'netease') return Promise.resolve(dailyTracks);
       if (pid === 'kugou') return API.kugouDaily().then((d) => (d && d.tracks) || []);
       if (pid === 'qishui') return API.qishuiFeed(20).then((d) => (d && d.tracks) || []);
@@ -10790,7 +16094,9 @@
         return railTracks('qq', (d && d.tracks) || [], (d && d.error) || 'QQ 音乐的「我喜欢」是空的');
       }
       if (pid === 'kugou') {
-        return railNone('酷狗包里没有「我喜欢的音乐」列表接口（只有搜索、榜单、歌单）—— 不编内容');
+        const d = await API.kugouLikedSongs(100);
+        return railTracks('kugou', (d && d.tracks) || [],
+          platFail(d, '酷狗的「我喜欢」是空的（在酷狗 App 里点几首红心再回来）'));
       }
       if (pid === 'qishui') {
         const d = await API.qishuiUserPlaylists();
@@ -10834,7 +16140,10 @@
       }
       if (pid === 'kugou') {
         const d = await API.kugouUserPlaylists();
-        return railColls('kugou', (d && d.playlists) || [], (d && d.error) || '酷狗没有返回歌单');
+        /* 「我喜欢」是系统歌单，已经归「我的喜欢」入口，这里不再列一遍 */
+        const list = ((d && d.playlists) || []).filter((p) => !isKugouLikedPlaylist(p));
+        return railColls('kugou', list,
+          (d && d.error) || '酷狗账号下还没有收藏的歌单（「我喜欢」在「我的喜欢」那项）');
       }
       if (pid === 'qishui') {
         const d = await API.qishuiUserPlaylists();
@@ -10910,10 +16219,10 @@
       const src = pid || p.source || 'netease';
       return src === 'kuwo'
         ? (p.rank ? API.kuwoRankTracks(p.id, 50) : API.kuwoPlaylistTracks(p.id, 100))
-        : src === 'qq' ? API.qqPlaylistDetail(p.id)
-          : src === 'kugou' ? API.kugouPlaylistTracks(p.id)
+        : src === 'qq' ? API.qqPlaylistDetail(p.id, p.dirId)
+          : src === 'kugou' ? API.kugouPlaylistTracksAll(p.id)
             : src === 'qishui' ? API.qishuiPlaylistTracks(p.id)
-              : src === 'bodian' ? API.bodianPlaylistTracks(p.id, 50, p.sourceType)
+              : src === 'bodian' ? API.bodianPlaylistTracks(p.id, 50, p.sourceType, p.trackCount)
                 : API.playlistDetail(p.id);
     }
 
@@ -10944,6 +16253,11 @@
     }
 
     function railFetch(pid, node) {
+      /* 本地曲库没有平台那套精选 / 喜欢 / 歌单 / 电台接口；只保留根层全部歌曲，
+         选到别的来源时如实说，不拿别家的空态文案冒充。 */
+      if (pid === PlatVis.LOCAL && node.kind !== 'daily') {
+        return Promise.resolve(railNone('本地曲库只有「每日推荐」这一层，点左上角回到全部歌曲'));
+      }
       if (node.kind === 'featured') return railFeatured(pid);
       if (node.kind === 'liked') return railLiked(pid);
       if (node.kind === 'playlists') return railMyPlaylists(pid);
@@ -11031,7 +16345,7 @@
           <button class="marq__card marq__card--coll" data-malb="${i}"
             title="${esc(t.name)}${t.artists ? ' · ' + esc(t.artists) : ''}">
             <span class="marq__art">${t.cover
-              ? `<img src="${API.img(t.cover, 320)}" alt="" loading="lazy" decoding="async" draggable="false">`
+              ? `<img src="${API.img(t.cover, 320)}" srcset="${API.img(t.cover, 320)} 320w, ${API.img(t.cover, 640)} 640w" sizes="(max-width: 560px) 320px, 156px" alt="" loading="lazy" decoding="async" draggable="false">`
               : ''}<span class="marq__tag">专辑</span></span>
             <b>${esc(t.name)}</b>
             <em>${esc([t.artists, sub].filter(Boolean).join(' · '))}</em>
@@ -11046,7 +16360,7 @@
           <button class="marq__card marq__card--coll" data-coll="${i}"
             title="${esc(t.name)}${by ? ' · ' + esc(by) : ''}">
             <span class="marq__art">${t.cover
-              ? `<img src="${API.img(t.cover, 320)}" alt="" loading="lazy" decoding="async" draggable="false">`
+              ? `<img src="${API.img(t.cover, 320)}" srcset="${API.img(t.cover, 320)} 320w, ${API.img(t.cover, 640)} 640w" sizes="(max-width: 560px) 320px, 156px" alt="" loading="lazy" decoding="async" draggable="false">`
               : ''}<span class="marq__tag">${tag}</span></span>
             <b>${esc(t.name)}</b>
             <em>${esc([sub, by].filter(Boolean).join(' · '))}</em>
@@ -11056,7 +16370,7 @@
       return `
         <button class="marq__card" data-i="${i}" title="${esc(t.name)}${t.artists ? ' · ' + esc(t.artists) : ''}">
           <span class="marq__art">${t.cover
-            ? `<img src="${API.img(t.cover, 320)}" alt="" loading="lazy" decoding="async" draggable="false">`
+            ? `<img src="${API.img(t.cover, 320)}" srcset="${API.img(t.cover, 320)} 320w, ${API.img(t.cover, 640)} 640w" sizes="(max-width: 560px) 320px, 156px" alt="" loading="lazy" decoding="async" draggable="false">`
             : ''}</span>
           <b>${esc(t.name)}</b>
           <em>${esc(t.artists || '')}</em>
@@ -11101,6 +16415,77 @@
         <b>${esc(title || (platName + ' · 暂无每日推荐'))}</b>
         <span class="marq__note">${esc(note)}</span>
       </span></div>`;
+    }
+
+    /* 跑马带是否处于「有人看」的模式：铺色态，或普通大厅的公开流 */
+    const marqLive = () => !!platMode || publicMarqOn;
+
+    /* 普通大厅：把同一个 #hall-marq 挪进公开区，喂匿名可用数据。
+       不新建第二套 UI；拖动 / 点击 / 播放仍走 bindMarq 那一套。 */
+    function mountPublicMarq() {
+      if (platMode || !H.pub || !H.pubSlot || !H.marq) return;
+      if (H.marq.parentElement !== H.pubSlot) H.pubSlot.appendChild(H.marq);
+      H.pub.hidden = false;
+      publicMarqOn = true;
+      renderPublicMarq();
+    }
+
+    function unmountPublicMarq() {
+      publicMarqOn = false;
+      if (H.pub) H.pub.hidden = true;
+      marqStop();
+      marqDrag = null;
+      /* 回铺色态时必须放回「歌曲面」，不能放回 #hall-plat 根上：
+         ensurePrism() 把跑马带搬进了 .plat-face--song，只有在那一层它才跟着
+         四面棱柱一起翻走、被面的 overflow 裁切。放回根上会变成棱柱的兄弟，
+         z-index:1 直接压在四个面上面 —— 切到工具箱也还在，拖动时整条带
+         在 3D 面之外重新合成，卡顿就是这么来的。
+         棱柱还没建时（首次进铺色）先放根上，ensurePrism() 会接手搬进去。 */
+      const marqHome = (faces && faces.song) || H.plat;
+      if (H.marq && marqHome && H.marq.parentElement !== marqHome) marqHome.appendChild(H.marq);
+      if (H.marq) H.marq.classList.remove('is-drag');
+      /* 公开流把 label 改成了「公开推荐」；回铺色态要还原成每日推荐 */
+      if (H.marq) H.marq.setAttribute('aria-label', '每日推荐');
+    }
+
+    function renderPublicMarq() {
+      if (platMode || !publicMarqOn || !H.marq) return;
+      const seq = ++marqSeq;
+      marqStop();
+      marqDrag = null;
+      marqPaused = false;
+      marqX = 0;
+      marqMoved = false;
+      marqTracks = [];
+      railReset();                        // 公开流只走根层「每日推荐」
+      railShown = [];
+      marqShownCount = 0;
+      railMore = false;
+      railShownType = 'tracks';
+      railNote = '';
+      H.marq.setAttribute('aria-label', '公开推荐');
+      if (dailyTracks.length) {
+        paintMarq(dailyTracks, 'tracks', false);
+        return;
+      }
+      H.marq.classList.add('is-empty');
+      H.marq.innerHTML = marqEmptyHtml('公开推荐', '正在取匿名推荐…', '不登录也能听');
+      marqHalf = 0;
+      API.personalized().then((d) => {
+        if (platMode || !publicMarqOn || seq !== marqSeq) return;
+        const tracks = (d && d.tracks) || [];
+        dailyTracks = tracks.slice(0, 40);
+        if (!dailyTracks.length) {
+          H.marq.classList.add('is-empty');
+          H.marq.innerHTML = marqEmptyHtml('公开推荐', '匿名推荐暂时没取到，稍后再试', '公开推荐');
+          return;
+        }
+        paintMarq(dailyTracks, 'tracks', false);
+      }).catch(() => {
+        if (platMode || !publicMarqOn || seq !== marqSeq) return;
+        H.marq.classList.add('is-empty');
+        H.marq.innerHTML = marqEmptyHtml('公开推荐', '匿名推荐暂时没取到，稍后再试', '公开推荐');
+      });
     }
 
     function renderMarq() {
@@ -11164,10 +16549,12 @@
         return;
       }
 
+      /* 本地曲库的根层叫「本地曲库」，别套用平台的「每日推荐」文案。 */
+      const rootName = railNode().name || '每日推荐';
       /* 没缓存：先给一句「正在取」，拿到再填（失败就退成空态，原因写在第二行） */
       H.marq.classList.add('is-empty');
       H.marq.innerHTML = `<div class="marq__seg"><span class="marq__empty">
-        <b>${esc(platName)} · 正在取每日推荐…</b>
+        <b>${esc(platName)} · 正在取${esc(rootName)}…</b>
         <span class="marq__note">${esc(MARQ_NOTE[pid] || '')}</span>
       </span></div>`;
       marqHalf = 0;
@@ -11177,7 +16564,11 @@
         marqCache[pid] = tracks || [];
         if (!tracks || !tracks.length) {
           H.marq.classList.add('is-empty');
-          H.marq.innerHTML = marqEmptyHtml(platName, MARQ_NOTE[pid] || '这个平台没有开放每日推荐');
+          H.marq.innerHTML = marqEmptyHtml(platName,
+            pid === PlatVis.LOCAL
+              ? '还没有导入本地歌曲，去「设置 → 平台管理 → 自定义音源」导入'
+              : (MARQ_NOTE[pid] || '这个平台没有开放每日推荐'),
+            pid === PlatVis.LOCAL ? `${platName} · 还没有歌曲` : `${platName} · ${rootName}`);
           return;
         }
         paintMarq(tracks, 'tracks', false);
@@ -11444,15 +16835,80 @@
       return true;
     };
 
+    /* 拖拽 / 环形展开期间给铺色背景降载（2026-11-12）：
+       暂停 WebGL 流色、撤掉 22px backdrop-filter。环形组件在开环 / 收环时
+       通过 window.__liziHallDragGuard 调用；跑马带自己的拖拽也走这一条。
+       正常态不动，零开销。 */
+    window.__liziHallDragGuard = (on) => {
+      const want = !!on;
+      /* 普通大厅拖公开流时没有铺色底 / 流色，不要顺手把 WebGL 又开起来 */
+      if (!platMode) {
+        if (H.plat) H.plat.classList.remove('is-marq-drag');
+        return;
+      }
+      if (H.plat) H.plat.classList.toggle('is-marq-drag', want);
+      if (!H.platFx) return;
+      try {
+        if (want) H.platFx.setPaused(true);
+        else if (document.body.dataset.view === 'hall' && !document.hidden) H.platFx.setPaused(false);
+      } catch { /* WebGL 没起来就算了 */ }
+    };
+
+    /* 拖拽期帧率统计（2026-11-13）：只记 rAF 间隔，常态零开销。
+       拖动结束算一次 median / p95 / max；只有真掉帧（p95 低于 30fps）才
+       console.warn 一行，同时把结果留在 window.__liziDragStats.last，
+       现场 / CDP 可直接读，不依赖日志级别。 */
+    window.__liziDragStats = {
+      last: null,
+      t: 0,
+      gaps: [],
+      start() { this.t = 0; this.gaps.length = 0; },
+      tick(now) {
+        if (this.t) this.gaps.push(now - this.t);
+        this.t = now;
+      },
+      stop(tag, quiet, extra) {
+        this.t = 0;
+        const gaps = this.gaps;
+        this.gaps = [];
+        if (gaps.length < 5) return null;          // 轻点 / 没动起来：样本不够，不算
+        const s = gaps.slice().sort((a, b) => a - b);
+        const n = s.length;
+        const med = s[Math.floor(n * 0.5)];
+        const p95 = s[Math.min(n - 1, Math.floor(n * 0.95))];
+        const max = s[n - 1];
+        const out = {
+          tag, frames: n,
+          medianMs: +med.toFixed(1), p95Ms: +p95.toFixed(1), maxMs: +max.toFixed(1),
+          fps: +(1000 / med).toFixed(1),
+        };
+        this.last = out;
+        /* 真掉帧 = p95 已经低于 30fps。max 只作参考：环拖时手指停顿会把它抬高。 */
+        if (!quiet && p95 > 33.4) {
+          const g = document.querySelector('#hall-plat-grain canvas');
+          console.warn('[Hall] 拖拽帧率', Object.assign({}, out, extra || {}, {
+            dpr: devicePixelRatio,
+            visibility: document.visibilityState,
+            platform: window.__liziAndroid ? 'android'
+              : (matchMedia('(pointer: coarse)').matches ? 'coarse' : 'desktop'),
+            plat: H.plat ? [H.plat.offsetWidth, H.plat.offsetHeight] : null,
+            grain: g ? [g.clientWidth, g.clientHeight, g.width, g.height] : null,
+          }));
+        }
+        return out;
+      },
+    };
+
     function marqStart(force) {
       if (reduceMotion) return;             // 尊重「减少动态效果」：不自动走，仍可拖
-      if (marqRaf || !platMode || H.marq.classList.contains('is-empty')) return;
-      /* 工具箱 / 形态长廊页签面板开着：带子被盖住，任何路径都别再开帧 */
-      if (srailSidePane()) return;
+      if (marqRaf || !marqLive() || H.marq.classList.contains('is-empty')) return;
+      /* 工具箱 / 形态长廊页签面板开着：带子被盖住，任何路径都别再开帧。
+         普通大厅的公开流没有页签面板，不受这条限制。 */
+      if (platMode && srailSidePane()) return;
       if (marqPaused && !force) return;     // seek 需要压过 hover 暂停
       const tick = () => {
         marqRaf = 0;
-        if (!platMode) return;
+        if (!marqLive()) return;
 
         /* 对齐缓动优先：跑在同一个 rAF 里，这段时间不扣 marqSpeedPx。 */
         if (marqSeek) {
@@ -11502,7 +16958,7 @@
       H.marq.addEventListener('pointerdown', (e) => {
         /* 三种内容（曲目 / 歌单 / 专辑）走同一套拖动：
            不再只看 is-empty（空态没有 .marq__track 也拖不了），直接确认轨道里有 seg。 */
-        if (!platMode || e.button !== 0) return;
+        if (!marqLive() || e.button !== 0) return;
         const track = H.marq.firstElementChild;
         if (!track || !track.querySelector('.marq__seg')) return;
         /* 兜底：rAF 测量可能在隐藏态被吞掉，marqHalf 为 0 时 marqWrap 会把 marqX
@@ -11515,32 +16971,83 @@
         marqStop();
         H.marq.classList.add('is-drag');
 
+        /* 拖拽期防御（2026-11-12，用户复报：拖跑马带时整块铺色面板变白，
+           只剩带子本身还能看到封面和歌名）。
+           拖拽同时制造三类合成压力：
+             1) 每个 pointermove 都直接写 translate3d，指针 120Hz 时一秒写上百次；
+             2) 快拖到末尾时 marqMaybeAppend 往带里插一批卡，整棵子树重排/重栅格；
+             3) 底下的 WebGL 流色还在 60fps 重画，上面盖着一层 22px backdrop-filter。
+           低端 GPU / Electron 透明窗口合成器在这种「层提升 + 表面重分配」竞态里
+           可能把整块 #hall-plat 的合成表面丢掉；跑马带因为自己单独提升过层反而还在。
+           防御：拖拽期间停流色、撤模糊、transform 收敛成每帧一次，补卡留到松手后；
+           常态（不拖）零额外开销。 */
+        if (window.__liziHallDragGuard) window.__liziHallDragGuard(true);
+        if (window.__liziDragStats) window.__liziDragStats.start();
+
+        let dragRaf = 0, writtenX = null;
+        const writeX = () => {
+          if (marqX === writtenX) return;   // 位置没变就不写，别制造无意义的合成层变更
+          writtenX = marqX;
+          const track = H.marq.firstElementChild;
+          if (track) track.style.transform = `translate3d(${marqX}px,0,0)`;
+        };
+        /* 只在拖拽这段里常驻一条 rAF：每帧最多写一次 transform；
+           同时把帧间隔交给 window.__liziDragStats（常态零开销）。 */
+        const dragFrame = (now) => {
+          dragRaf = 0;
+          if (!marqDrag) return;
+          if (window.__liziDragStats) window.__liziDragStats.tick(now);
+          writeX();
+          dragRaf = requestAnimationFrame(dragFrame);
+        };
+        dragRaf = requestAnimationFrame(dragFrame);
+
         const move = (ev) => {
           if (!marqDrag) return;
           marqDrag.moved = Math.max(marqDrag.moved, Math.abs(ev.clientX - marqDrag.sx));
           marqX = marqDrag.start + (ev.clientX - marqDrag.x);
           marqWrap();
-          marqMaybeAppend();                  // 拖到已渲染末尾附近也照常补下一批
-          const track = H.marq.firstElementChild;
-          if (track) track.style.transform = `translate3d(${marqX}px,0,0)`;
+          /* 这里只记位置：transform 由上面的 rAF 每帧写一次，
+             不在每个 pointermove 里改合成层；补卡也留到松手后。 */
         };
-        const up = () => {
+        const finish = (fromLeave) => {
           if (!marqDrag) return;
           marqMoved = marqDrag.moved > 5;
           marqDrag = null;
+          marqDragEnd = null;
+          if (dragRaf) { cancelAnimationFrame(dragRaf); dragRaf = 0; }
+          writeX();                               // 落点补最后一帧
           H.marq.classList.remove('is-drag');
-          marqPaused = false;
+          if (fromLeave) H.plat.classList.remove('is-marq-drag');
           window.removeEventListener('pointermove', move);
           window.removeEventListener('pointerup', up);
           window.removeEventListener('pointercancel', up);
-          marqStart();
+          window.removeEventListener('blur', up);
+          document.documentElement.removeEventListener('pointerleave', up);
+          if (!fromLeave) {
+            if (window.__liziHallDragGuard) window.__liziHallDragGuard(false);
+            marqPaused = false;
+            marqMaybeAppend();          // 拖拽期间没补卡：松手后按落点补一次
+            if (document.body.dataset.view === 'hall') marqStart();
+          }
+          /* 帧率汇总：正常拖动只在 window.__liziDragStats.last 留数字（median/p95/max/fps）；
+             真掉帧（p95 < 30fps）才打一行 warn。切视图收尾 / 轻点不报。 */
+          if (window.__liziDragStats) {
+            window.__liziDragStats.stop('marq', fromLeave || !marqMoved);
+          }
           /* 触屏 / 手势识别的 click 可能比 pointerup 晚一个任务，所以守卫保留一会儿；
              正常鼠标 click 紧跟在 pointerup 后，500ms 足够，又不会误吞下一次点击。 */
           setTimeout(() => { marqMoved = false; }, 500);
         };
+        const up = () => finish(false);
+        marqDragEnd = () => finish(true);
         window.addEventListener('pointermove', move);
         window.addEventListener('pointerup', up);
         window.addEventListener('pointercancel', up);
+        /* 拖到窗口外松手 / 窗口失焦时收不到 pointerup：用 blur + 指针离开视口
+           兜底收尾，别让流色一直停着、模糊层一直被撤掉。 */
+        window.addEventListener('blur', up);
+        document.documentElement.addEventListener('pointerleave', up);
       });
 
       H.marq.addEventListener('click', (e) => {
@@ -11573,7 +17080,7 @@
     }
 
     /** 主入口：先拿缓存秒出，再并发查 6 家刷新 */
-    async function paintMe(force) {
+    async function paintMe(force, mode, src) {
       const token = ++meToken;
       const accounts = (window.LIZI_ACCOUNTS || []).slice();
       if (!accounts.length) {
@@ -11584,8 +17091,32 @@
       /* 登录事件触发的强制刷新：用户刚登录，理应重新进铺色态 */
       if (force) platOptOut = false;
 
-      const cached = force ? null : meCache.read();
-      const cachedRows = cached && Array.isArray(cached.rows) ? cached.rows : null;
+      /* force 的两种模式（由 Hall.refreshMe 传进来）：
+           'keep'  → 先用本次会话最后一次真实查询结果（platRows）占位，别让
+                     刚登录的人看见铺色态先被弹回普通大厅再闪回来；
+           'clear' → 退出登录，直接把退出的这一家按未登录画（其余平台保持原样）。
+         正常挂载（不 force）才读 meCache 秒出首屏。 */
+      const cached = meCache.read();
+      const cachedRowsRaw = force
+        ? (mode === 'clear'
+          /* 退出：把退出的那一家先按未登录画，其余平台保持原样。
+             当前铺色的正好是它 → restoreHallTheme 会立刻落到下一个已登录平台；
+             一个都没有 → 当场退回普通大厅，不会在旧平台公开内容里多停几秒。 */
+          ? (platRows.length
+            ? platRows.map((r) => (src && r && r.id === src
+              ? { ...r, loggedIn: false, nickname: '', avatar: '' }
+              : r))
+            : null)
+          : (platRows.length ? platRows : null))
+        : (cached && Array.isArray(cached.rows) ? cached.rows : null);
+
+      /* 缓存里「一个已登录都没有」不能当成可信真值直接画：冷启动时边车没起，
+         查询失败会被写成这份全未登录缓存（旧版本甚至直接落了盘）。
+         这种情况先显示「正在确认登录状态…」并立刻重查，而不是先给一句
+         「还没有登录任何平台」——设置页明明写着已登录，大厅却在否认。 */
+      const cacheSaysNobody = !!(cachedRowsRaw && cachedRowsRaw.length
+        && !cachedRowsRaw.some((r) => r && r.loggedIn));
+      const cachedRows = cacheSaysNobody ? null : cachedRowsRaw;
 
       /* 有缓存就立刻画真状态；没有先给「正在确认登录状态」的引导
          （2026-11-08 起大厅不再摆七个未登录方块，登录统一去设置页） */
@@ -11596,16 +17127,19 @@
       if (window.LiziPixelCard) window.LiziPixelCard.mountAll(H.me);
       restoreHallTheme(rows0);
 
-      if (!force) meIdle(() => { if (token === meToken) meRefreshGrid(token, accounts); });
+      meRetryLeft = 3;
+      /* 全未登录的缓存 / 强制刷新：别等 idle，马上查一次（上面画的是「正在确认」）。 */
+      if (!force && !cacheSaysNobody) meIdle(() => { if (token === meToken) meRefreshGrid(token, accounts); });
       else meRefreshGrid(token, accounts);
     }
 
     /** 并发查 6 家真实状态，回来后整体重画一次 */
     async function meRefreshGrid(token, accounts) {
+      let unknown = 0;                 // 超时 / 请求失败的平台数（≠ 未登录）
       const rows = await Promise.all(accounts.map(async (a) => {
         const base = { id: a.id, name: a.name, accent: a.accent, loggedIn: false };
         const r = await meSettle(a.check());
-        if (r.timeout || r.e || !r.v) return base;
+        if (r.timeout || r.e || !r.v) { unknown++; return base; }
         if (!r.v.loggedIn) {
           /* QQ 上游 401 时登录态是真失效（绝不画成已登录），但本地旧凭据还留着
              上次账号的真实头像；单独拿出来铺图，点击仍走扫码。 */
@@ -11630,12 +17164,53 @@
       }));
 
       if (token !== meToken) return;          // 期间又刷新过，丢弃这次结果
+
+      /* 冷启动边车还没起来时，六家会一起超时。以前这里直接当成「全部未登录」
+         重画并写缓存：大厅立刻从铺色态掉成「还没有登录任何平台」，而且这份
+         错误状态会被下次启动秒出。现在分开处理：
+         · 有查询失败（unknown）时绝不写缓存；
+         · 本次一个已登录都没查到、但缓存里明明有已登录平台 → 保留当前画面，
+           只按 0.8/1.6/3.2s 重查，不把人顶回文字引导。 */
+      if (unknown) {
+        const cached = meCache.read();
+        const cachedLogged = !!(cached && Array.isArray(cached.rows) &&
+          cached.rows.some((r) => r && r.loggedIn));
+        const anyLogged = rows.some((r) => r.loggedIn);
+
+        if (!anyLogged && cachedLogged) {
+          scheduleMeRetry(token, accounts);
+          return;
+        }
+        if (!anyLogged) {
+          /* 没有任何缓存、也没查到登录：先保持「正在确认登录状态…」，
+             不要立刻下结论说没登录；三次都查不到才如实显示未登录引导。 */
+          if (meRetryLeft > 0) {
+            H.me.innerHTML = hallLoginHtml(true);
+            syncHallMeCell();
+            scheduleMeRetry(token, accounts);
+            return;
+          }
+        }
+        /* 部分平台查到了、部分是未知：先画已知的（不缓存），继续重查 */
+        scheduleMeRetry(token, accounts);
+      }
+
       platRows = rows;
       H.me.innerHTML = meHallHtml(rows);
       syncHallMeCell();
       if (window.LiziPixelCard) window.LiziPixelCard.mountAll(H.me);
       restoreHallTheme(rows);
-      meCache.write({ rows });
+      if (!unknown) meCache.write({ rows });
+    }
+
+    /** 冷启动重查：0.8s → 1.6s → 3.2s，最多三次；期间又有新刷新就作废 */
+    function scheduleMeRetry(token, accounts) {
+      if (meRetryLeft <= 0) return;
+      const wait = 800 * Math.pow(2, 3 - meRetryLeft);
+      meRetryLeft--;
+      setTimeout(() => {
+        if (token === meToken) meRefreshGrid(token, accounts);
+      }, wait);
     }
 
     /** 并发查 6 家：每家独立超时/失败，全部结束才重画一次（避免轮播一路跳） */
@@ -11948,10 +17523,25 @@
         const songFace = document.body.dataset.view === 'hall' && sideTab === 'song';
         H.platFx.setPaused(!songFace);
       });
-      /* 长条里的平台图标：点别的台换色，点当前的退出铺色（和「我的」卡同一条路）。
+      /* 长条里的平台图标：点别的台换色；点当前台（已登录且已铺开）直接无副作用。
+         2026-11-13：旧的「点当前台退出铺色」是白屏根因（退场找不到收缩目标时直接
+         hidden，#hall-plat 下方的空 rail 露出 #view-hall 白底），已停用。
          未登录的图标还是灰的；点了去设置页「平台账号」（大厅不弹扫码卡片）。 */
       if (window.LiziDock) window.LiziDock.attach(H.platBar);
       window.addEventListener('lizi:platforms', refreshPlatformUI);
+      /* 本地曲库变了（导入 / 补歌词 / 删除）：铺色态正停在本地时立刻重画；
+         大厅被设置页盖住就记脏，回大厅时再补。缓存必须一起作废，
+         否则 renderDailyMarq 会先画上一份。 */
+      document.addEventListener('lizi-local-change', () => {
+        delete marqCache[PlatVis.LOCAL];
+        if (!mounted || platMode !== PlatVis.LOCAL) return;
+        if (document.body.dataset.view === 'hall') {
+          marqSeq++;
+          renderMarq();
+        } else {
+          localDirty = true;
+        }
+      });
       H.platBar.addEventListener('click', (e) => {
         if (e.target.closest('[data-search-clear]')) {
           clearMarqSearch(true);
@@ -11962,14 +17552,15 @@
         const b = e.target.closest('.pstrip__i[data-plat]');
         if (!b) return;
         const pid = b.dataset.plat;
+        /* 自定义音源也走同一条路：进铺色态，跑马带画本机导入的曲目。
+           它不是账号，所以下面 is-off / 登录检查不会拦它（isLocal）。 */
         /* 大厅不再承担登录入口（2026-11-08）：长条上未登录的平台点了就去设置页
            「平台账号」，不再在这里弹扫码卡片（扫码那套代码还留着，只是没入口）。 */
         if (b.classList.contains('is-off')) { openAccountSettings(); return; }
-        if (pid === platMode) {
-          platOptOut = true;
-          applyHallTheme('');
-          return;
-        }
+        /* 已登录平台：当前台 = 已经铺开，点击不再退出/重进铺色态；同一张卡
+           600ms 内的第二下也吞掉（第一次切台后它已变成当前台，否则会退出 → 白）。 */
+        if (pid === platMode) return;
+        if (!platClickAllowed(pid)) return;
         applyHallTheme(pid, b);
       });
       /* 工具箱每一项自己绑了动作（见 paintTools），这里不再统一处理。
@@ -11979,20 +17570,20 @@
         if (nav) { meGo(+nav.dataset.meNav); return; }
         /* 登录引导（未登录任何平台时大厅里唯一的入口）：去设置页「平台账号」 */
         if (e.target.closest('[data-hall-account]')) { openAccountSettings(); return; }
+        /* 平台全被隐藏时的空态：去「平台管理」 */
+        if (e.target.closest('[data-hall-plat-manage]')) { openPlatManageSettings(); return; }
         /* 「我的」现在只画已登录的平台：
-           · 已登录 → 整块大厅铺成这个平台的首页；再点同一个退出
+           · 已登录 → 整块大厅铺成这个平台的首页；再点同一个不再退出（2026-11-13，
+             和 dock 图标同一条保护：已登录平台点击无副作用，防退出后下方空 rail 白屏）
            · 未登录 / 登录失效（理论上不会画出来）→ 也走设置页，不弹扫码卡片 */
         /* 2026-11-08：收紧到平台方块本身，避免误认到带 data-plat 的祖先块。 */
         const cell = e.target.closest('.plat[data-plat]');
         if (cell) {
           const pid = cell.dataset.plat;
           if (cell.classList.contains('is-in') && !cell.classList.contains('is-stale')) {
-            if (platMode === pid) {
-              platOptOut = true;
-              applyHallTheme('');
-            } else {
-              applyHallTheme(pid, cell);
-            }
+            if (pid === platMode) return;
+            if (!platClickAllowed(pid)) return;
+            applyHallTheme(pid, cell);
             return;
           }
           openAccountSettings();
@@ -12127,6 +17718,13 @@
         heroGeom();
         refreshThemeColors();
       });
+      /* 海报本身的尺寸变化不一定伴随 window.resize（横竖屏切换、分屏、系统字体/
+         显示大小、手机 UI 断点切换都可能只改容器宽度）。方形封面靠
+         --hero-ck = 海报宽/高 放大铺满整幅，值一旧，右边就会露出一块没铺到的
+         纸色。直接观察海报元素，尺寸一变就重算，开销只有写几个 CSS 变量。 */
+      if (typeof ResizeObserver !== 'undefined') {
+        try { new ResizeObserver(() => heroGeom()).observe(H.hero); } catch { /* 老环境 */ }
+      }
       window.addEventListener('resize', () => {
         if (!mounted) return;
         requestAnimationFrame(heroGeom);
@@ -12140,6 +17738,10 @@
           if (H.platFx && H.platFx.resize) H.platFx.resize();
           /* 我的专辑自己的 resize 防抖是 80ms，等它改完 --ma-size 再算一次 */
           if (sideTab === 'myalbums') setTimeout(() => { if (sideTab === 'myalbums') layoutPrism(); }, 120);
+        } else if (publicMarqOn) {
+          /* 普通大厅的公开流：按新宽度重量一份，继续走 */
+          marqMeasure();
+          marqStart();
         }
       }, { passive: true });
     }
@@ -12149,6 +17751,13 @@
         /* 从别的视图回大厅：先摘掉「离开时强制隐藏歌词」的类，再按真实指针恢复悬停 */
         if (H.hero) H.hero.classList.remove('is-away');
         if (mounted) {
+          /* 理论上 refreshMe 在 mounted 时已经当场重画过；这里兜住极端时序
+             （通知和大厅挂载同帧）留下的待办。 */
+          if (mePendingRefresh) {
+            const p = mePendingRefresh;
+            mePendingRefresh = null;
+            paintMe(true, p.mode, p.src);
+          }
           paintHero();
           resyncHover();
           meAttach();                    // 上次离开大厅时摘掉了，回来要接上
@@ -12167,6 +17776,11 @@
               /* 面板被收起来时回大厅：流色 / 跑马带都别开（看不见），
                  等用户点开下三角，setPlatFolded(false) 会重量并续上。 */
               if (platFolded) return;
+              /* 设置页里导入 / 删了本地曲目：回来先按最新曲库重画，再开跑马带。 */
+              if (platMode === PlatVis.LOCAL && localDirty) {
+                localDirty = false;
+                renderMarq();
+              }
               if (H.platFx) H.platFx.setPaused(false);
               /* 可能是在设置页登录后进的铺色态：那时大厅隐藏，paintMarq 里的
                  那次 requestAnimationFrame(marqMeasure) 量到宽度 0，回卷周期是 0。
@@ -12182,6 +17796,13 @@
               /* 设置页里切过「同源 / 撞色」：回来时按当前模式重铺一次 */
               refreshThemeColors();
             }, 420);
+          } else if (publicMarqOn) {
+            /* 普通大厅的公开流：回来后等视图过渡落定再重画/接着走 */
+            clearTimeout(Hall._resumeT);
+            Hall._resumeT = setTimeout(() => {
+              if (!mounted || platMode || document.body.dataset.view !== 'hall') return;
+              renderPublicMarq();
+            }, 420);
           }
           return;
         }
@@ -12191,8 +17812,21 @@
         paintHero();
         paintTools();
         paintSideRail();                 // 铺色态左侧竖向 Rubber Segment（幂等，只建一次）
-        paintMe();                       // 里面会 restoreHallTheme 决定要不要直接进铺色态
+        /* 大厅第一次挂载前收到过登录/退出通知：直接强制重查，别先用 meCache 画一遍旧态。
+           没有待办时保持原来的「缓存秒出 + 空闲校正」。 */
+        {
+          const pending = mePendingRefresh;
+          mePendingRefresh = null;
+          /* 有登录/退出待办就强制重查（按待办模式）；没有就沿用「缓存秒出 + 空闲校正」 */
+          if (pending) paintMe(true, pending.mode, pending.src);
+          else paintMe();                // 里面会 restoreHallTheme 决定要不要直接进铺色态
+        }
         paintDaily();                    // 每日推荐数据 → 跑马带
+        /* 普通大厅：把公开流挂上（有已登录平台的话，稍后 applyHallTheme
+           会把同一个节点挪回铺色面板，这里先让大厅不至于没有带子）。 */
+        setTimeout(() => {
+          if (mounted && !platMode) mountPublicMarq();
+        }, 300);
         resyncHover();
         /* 等 app 自己画完、量完，再兜两次：开场残留的隐藏类 / 半切铺色态 */
         setTimeout(healHallBlank, 900);
@@ -12208,6 +17842,9 @@
         if (H.hero) H.hero.classList.add('is-away');
         meDetach();
         marqStop();
+        /* 拖跑马带时切视图 / 去设置页：先按「离开」收尾 —— 撤掉 drag 类、
+           停掉诊断 rAF、摘掉 window 监听（流色由下面统一暂停，不在这里续）。 */
+        if (marqDragEnd) { const f = marqDragEnd; marqDragEnd = null; f(); }
         /* 分屏拖到一半切视图：立刻按露出比例落定，别把 inline 高度留到下次回来 */
         if (heroDrag) endHeroDrag(true, true);
         stopHeroSnap();
@@ -12226,12 +17863,32 @@
       saveTrack,
       /** 播放状态变了刷新海报播放键（playstate 订阅里调，只订阅一次） */
       syncPlayButton: syncHeroPlay,
-      /** 登录状态变了要把「我的」重画一遍 */
-      refreshMe() { if (mounted) paintMe(true); },   // 登录/退出：跳过缓存，立刻重查
+      /** 登录状态变了要把「我的」重画一遍。
+       *  mode='keep'（登录）先用本次会话最后一次真实结果占位；'clear'（退出）
+       *  立即按未登录重画并退出铺色态。两种模式都会作废 meCache 并强制重查五家。 */
+      refreshMe(mode, src) {
+        const m = mode === 'clear' ? 'clear' : 'keep';
+        try { localStorage.removeItem(ME_CACHE); } catch { /* 隐私模式 */ }
+        /* 真登录 / 退出（带 src）才动内容缓存。启动时那一次 Hall.refreshMe()
+           没有 src，只是校准「我的」卡，不能把它刚取好的首屏内容清掉。
+           缓存清掉后，下面 paintMe → restoreHallTheme → applyHallTheme 会重画
+           当前层级并重新取数（每日推荐 / 精选 / 我的喜欢不再拿未登录那份）。 */
+        if (src) {
+          try { dropAuthCaches(src); } catch { /* 大厅还没初始化 */ }
+          /* 网易云每日推荐不在 marqCache 的常规路径里，它单独存在 dailyTracks，
+             而且只在 Hall.mount 取过一次 —— 登录后必须主动重取一次。
+             还没挂载时不必在这里打：mount() 里本来就会取一次（届时会话已是新的）。 */
+          if (src === 'netease' && mounted) { try { paintDaily(); } catch { /* 还没初始化 */ } }
+        }
+        if (mounted) paintMe(true, m, src);
+        else mePendingRefresh = { mode: m, src };   // 还没挂载：下次 mount 强制重查
+      },
       /** 设置页拖速度滑杆时调；下一帧 tick 就用新速度，不用切视图 */
       setMarqSpeed(v) { marqSpeedPx = marqSpeedOf(v); },
       /** 平台品牌底色：设置页平台行的小色块复用大厅这套 PLAT_BG，别另抄 hex */
       platColor(id) { const b = PLAT_BG[id]; return b ? b.bg : ''; },
+      /** 平台 logo 路径：设置页「平台管理」的小图标也走这张表（2026-11-16） */
+      platLogo(id) { return PLAT_LOGO[id] || ''; },
       /** 设置页切换「大厅内容轨」：立刻重画左上角 + 跑马带，不重进大厅。
           新旧模式都回到每日推荐（旧模式左上角恢复平台名）。 */
       refreshRailMode() {
@@ -12339,28 +17996,448 @@
   })();
 
   /* ================================================================== *
-   * 音乐实验室：DJ 台 / 自动过渡 / 插件
+   * 插件页：VST3 离线处理（2026-11-17）
+   * ------------------------------------------------------------------
+   * 后端 /api/vst/* 已经接好（server.mjs + services/vst-host）。
+   *   · 第一次访问 /api/vst/status 才拉起 Python 宿主，可能要十几秒 → 有「正在启动」态
+   *   · /api/vst/plugins 只列文件名，134 个实测 63ms，快；?probe=1 才 load_plugin，
+   *     单个 3.45 秒、后端一次探测全部 → 不做自动探测，只留显式按钮，且不阻塞处理
+   *   · /api/vst/render 收 { source, url, pluginPath }，url 必须是上游直链
+   *     （server.mjs 用 AUDIO_HOSTS 按 host 校验；播放器里拿到的是本站代理路径，
+   *      所以要把 ?url= 参数拆出来，见 upstreamUrl）
+   * 这一版不做参数编辑：后端收 params/preset，但缓存 id 不含 preset，UI 后面再接。
+   * ================================================================== */
+  const VstLab = (() => {
+    /* AUDIO_HOSTS[source] 的浏览器副本（2026-11-17 从 server.mjs 抄）。
+       只用来决定按钮能不能点 —— 真白名单永远以服务端为准；这里漏放/多放一个，
+       结果只是把「本可避免的 403」变成一次网络往返。 */
+    const HOSTS = {
+      kugou: [/\.kugou\.com$/i, /\.kgmusic\.cn$/i, /\.kglink\.com$/i, /\.kugou\.com\.cn$/i],
+      qishui: [/\.365yg\.com$/i, /\.douyinvod\.com$/i, /\.byteicdn\.com$/i, /\.pstatp\.com$/i, /\.douyinpic\.com$/i, /\.snssdk\.com$/i],
+      bodian: [/\.kuwo\.cn$/i, /\.kugou\.com$/i, /\.bodian\.com$/i],
+      kuwo: [/\.kuwo\.cn$/i, /\.kuwo\.com$/i],
+      netease: [/\.music\.126\.net$/i],
+      spotify: [],   // 后端就是空数组：本期不接音频，直接拒
+    };
+    const SRC_LABEL = {
+      netease: '网易云', kugou: '酷狗', qishui: '汽水', bodian: '波点',
+      kuwo: '酷我', spotify: 'Spotify', qq: 'QQ 音乐', local: '本地音乐',
+    };
+
+    const E = {
+      state: $('vst-state'), search: $('vst-search'), count: $('vst-count'),
+      plugins: $('vst-plugins'), song: $('vst-song'), picked: $('vst-picked'),
+      hint: $('vst-hint'), probe: $('vst-probe'),
+      run: $('vst-run'), why: $('vst-why'),
+      prog: $('vst-prog'), progT: $('vst-prog-t'),
+      err: $('vst-err'), out: $('vst-out'), audio: $('vst-audio'), meta: $('vst-meta'),
+    };
+
+    let bound = false;
+    let status = 'idle';       // idle | starting | ready | error
+    let ready = false;
+    let plugins = [];          // [{ path, name, vendor, version, probeError }]
+    let loadingList = false;
+    let filter = '';
+    let picked = null;
+    let probeStarted = false;  // ?probe=1 只发一次（宿主那边会缓存探测结果）
+    let probeBusy = false;
+    let statusRetry = false;   // 列表能读到但状态还是 error 时，允许重查一次状态
+    let rendering = false;
+    let elapsedTimer = 0;
+    let cur = null;            // 当前曲能处理时的 { title, source, url, ok, why }
+    /* 当前 <audio> 里的直链属于哪一首：切歌时先清空，等 Player 的 source 事件
+       确认新直链已设好再放开 —— 否则「标题已经是新歌、audio.src 还是旧歌」的
+       那几秒里点处理，会把上一首送去渲染。 */
+    let srcKey = '';
+
+    /* ---------- 状态行 ---------- */
+    function setStatus(s, text) {
+      status = s;
+      E.state.dataset.state = s;
+      E.state.textContent = text;
+      paintRun();
+    }
+
+    async function loadStatus() {
+      setStatus('starting', '正在启动…');
+      try {
+        const r = await fetch('/api/vst/status', { cache: 'no-store' });
+        const d = await r.json().catch(() => null);
+        if (d && d.ready) {
+          ready = true;
+          setStatus('ready', '就绪 · pedalboard ' + (d.pedalboard || '未知版本'));
+          /* 启动期间插件列表可能先失败了，宿主就绪后补一次 */
+          if (!plugins.length && !loadingList) loadPlugins();
+        } else {
+          ready = false;
+          setStatus('error', '未就绪 · ' + ((d && d.error) || ('HTTP ' + r.status)));
+        }
+      } catch (e) {
+        ready = false;
+        setStatus('error', '未就绪 · ' + ((e && e.message) || e));
+      }
+    }
+
+    /* ---------- 插件列表（不 probe，快） ---------- */
+    async function loadPlugins() {
+      if (loadingList) return;
+      loadingList = true;
+      E.count.textContent = '正在读取插件列表…';
+      try {
+        const r = await fetch('/api/vst/plugins', { cache: 'no-store' });
+        const d = await r.json().catch(() => null);
+        if (d && d.error) {
+          E.count.textContent = '插件列表读取失败：' + d.error;
+          return;
+        }
+        if (!d || !Array.isArray(d.plugins)) {
+          E.count.textContent = '插件列表读取失败：HTTP ' + r.status;
+          return;
+        }
+        plugins = d.plugins;
+        paintList();
+        /* 列表都读到了说明宿主其实活着；和「未就绪」矛盾时补查一次状态 */
+        if (!ready && status === 'error' && !statusRetry) {
+          statusRetry = true;
+          loadStatus();
+        }
+      } catch (e) {
+        E.count.textContent = '插件列表读取失败：' + ((e && e.message) || e);
+      } finally {
+        loadingList = false;
+      }
+    }
+
+    /* ---------- probe：用户明确要求时才发，且只发一次 ----------
+       后端没有「只探测一个插件」的入口：/plugins?probe=1 会把 134 个逐个
+       load_plugin（单个 3.45 秒），一次就是几分钟。所以这里不做成「点一下
+       插件就自动探测」—— 那等于把全量探测偷偷塞进选插件的动作里，和任务里
+       「不要默认全量 probe」冲突。给一个显式的「读取厂商 / 版本」按钮，
+       点一次、后台跑，选中与处理都不依赖它。宿主进程内会缓存探测结果，
+       后续再请求几乎立刻返回。 */
+    async function probeOnce() {
+      if (probeStarted) return;
+      probeStarted = true;
+      probeBusy = true;
+      paintPicked();
+      paintProbe();
+      E.hint.hidden = false;
+      E.hint.textContent = '正在读取厂商 / 版本：会把每个插件各加载一次，可能要几分钟。不影响下面的处理，可以直接运行。';
+      try {
+        const r = await fetch('/api/vst/plugins?probe=1', { cache: 'no-store' });
+        const d = await r.json().catch(() => null);
+        if (d && Array.isArray(d.plugins) && d.plugins.length) {
+          plugins = d.plugins;
+          /* 按 path 找回选中项，别因为换了数据对象把用户选的插件丢了 */
+          if (picked) picked = plugins.find((p) => p.path === picked.path) || picked;
+          paintList();
+        }
+      } catch { /* 探测失败就继续用文件名，不挡处理 */ }
+      finally {
+        probeBusy = false;
+        E.hint.hidden = true;
+        paintPicked();
+        paintProbe();
+      }
+    }
+
+    /* ---------- 列表渲染 / 搜索 ---------- */
+    function subline(p) {
+      if (p.probeError) return '加载失败：' + p.probeError;
+      const bits = [];
+      if (p.vendor) bits.push(p.vendor);
+      if (p.version) bits.push('v' + p.version);
+      return bits.join(' · ');
+    }
+
+    function paintList() {
+      const box = E.plugins;
+      if (!box) return;
+      const q = filter.trim().toLowerCase();
+      const hit = q
+        ? plugins.filter((p) => [p.name, p.vendor, p.version, p.path]
+          .some((v) => String(v || '').toLowerCase().includes(q)))
+        : plugins;
+      const frag = document.createDocumentFragment();
+      for (const p of hit) {
+        const li = document.createElement('li');
+        li.className = 'lab-vst__row';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'lab-vst__item';
+        b.dataset.path = p.path;
+        b.setAttribute('role', 'option');
+        const on = !!picked && picked.path === p.path;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+        const n = document.createElement('span');
+        n.className = 'lab-vst__name';
+        /* 文件名兜底：probe 之前只有 name=文件名（去掉 .vst3） */
+        n.textContent = p.name || String(p.path || '').split(/[\\/]/).pop() || '未命名插件';
+        b.appendChild(n);
+        const sub = subline(p);
+        if (sub) {
+          const s = document.createElement('span');
+          s.className = 'lab-vst__sub' + (p.probeError ? ' lab-vst__sub--err' : '');
+          s.textContent = sub;
+          b.appendChild(s);
+        }
+        li.appendChild(b);
+        frag.appendChild(li);
+      }
+      if (!hit.length) {
+        const empty = document.createElement('li');
+        empty.className = 'lab-vst__empty';
+        empty.textContent = plugins.length ? '没有匹配的插件' : '没有扫到 VST3 插件（看服务端日志里的 roots）';
+        frag.appendChild(empty);
+      }
+      box.replaceChildren(frag);
+      E.count.textContent = q
+        ? `共 ${plugins.length} 个 · 匹配 ${hit.length} 个`
+        : `共 ${plugins.length} 个插件`;
+    }
+
+    /* 选中不重画列表：重画会把滚动位置冲掉 */
+    function selectPlugin(path) {
+      const p = plugins.find((x) => x.path === path) || null;
+      picked = p;
+      const items = E.plugins ? E.plugins.querySelectorAll('.lab-vst__item') : [];
+      items.forEach((b) => {
+        const on = !!picked && b.dataset.path === picked.path;
+        b.classList.toggle('is-on', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+      });
+      paintPicked();
+      paintProbe();     // 有厂商 / 版本就不显示探测按钮；没读过就等你按
+      paintRun();
+    }
+
+    function paintPicked() {
+      if (!picked) {
+        E.picked.textContent = '还没有选插件';
+        E.picked.dataset.state = '';
+        return;
+      }
+      const name = picked.name || String(picked.path || '').split(/[\\/]/).pop() || '未命名插件';
+      const sub = subline(picked);
+      let tail = sub;
+      if (!tail && probeBusy) tail = '读取中…';
+      E.picked.textContent = tail ? name + ' · ' + tail : name;
+      E.picked.dataset.state = picked.probeError ? 'error' : '';
+    }
+
+    /* 探测按钮只在「选中了插件、还没读到厂商/版本、也从没读过」时出现。
+       解释为什么不在选中时自动跑：见 probeOnce 上面那段。 */
+    function paintProbe() {
+      const show = !!picked && !probeStarted && !subline(picked);
+      E.probe.hidden = !show;
+    }
+
+    /* ---------- 当前曲 → 能处理的直链 ---------- */
+    function currentTrack() {
+      const st = Player && Player.state;
+      if (!st || !Array.isArray(st.queue)) return null;
+      return st.queue[st.index] || null;
+    }
+
+    /** 曲目身份：source + id（同 id 撞平台时也不能算同一首，和 Player.saveTrack 一致） */
+    function trackKey(t) {
+      return t ? ((t.source || 'netease') + '|' + (t.id == null ? '' : t.id)) : '';
+    }
+
+    /* 播放器把各家直链都包成了 /api/<src>/audio?url=<encoded>（QQ / 网易云
+       还带 CORS 原因），VST 端点要的是上游直链本身，所以拆 ?url=。
+       不是同源代理、也不是 http(s) 的（blob: 演示音 / 安卓本地）一律返回 ''。 */
+    function upstreamUrl(raw) {
+      if (!raw) return '';
+      try {
+        const u = new URL(raw, location.href);
+        if (u.origin === location.origin) return u.searchParams.get('url') || '';
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+        return u.href;
+      } catch {
+        return '';
+      }
+    }
+
+    function hostAllowed(source, url) {
+      const allow = HOSTS[source];
+      if (!allow || !allow.length) return false;
+      let host = '';
+      try { host = new URL(url).hostname; } catch { return false; }
+      return allow.some((re) => re.test(host));
+    }
+
+    function songState() {
+      const t = currentTrack();
+      if (!t) {
+        return { ok: false, title: '播放器里还没有歌', why: '先在任意页面放一首；插件处理拿的是当前这首。' };
+      }
+      const title = (t.name || '未知曲目') + ' - ' + (t.artists || '未知歌手');
+      const source = t.source || 'netease';
+      const raw = (Player.audio && (Player.audio.currentSrc || Player.audio.src)) || '';
+      const url = upstreamUrl(raw);
+      const label = SRC_LABEL[source] || source;
+      if (!HOSTS[source] || !HOSTS[source].length) {
+        const why = source === 'local'
+          ? '本地音乐存在 IndexedDB 里，没有能过白名单的直链，这一版不能送去处理。'
+          : source === 'qq'
+            ? 'QQ 的直链走本机代理、不在 VST 白名单里，这一版先不接。'
+            : source === 'spotify'
+              ? 'Spotify 本期不接音频，不能处理。'
+              : `「${label}」不在音频白名单里，不能送去处理。`;
+        return { ok: false, title, why };
+      }
+      if (srcKey !== trackKey(t)) {
+        return { ok: false, title, why: '正在切歌：等这一首的直链设好再处理，免得拿到上一首。' };
+      }
+      if (!url) {
+        return { ok: false, title, why: '这首歌还没拿到直链（可能是演示音轨或正在切歌），等它开始播放再试。' };
+      }
+      if (!hostAllowed(source, url)) {
+        return { ok: false, title, why: '当前直链的主机不在白名单里（多半是演示音轨），不能送去处理。' };
+      }
+      return { ok: true, title, source, url, why: '' };
+    }
+
+    function paintSong() {
+      cur = songState();
+      E.song.textContent = cur.title;
+      paintRun();
+    }
+
+    function paintRun() {
+      if (!E.run) return;
+      const ok = ready && !!picked && !!(cur && cur.ok) && !rendering;
+      E.run.disabled = !ok;
+      let why = '';
+      if (rendering) why = '正在处理，别切歌 / 别刷新这一页。';
+      else if (!ready) {
+        why = status === 'starting'
+          ? '宿主还在启动（第一次要拉起 Python，十几秒），等状态变成「就绪」再处理。'
+          : status === 'error'
+            ? '宿主未就绪，先看右上角的错误。'
+            : '';
+      } else if (!picked) why = '先在左边选一个插件。';
+      else if (!cur || !cur.ok) why = (cur && cur.why) || '';
+      E.why.textContent = why;
+    }
+
+    /* ---------- 提交处理 ---------- */
+    function paintElapsed(t0) {
+      E.progT.textContent = '正在处理… 已等 ' + ((Date.now() - t0) / 1000).toFixed(0)
+        + ' 秒（整首离线处理，几十秒到几分钟都可能）';
+    }
+
+    async function doRender() {
+      if (rendering) return;
+      const info = cur;
+      if (!ready || !picked || !info || !info.ok) return;
+
+      rendering = true;
+      const t0 = Date.now();
+      E.err.hidden = true;
+      E.err.textContent = '';
+      E.out.hidden = true;
+      E.prog.hidden = false;
+      paintElapsed(t0);
+      elapsedTimer = setInterval(() => paintElapsed(t0), 500);
+      paintRun();
+
+      try {
+        const r = await fetch('/api/vst/render', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: info.source, url: info.url, pluginPath: picked.path }),
+        });
+        const d = await r.json().catch(() => null);
+
+        /* 失败：后端 error 原样显示，不吞也不改写 */
+        if (!r.ok || !d || d.ok === false) {
+          E.err.textContent = (d && d.error) ? String(d.error) : ('处理失败：HTTP ' + r.status);
+          E.err.hidden = false;
+          return;
+        }
+        if (!d.url) {
+          E.err.textContent = '处理完成但后端没有返回音频地址';
+          E.err.hidden = false;
+          return;
+        }
+
+        const bits = [];
+        bits.push('耗时 ' + ((Number(d.elapsedMs) || (Date.now() - t0)) / 1000).toFixed(1) + ' 秒');
+        if (d.sampleRate) bits.push(d.sampleRate + ' Hz / ' + (d.channels || '?') + ' 声道');
+        else if (d.channels) bits.push(d.channels + ' 声道');
+        if (d.durationMs) bits.push('音频 ' + (Number(d.durationMs) / 1000).toFixed(1) + ' 秒');
+        bits.push(d.cached ? '已缓存' : '新生成');
+        E.meta.textContent = bits.join(' · ');
+
+        E.audio.src = d.url;
+        E.audio.load();          // 换 src 后显式 load：同一插件再处理一次时也能刷到新结果
+        E.out.hidden = false;
+      } catch (e) {
+        E.err.textContent = '请求失败：' + ((e && e.message) || e);
+        E.err.hidden = false;
+      } finally {
+        clearInterval(elapsedTimer);
+        elapsedTimer = 0;
+        rendering = false;
+        E.prog.hidden = true;
+        paintRun();
+      }
+    }
+
+    /* ---------- 绑定 / 入口 ---------- */
+    function bind() {
+      if (bound) return;
+      bound = true;
+      if (E.search) E.search.addEventListener('input', () => {
+        filter = E.search.value || '';
+        paintList();
+      });
+      if (E.plugins) E.plugins.addEventListener('click', (e) => {
+        const b = e.target.closest('.lab-vst__item');
+        if (!b) return;
+        selectPlugin(b.dataset.path);
+      });
+      if (E.probe) E.probe.addEventListener('click', probeOnce);
+      if (E.run) E.run.addEventListener('click', doRender);
+      /* 换歌 / 换直链都要重算「能不能处理」。Player 在 player.js 里先加载，
+         这里监听一次就够，不随页签开关反复绑。
+         首次绑定时（通常正在播某首）默认 audio.src 就是当前曲的，直接记上；
+         之后 trackchange 先清空，等 source 事件确认新直链再放开。 */
+      srcKey = trackKey(currentTrack());
+      Player.on('trackchange', () => { srcKey = ''; paintSong(); });
+      Player.on('source', ({ track }) => { srcKey = trackKey(track); paintSong(); });
+    }
+
+    return {
+      /** 切到插件页签时调用：第一次才拉状态 / 列表，之后只刷新当前曲 */
+      enter() {
+        bind();
+        if (status === 'idle') loadStatus();
+        if (!plugins.length && !loadingList && status !== 'error') loadPlugins();
+        paintSong();
+        paintProbe();
+      },
+    };
+  })();
+
+  /* ================================================================== *
+   * 音乐实验室：DJ 台 / 插件
    *
    * DJ 台本体整体搬到了 public/lab/dj.js（ESM，按需动态 import），
    * 音频引擎在 public/lab/dj-engine.js —— 一个 AudioContext 单例、
    * 每 deck 一条 trim→EQ→filter→推子→横推→master 的链，全部在那里。
-   * 这里只剩：分页切换、自动过渡（等功率曲线）、插件结论页。
-   * 自动过渡直接复用 DJ 台的 AudioContext 和 master 总线，不再自己造一个。
+   * 这里只剩：分页切换；插件页（VstLab，见上）。
    * ================================================================== */
   const Lab = (() => {
     let mounted = false;
     let DJM = null;        // public/lab/dj.js 的模块对象
     let loading = null;    // import() 的 promise（并发去重）
 
-    const E = {
-      tabs: $('lab-tabs'), sub: $('lab-sub'),
-      xa: $('xfade-a'), xb: $('xfade-b'), curve: $('xfade-curve'),
-      len: $('xfade-len'), lenRange: $('xfade-len-range'),
-      held: $('xfade-held'), heldRange: $('xfade-held-range'),
-      run: $('xfade-run'), stop: $('xfade-stop'),
-    };
-
-    const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+    const E = { tabs: $('lab-tabs'), sub: $('lab-sub') };
 
     /** 动态 import DJ 台；模块加载失败也不让整页崩 */
     function dj() {
@@ -12380,131 +18457,14 @@
       return loading;
     }
 
-    /* ---------- 等功率曲线（10-26 验证过的原式） ---------- */
-    function buildCurves(crossover, together, points) {
-      const pivot = clamp(crossover, 0.15, 0.85);
-      const held = clamp(together, 0, 0.8);
-      const lead = pivot * (1 - held);
-      const trail = pivot + (1 - pivot) * held;
-      const out = new Float32Array(points), inc = new Float32Array(points);
-      for (let i = 0; i < points; i++) {
-        const p = i / (points - 1);
-        const warped = p <= lead ? (p / Math.max(1e-3, lead)) * 0.5
-          : p >= trail ? 0.5 + ((p - trail) / Math.max(1e-3, 1 - trail)) * 0.5 : 0.5;
-        const ang = warped * (Math.PI / 2);
-        const head = Math.pow(10, (-1.5 * Math.sin(Math.PI * p)) / 20);
-        out[i] = Math.cos(ang) * head;
-        inc[i] = Math.sin(ang) * head;
-      }
-      return { out, inc };
-    }
-
-    function drawCurve() {
-      const cv = E.curve;
-      if (!cv) return;
-      const g = cv.getContext('2d');
-      const W = cv.width, H = cv.height, pad = 26;
-      g.clearRect(0, 0, W, H);
-      g.fillStyle = '#fdfcfa'; g.fillRect(0, 0, W, H);
-      const heldN = Number(E.heldRange.value);
-      const { out, inc } = buildCurves(0.45, heldN, 256);
-      const X = (p) => pad + p * (W - pad * 2);
-      const Y = (v) => H - pad - v * (H - pad * 2);
-      g.strokeStyle = 'rgba(21,22,28,.07)'; g.lineWidth = 1;
-      for (let i = 0; i <= 4; i++) {
-        const y = Y(i / 4);
-        g.beginPath(); g.moveTo(pad, y); g.lineTo(W - pad, y); g.stroke();
-      }
-      const line = (arr, color) => {
-        g.strokeStyle = color; g.lineWidth = 2; g.beginPath();
-        for (let i = 0; i < arr.length; i++) {
-          const x = X(i / (arr.length - 1)), y = Y(arr[i]);
-          i ? g.lineTo(x, y) : g.moveTo(x, y);
-        }
-        g.stroke();
-      };
-      line(out, '#d0453f');
-      line(inc, '#1e9e63');
-      g.font = '11px ui-monospace, monospace';
-      g.fillStyle = '#8c8c96';
-      g.fillText('cos² + sin² ≡ 1', W - pad - 96, pad + 4);
-      g.fillStyle = '#c0392f'; g.fillText('— 出', pad + 4, H - 8);
-      g.fillStyle = '#1e9e63'; g.fillText('— 进', pad + 58, H - 8);
-      g.fillStyle = '#8c8c96';
-      g.fillText('平台 ' + heldN.toFixed(2) + ' · 时长 ' + Number(E.lenRange.value).toFixed(1) + 's', W - pad - 130, H - 8);
-    }
-
-    /* ---------- 自动过渡 ---------- */
-    let xfSrc = [];
-    let xfGen = 0;          // 代次：每次 stopXfade 就 ++，下载回来的旧任务发现代次变了就直接放弃
-    /** 停掉自动过渡的演示音源。按钮、自动结束、离开实验室/切分页都走这里（内部调用，不模拟点击）。
-     *  label 传了才改副标题，免得把 DJ 台自己的提示盖掉。 */
-    function stopXfade(label) {
-      xfGen++;
-      if (xfSrc.length) {
-        xfSrc.forEach((s) => { try { s.stop(); } catch { /* 已停 */ } });
-        xfSrc = [];
-      }
-      if (label !== undefined && E.sub) E.sub.textContent = label;
-    }
-    async function runXfade() {
-      const st = Player.state;
-      const qq = st.queue || [];
-      if (qq.length < 2) { E.xa.textContent = '队列里至少要有两首歌'; return; }
-      const T1 = qq[st.index], T2 = qq[(st.index + 1) % qq.length];
-      E.xa.textContent = T1.name || '—';
-      E.xb.textContent = T2.name || '—';
-      E.run.disabled = true;
-      if (DJM) DJM.stopDecks();
-      const gen = xfGen;
-      try {
-        const m = await dj();
-        if (!m) throw new Error('DJ 模块没起来');
-        const { ctx, master } = m.audio();
-        const one = async (tr) => {
-          const r = await API.songUrl(tr.id);
-          const it = (r.data || [])[0];
-          if (!it || !it.url) throw new Error((tr.name || '') + ' 拿不到直链');
-          const ab = await fetch(it.url, { mode: 'cors' }).then((res) => res.arrayBuffer());
-          return ctx.decodeAudioData(ab);
-        };
-        const len = Number(E.lenRange.value), heldN = Number(E.heldRange.value);
-        const [bA, bB] = await Promise.all([one(T1), one(T2)]);
-        /* 期间用户切走了（stopXfade 已经把代次 +1）→ 别开声 */
-        if (gen !== xfGen) return;
-        const t0 = ctx.currentTime + 0.08;
-        const { out, inc } = buildCurves(0.45, heldN, 128);
-        const mk = (b, curve, delay) => {
-          const s = ctx.createBufferSource(); s.buffer = b;
-          const g = ctx.createGain(); g.gain.value = 0;
-          s.connect(g).connect(master);
-          s.start(t0);
-          g.gain.setValueAtTime(0, t0);
-          g.gain.setValueCurveAtTime(curve, t0 + delay, len);
-          return s;
-        };
-        xfSrc = [mk(bA, out, 1.6), mk(bB, inc, 1.6)];
-        if (E.sub) E.sub.textContent = '过渡中… ' + (T1.name || '') + ' → ' + (T2.name || '');
-        setTimeout(() => stopXfade('过渡完成'), (1.6 + len + 0.6) * 1000);
-      } catch (e) {
-        E.xa.textContent = '失败：' + e.message;
-      } finally {
-        E.run.disabled = false;
-      }
-    }
-
     function select(tab) {
-      const t = tab || 'dj';
-      if (t !== 'xfade') stopXfade();
+      /* 2026-11-16：分页只剩 DJ 台 / 插件；传错一律回 DJ 台 */
+      const t = tab === 'vst' ? 'vst' : 'dj';
       if (E.tabs) E.tabs.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('is-on', b.dataset.tab === t));
       document.querySelectorAll('.lab-pane').forEach((p) => p.classList.toggle('is-on', p.id === 'lab-pane-' + t));
-      if (t === 'xfade') {
-        drawCurve();
-        const st = Player.state, qq = st.queue || [];
-        const T1 = qq[st.index], T2 = qq[(st.index + 1) % qq.length];
-        E.xa.textContent = T1 ? (T1.name || '—') : '—';
-        E.xb.textContent = T2 ? (T2.name || '—') : '—';
-      }
+      /* 2026-11-17：切到插件页才拉宿主状态 / 插件列表（第一次要十几秒），
+         切回 DJ 台不做任何事 —— VstLab 的状态留着，下次进来直接复用。 */
+      if (t === 'vst') VstLab.enter();
       /* DJ 台自己管 rAF 和音频；切到别的分页就让它下电 */
       dj().then((m) => { if (m) m.show(t); });
     }
@@ -12514,20 +18474,7 @@
         const b = e.target.closest('[data-tab]');
         if (b) select(b.dataset.tab);
       });
-      if (E.lenRange) E.lenRange.addEventListener('input', () => {
-        E.len.textContent = Number(E.lenRange.value).toFixed(1) + 's';
-        drawCurve();
-      });
-      if (E.heldRange) E.heldRange.addEventListener('input', () => {
-        E.held.textContent = Number(E.heldRange.value).toFixed(2);
-        drawCurve();
-      });
-      if (E.run) E.run.addEventListener('click', runXfade);
-      if (E.stop) E.stop.addEventListener('click', () => stopXfade('已停'));
     }
-
-    /* 把「停演示音源」登记到外层：show() 离开 lab、select() 切分页都要用 */
-    labStopXfade = stopXfade;
 
     return {
       mount(tab) {
@@ -12535,10 +18482,8 @@
         select(tab || 'dj');
       },
       open(tab) { show('lab'); this.mount(tab); },
-      stopXfade,
-      /** 离开实验室：停音频（不给用户留一个看不见的声源） */
+      /** 离开实验室：把 DJ 台的电断掉（不给用户留一个看不见的声源） */
       leave() {
-        stopXfade();
         if (!DJM) return;
         try { DJM.deactivate(); DJM.stopDecks(); } catch { /* 忽略 */ }
       },
@@ -12887,14 +18832,19 @@
   async function afterLogin(s) {
     s = s || await API.session();
     if (!s || s.loggedIn !== true) return;
-    profile = s.profile;
+    profile = bareProfile(s.profile);
     /* 顶栏登录位删掉后，设置页账号块不再靠 MutationObserver 跟着刷新 */
     paintAccount();
-    const lists = await API.userPlaylists(profile.userId);
-    const mine = lists.playlists.filter((p) => !p.subscribed);
-    const sub = lists.playlists.filter((p) => p.subscribed);
-    renderPlaylists([...mine, ...sub]);
-    Hall.refreshMe();          // 大厅那张个人主页卡要立刻换成你自己的
+    /* 先通知大厅，再拉歌单：userPlaylist 慢/失败时也不能把登录态刷新挡住。
+       以前通知排在 await 之后，它的异常会被调用方的 catch 吃掉，大厅就一直
+       停在未登录，只能重启才正常。 */
+    notifyAuthChanged('login', 'netease');   // 大厅「我的」/铺色长条当场重查（跳过缓存）
+    try {
+      const lists = await API.userPlaylists(profile.userId);
+      const mine = lists.playlists.filter((p) => !p.subscribed);
+      const sub = lists.playlists.filter((p) => p.subscribed);
+      renderPlaylists([...mine, ...sub]);
+    } catch { /* 歌单拉不到不影响已经到手的登录态 */ }
   }
 
   function openModal() {
@@ -12932,7 +18882,7 @@
     renderPlaylists([]);
     el.plName.textContent = '发现音乐';
     el.plSub.textContent = '已退出登录';
-    Hall.refreshMe();          // 退出后退回示例卡
+    notifyAuthChanged('logout', 'netease');   // 退出后铺色态立刻退回普通大厅
   }
 
   /* ================================================================== *
@@ -12995,6 +18945,309 @@
     }
   });
 
+  /* ================================================================== *
+   * 桌面版快捷键（2026-11-19）
+   *
+   * 和上面那个全局 handler 分工：Space / Esc / F5 仍然归它，这里不重复绑。
+   * 本段只接管 ←/→/↑/↓、字母键、Ctrl+←/→、/、?。
+   * 守卫顺序：输入法组词 → 输入框 / 滑杆 / 工具区 → 浮层打开 → 当前视图。
+   * 只在 hall / browse / now 生效；舞台、形态、设置、工具箱、歌手页、
+   * 本地音乐等整页视图不抢键。
+   * ================================================================== */
+  function initShortcuts() {
+    const VIEWS = new Set(['hall', 'browse', 'now']);
+    let helpEl = null, helpOpen = false, helpPrevFocus = null;
+
+    /* 这些区域自己要用方向键 / 字母键：焦点在里面时一律放行。
+       注意 #pull（歌词拉手）、[role=slider]（进度 / 音量 / dock / EQ 推子）、
+       #eq-canvas（均衡曲线）、[data-src-root]（大厅来源滚轮）、.srail__i
+       （铺色态竖排侧键）都有各自的键盘逻辑。 */
+    const inOwnKeysArea = (t) => !!t && !!t.closest && !!t.closest([
+      'input', 'textarea', 'select',
+      '[contenteditable]:not([contenteditable="false"])',
+      '[role="slider"]',
+      '#eq-canvas', '.eq-canvas-wrap',
+      '#pull', '[data-src-root]', '.srail__i',
+      '#stage-frame',
+      '.spz', '.mig', '.ldp',
+      '#stage-settings', '#stage-menu-pop',
+    ].join(','));
+
+    const queuePaneOpen = () => !!document.querySelector('#queue:not([hidden])');
+
+    /* 任何浮层打开时，方向键 / 字母键归浮层自己。
+       allowQueue：Q 是队列自己的开关键，队列开着时还要能按 Q 收起来。 */
+    const overlayOpen = (allowQueue) => {
+      if (el.modal && !el.modal.classList.contains('is-closed')) return true;   // 登录
+      if (document.querySelector('#drawer.is-open')) return true;               // 播放页抽屉
+      if (!allowQueue && queuePaneOpen()) return true;                          // 播放队列
+      if (document.querySelector('#queue-sheet:not([hidden])')) return true;    // 手机队列抽屉
+      if (document.querySelector('#mig:not([hidden])')) return true;            // 歌单搬运
+      if (document.querySelector('#lizi-spatial:not([hidden])')) return true;   // 空间音频
+      if (document.querySelector('#eq-sheet:not([hidden])')) return true;       // 音效面板
+      if (document.querySelector('.studio:not([hidden])')) return true;         // AI 工坊
+      if (document.querySelector('#upd-modal:not([hidden])')) return true;      // 更新提示
+      if (document.body.classList.contains('is-ma-fs')) return true;            // 我的专辑全屏
+      if (document.querySelector('.ldp-mask.on')) return true;                  // 歌声延迟
+      if (document.querySelector('#hall-src-menu.is-open')) return true;        // 大厅来源滚轮
+      if (document.querySelector('#glide-select.is-open')) return true;         // 手机来源选择
+      if (document.querySelector('.hcc')) return true;                         // 跑马带环形卡片
+      if (document.querySelector('#tour:not([hidden])')) return true;           // 上手引导
+      if (document.querySelector('#tour-done:not([hidden])')) return true;      // 引导完成页
+      if (document.querySelector('#coach:not([hidden])')) return true;          // 引导聚光灯
+      if (document.querySelector('#login-guide:not([hidden])')) return true;    // 登录引导
+      return false;
+    };
+
+    const seekBy = (delta) => {
+      const a = Player.audio;
+      if (!a || !a.src) return false;
+      const dur = a.duration;
+      if (!isFinite(dur) || dur <= 0) return false;
+      Player.seek(Math.min(dur, Math.max(0, (a.currentTime || 0) + delta)));
+      return true;
+    };
+
+    /* 音量必须同步播放条上的滑杆 UI，不能只改 Player 内部 */
+    const applyVolume = (v) => {
+      const vol = Math.max(0, Math.min(1, Math.round(v * 100) / 100));
+      Player.setVolume(vol);
+      if (el.volFill) el.volFill.style.width = vol * 100 + '%';
+    };
+
+    /* 随机开关记住进随机前的模式，关掉时能回到原来那一档 */
+    let modeBeforeShuffle = Player.state.mode === 'shuffle' ? 'order' : Player.state.mode;
+    const applyMode = (m) => {
+      Player.setMode(m);
+      try { localStorage.setItem('playMode', m); } catch { /* 隐私模式 */ }
+      applyModeUI(m);            // 播放条 / 播放页两处图标一起换
+    };
+
+    function toggleLyricsPane() {
+      if (view !== 'now') { show('now'); return; }   // show('now') 自带 setLyricsOpen(true)
+      setLyricsOpen(!lyricsOpen);
+    }
+
+    function toggleQueuePane() {
+      if (view !== 'now') show('now');
+      const open = $('queue').hidden;                // 当前收起 → 这次打开
+      setDrawer(false);                              // 抽屉别和面板叠着
+      setQueuePane(open);
+      if (open) setLyricsOpen(true);                 // 队列住在歌词面板里
+      /* 收起时如果焦点还在队列行上，跟着现有 Esc 收队列的做法回到「控制」 */
+      if (!open) {
+        const q = $('queue');
+        if (q && q.contains && q.contains(document.activeElement)) {
+          const back = $('btn-drawer');
+          if (back && back.focus) { try { back.focus({ preventScroll: true }); } catch { back.focus(); } }
+        }
+      }
+    }
+
+    function toggleShuffle() {
+      if (Player.state.mode === 'shuffle') applyMode(modeBeforeShuffle || 'order');
+      else { modeBeforeShuffle = Player.state.mode; applyMode('shuffle'); }
+    }
+
+    /* R：列表循环 → 单曲循环 → 顺序（关循环）→ 列表循环；随机档按“列表”起算 */
+    function cycleLoopMode() {
+      const m = Player.state.mode;
+      applyMode(m === 'loop' ? 'single' : m === 'single' ? 'order' : 'loop');
+    }
+
+    function focusSearch() {
+      const input = el.search;
+      if (!input || !input.focus) return;
+      /* 顶栏搜索在所有视图都有；只有它被隐藏时才退回播放页再聚焦 */
+      const box = input.getClientRects ? input.getClientRects() : null;
+      if (box && !box.length) show('now');
+      try { input.focus({ preventScroll: true }); } catch { input.focus(); }
+      try { input.select(); } catch { /* 老浏览器 */ }
+    }
+
+    /* ---------------- ? 快捷键帮助浮层 ---------------- */
+
+    const helpRow = (keys, desc, note) => `<div class="kbdhelp__row">
+      <span class="kbdhelp__keys">${keys.map((k) => `<kbd>${k}</kbd>`).join('')}</span>
+      <span class="kbdhelp__desc">${desc}${note ? `<i>${note}</i>` : ''}</span>
+    </div>`;
+
+    function ensureHelp() {
+      if (helpEl) return helpEl;
+      const st = document.createElement('style');
+      st.id = 'lizi-shortcuts-style';
+      st.textContent = [
+        '.kbdhelp{position:fixed;inset:0;z-index:2147482000;display:flex;align-items:center;justify-content:center;',
+        'padding:24px;background:oklch(13% 0.012 70 / .68);opacity:0;transition:opacity .18s ease;',
+        'font:500 13px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif}',
+        '.kbdhelp[hidden]{display:none}',
+        '.kbdhelp.is-on{opacity:1}',
+        '.kbdhelp__card{width:min(94vw,600px);max-height:min(86vh,660px);overflow:auto;padding:22px 24px 16px;',
+        'border-radius:18px;color:#f2e7d4;background:linear-gradient(180deg,#241f17,#15110c);',
+        'border:1px solid rgba(240,179,92,.22);box-shadow:0 26px 70px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,220,160,.08);',
+        'transform:translateY(10px) scale(.985);opacity:0;transition:transform .22s cubic-bezier(.2,.8,.2,1),opacity .18s ease}',
+        '.kbdhelp.is-on .kbdhelp__card{transform:none;opacity:1}',
+        '.kbdhelp__head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}',
+        '.kbdhelp__title{margin:0;font-size:16px;font-weight:650;letter-spacing:.03em;color:#f7ecd9}',
+        '.kbdhelp__title i{font-style:normal;color:#f0b35c;margin-right:8px}',
+        '.kbdhelp__x{width:32px;height:32px;padding:0;border-radius:50%;cursor:pointer;',
+        'border:1px solid rgba(240,179,92,.26);background:rgba(240,179,92,.08);color:#e8c48a;',
+        'font-family:inherit;font-size:19px;font-weight:400;line-height:1}',
+        '.kbdhelp__x:hover{background:rgba(240,179,92,.16)}',
+        '.kbdhelp__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 26px}',
+        '.kbdhelp__row{display:flex;align-items:baseline;gap:10px;padding:7px 0;border-top:1px solid rgba(240,179,92,.09)}',
+        '.kbdhelp__keys{flex:none;display:flex;gap:4px;min-width:100px}',
+        '.kbdhelp__keys kbd{font:600 11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#f0b35c;',
+        'background:rgba(240,179,92,.10);border:1px solid rgba(240,179,92,.24);border-bottom-width:2px;',
+        'border-radius:6px;padding:2px 6px;min-width:24px;text-align:center;white-space:nowrap}',
+        '.kbdhelp__desc{color:#e9dcc6;font-size:13px;line-height:1.45}',
+        '.kbdhelp__desc i{display:block;font-style:normal;font-size:13px;color:#a8977e}',
+        '.kbdhelp__foot{margin:14px 0 0;padding-top:12px;border-top:1px solid rgba(240,179,92,.12);',
+        'font-size:13px;color:#a8977e;text-align:center}',
+        '@media (max-width:560px){.kbdhelp__grid{grid-template-columns:1fr}.kbdhelp__keys{min-width:92px}}',
+      ].join('');
+      document.head.appendChild(st);
+
+      const wrap = document.createElement('div');
+      wrap.className = 'kbdhelp';
+      wrap.id = 'lizi-keys-help';
+      wrap.hidden = true;
+      wrap.innerHTML = `
+        <div class="kbdhelp__card" role="dialog" aria-modal="true" aria-labelledby="kbdhelp-title">
+          <header class="kbdhelp__head">
+            <h2 class="kbdhelp__title" id="kbdhelp-title"><i>?</i>键盘快捷键</h2>
+            <button class="kbdhelp__x" type="button" aria-label="关闭">×</button>
+          </header>
+          <div class="kbdhelp__grid">
+            ${helpRow(['Space'], '播放 / 暂停')}
+            ${helpRow(['←', '→'], '后退 / 前进 5 秒', '按住 Shift = 15 秒')}
+            ${helpRow(['↑', '↓'], '音量 ±5%', '按住 Shift = ±1%')}
+            ${helpRow(['M'], '静音 / 恢复')}
+            ${helpRow(['Ctrl', '←', '→'], '上一首 / 下一首')}
+            ${helpRow(['L'], '歌词面板开 / 关')}
+            ${helpRow(['Q'], '播放队列开 / 关')}
+            ${helpRow(['S'], '随机播放开关')}
+            ${helpRow(['R'], '循环模式：列表 → 单曲 → 关')}
+            ${helpRow(['/'], '聚焦搜索框')}
+            ${helpRow(['?'], '打开 / 关闭本帮助')}
+            ${helpRow(['Esc'], '关闭浮层 / 返回')}
+          </div>
+          <p class="kbdhelp__foot">再按 ? 或 Esc 关闭 · 输入框、滑块和浮层打开时不抢键</p>
+        </div>`;
+      document.body.appendChild(wrap);
+      wrap.addEventListener('click', (e) => {
+        if (e.target === wrap || (e.target.closest && e.target.closest('.kbdhelp__x'))) closeHelp();
+      });
+      helpEl = wrap;
+      return wrap;
+    }
+
+    function openHelp() {
+      ensureHelp();
+      if (helpOpen) return;
+      helpOpen = true;
+      helpPrevFocus = document.activeElement;
+      helpEl.hidden = false;
+      requestAnimationFrame(() => { if (helpOpen) helpEl.classList.add('is-on'); });
+      const x = helpEl.querySelector('.kbdhelp__x');
+      if (x) { try { x.focus({ preventScroll: true }); } catch { x.focus(); } }
+    }
+
+    function closeHelp() {
+      if (!helpOpen || !helpEl) return;
+      helpOpen = false;
+      const box = helpEl;
+      box.classList.remove('is-on');
+      setTimeout(() => { if (!helpOpen) box.hidden = true; }, 200);
+      const back = helpPrevFocus;
+      helpPrevFocus = null;
+      if (back && back.isConnected && back.focus) {
+        try { back.focus({ preventScroll: true }); } catch { back.focus(); }
+      }
+    }
+
+    /* 设置页「快捷键」入口（2026-11-19）：桌面和 /m 共用 app.js。
+       点这一行直接打开同一张帮助卡；手机上外接键盘也能用。 */
+    window.LIZI_KEYS_HELP = { open: openHelp, close: closeHelp };
+    const kbdRow = document.getElementById('row-shortcuts');
+    if (kbdRow) kbdRow.addEventListener('click', () => openHelp());
+
+    /* 帮助浮层打开时用捕获阶段守门：Esc / ? 关浮层，其它快捷键（含空格播放）
+       一律不往下传。Tab 留给浏览器，键盘仍能走。 */
+    document.addEventListener('keydown', (e) => {
+      if (!helpOpen) return;
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Escape' || e.key === '?') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        closeHelp();
+        return;
+      }
+      if (e.key === 'Tab') return;
+      /* 关闭键自己保留 Enter；浮层外万一还留着焦点，也不让 Enter 点到底下的按钮 */
+      if (e.key === 'Enter') {
+        if (e.target && e.target.closest && e.target.closest('.kbdhelp__x')) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      if (e.key === ' ' || e.code === 'Space' || /^Arrow/.test(e.key) || /^Key[MLQSR]$/.test(e.code)) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }, true);
+
+    /* ---------------- 主快捷键 ---------------- */
+
+    document.addEventListener('keydown', (e) => {
+      if (e.isComposing || e.keyCode === 229) return;   // 输入法组词中
+      if (helpOpen) return;                             // 帮助浮层由上面的捕获处理器管
+      if (!VIEWS.has(view)) return;                     // 舞台 / 形态 / 设置 / 工具箱等整页不抢
+      if (inOwnKeysArea(e.target)) return;
+      if (overlayOpen()) {
+        /* 队列开着时，Q 仍然负责把它收起来（其它浮层不例外） */
+        if (!(e.code === 'KeyQ' && queuePaneOpen() && !overlayOpen(true))) return;
+      }
+
+      const key = e.key, code = e.code;
+      const mod = e.ctrlKey || e.metaKey;
+      const plain = !mod && !e.altKey;
+
+      /* Ctrl / Cmd + ← →：上一首 / 下一首；同时挡掉浏览器后退 / 前进 */
+      if (mod && !e.shiftKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+        e.preventDefault();
+        if (key === 'ArrowLeft') Player.prev(); else Player.next();
+        return;
+      }
+
+      if (key === 'ArrowLeft' || key === 'ArrowRight') {
+        if (!plain) return;
+        const step = e.shiftKey ? 15 : 5;
+        if (seekBy(key === 'ArrowLeft' ? -step : step)) e.preventDefault();
+        return;
+      }
+
+      if (key === 'ArrowUp' || key === 'ArrowDown') {
+        if (!plain) return;
+        const step = e.shiftKey ? 0.01 : 0.05;
+        e.preventDefault();
+        applyVolume(Player.volume + (key === 'ArrowUp' ? step : -step));
+        return;
+      }
+
+      if (!plain) return;   // 字母键不抢 Ctrl+S / Ctrl+R 这类浏览器快捷键
+
+      if (code === 'KeyM') { e.preventDefault(); el.btnMute.click(); return; }   // 复用现有静音按钮
+      if (code === 'KeyL') { e.preventDefault(); toggleLyricsPane(); return; }
+      if (code === 'KeyQ') { e.preventDefault(); toggleQueuePane(); return; }
+      if (code === 'KeyS') { e.preventDefault(); toggleShuffle(); return; }
+      if (code === 'KeyR') { e.preventDefault(); cycleLoopMode(); return; }
+      if (key === '/') { e.preventDefault(); focusSearch(); return; }
+      if (key === '?') { e.preventDefault(); openHelp(); return; }
+    });
+  }
+  initShortcuts();
+
   /* 粘贴 Cookie 导入（备用，也是最稳的一条）。
      值只发给本机服务端：这里不 console、不拼进诊断、成功后立刻清空输入框，
      页面上只会出现「登录成功 / cookie 无效或已过期」这类服务端给的文案。 */
@@ -13042,23 +19295,30 @@
   const srcSwitch = $('src-switch');
   const srcHint = $('src-hint');
 
-  /* 音源表：加一家只改这里（按钮是从它生成的，别再往 index.html 写死按钮） */
-  const SEARCH_SOURCES = [
+  /* 音源表：加一家只改这里（按钮是从它生成的，别再往 index.html 写死按钮）。
+     2026-11-15：设置 → 平台管理 关掉的平台不进搜索栏；「自定义音源」打开时
+     末尾多一个「本地」。SEARCH_SOURCES 是**过滤后的**当前表，别处只读它。 */
+  const SEARCH_ALL = [
     { id: 'netease', label: '网易云', hint: '网易云' },
     { id: 'qq', label: 'QQ 音乐', hint: 'QQ 音乐' },
     { id: 'kugou', label: '酷狗', hint: '酷狗音乐' },
     { id: 'qishui', label: '汽水', hint: '汽水音乐' },
     { id: 'bodian', label: '波点', hint: '波点音乐' },
+    { id: PlatVis.LOCAL, label: '本地', hint: '本地音乐' },
     /* 2026-11-10：Spotify 整块下线（和设置页那边同一决定），搜索栏不再露出。
        OAuth 回调在本机回不来，留着只会让用户以为能搜。 */
   ];
-  /* 老用户 localStorage 里可能还存着 'spotify'：表里没有就回落到网易云，
-     否则搜索栏一个按钮都不高亮、hint 还会显示「Spotify」。 */
-  if (!SEARCH_SOURCES.some((s) => s.id === searchSource)) searchSource = 'netease';
-  const srcLabel = (id) => (SEARCH_SOURCES.find((s) => s.id === id) || {}).hint || id;
+  let SEARCH_SOURCES = SEARCH_ALL.filter((s) => PlatVis.has(s.id));
+  /* 老用户 localStorage 里可能还存着 'spotify' / 已隐藏的平台：表里没有就回落到
+     第一个可见音源，否则搜索栏一个按钮都不高亮、hint 还会显示那家的名字。 */
+  if (!SEARCH_SOURCES.some((s) => s.id === searchSource)) {
+    searchSource = SEARCH_SOURCES.length ? SEARCH_SOURCES[0].id : 'netease';
+  }
+  const srcLabel = (id) => (SEARCH_ALL.find((s) => s.id === id) || {}).hint || id;
   const isAll = () => searchSource === 'all';
 
   function buildSourceButtons() {
+    srcSwitch.querySelectorAll('[data-src]').forEach((b) => b.remove());
     const frag = document.createDocumentFragment();
     for (const s of [{ id: 'all', label: '全部' }, ...SEARCH_SOURCES]) {
       const b = document.createElement('button');
@@ -13090,6 +19350,20 @@
 
   /** 打一家，返回 { id, tracks, count, error, note } —— 一家挂了不能拖垮其它家 */
   async function searchOne(id, q) {
+    if (id === PlatVis.LOCAL) {
+      const l = window.LIZI_LOCAL;
+      if (!l) return { id, tracks: [], count: 0, error: '当前环境不支持本地音乐' };
+      try {
+        const rows = await l.search(q);
+        const tracks = rows.map((t) => ({
+          id: t.id, source: 'local', name: t.name, artists: t.artists,
+          album: t.album, duration: t.duration, cover: t.cover,
+        }));
+        return { id, tracks, count: tracks.length, error: null };
+      } catch (e) {
+        return { id, tracks: [], count: 0, error: '本地音乐读取失败' };
+      }
+    }
     if (id === 'netease') {
       const d = await API.search(q);
       return { id, tracks: d.tracks || [], count: d.songCount || (d.tracks || []).length, error: null };
@@ -13104,9 +19378,30 @@
     return { id, tracks: (d && d.tracks) || [], count: (d && d.songCount) || ((d && d.tracks) || []).length, error: null, note: d && d.note };
   }
 
+  /* 平台管理开关变了：重排音源按钮；当前选中的被关掉就换第一个可见的 */
+  function rebuildSearchSources() {
+    SEARCH_SOURCES = SEARCH_ALL.filter((s) => PlatVis.has(s.id));
+    if (!isAll() && !SEARCH_SOURCES.some((s) => s.id === searchSource)) {
+      searchSource = SEARCH_SOURCES.length ? SEARCH_SOURCES[0].id : 'all';
+      try { localStorage.setItem('lizi.searchSource', searchSource); } catch { /* ignore */ }
+    }
+    buildSourceButtons();
+    paintSource();
+  }
+  document.addEventListener('lizi:platforms', rebuildSearchSources);
+
   async function runSearch(q) {
     lastQuery = q;
     show('browse');
+    if (!SEARCH_SOURCES.length) {
+      hint('没有可搜索的音源');
+      emptyList('设置 → 平台管理 里把想用的平台打开，再来搜索。');
+      return;
+    }
+    if (!isAll() && !SEARCH_SOURCES.some((s) => s.id === searchSource)) {
+      searchSource = SEARCH_SOURCES[0].id;
+      paintSource();
+    }
     el.plName.textContent = `搜索「${q}」`;     // 主视图头已删，这两行是给旧代码留的
     el.plCover.hidden = true;
 
@@ -13160,10 +19455,16 @@
     searchTimer = setTimeout(() => runSearch(q), 420);
   });
 
-  /* 切音源：有搜索词就用新音源重搜一遍 */
+  /* 切音源：有搜索词就用新音源重搜一遍。
+     点的是**当前已在用**的音源时不早退，当成「重搜一次」——
+     同一个词再搜一遍必须有反应（上游偶发失败时这就是唯一的重试入口）。 */
   srcSwitch.addEventListener('click', (e) => {
     const b = e.target.closest('[data-src]');
-    if (!b || b.dataset.src === searchSource) return;
+    if (!b) return;
+    if (b.dataset.src === searchSource) {
+      if (lastQuery) runSearch(lastQuery);
+      return;
+    }
     searchSource = b.dataset.src;
     try { localStorage.setItem('lizi.searchSource', searchSource); } catch { /* ignore */ }
     paintSource();
@@ -13186,7 +19487,16 @@
   el.search.addEventListener('keydown', (e) => {
     /* 输入法候选框里的 Esc 是「取消这次组词」，别顺手把搜索框也收了 */
     if (e.isComposing || e.keyCode === 229) return;
-    if (e.key === 'Escape') el.search.blur();
+    if (e.key === 'Escape') { el.search.blur(); return; }
+    /* 回车 = 重搜当前词。搜索是"输入即搜"，所以输入框里的字没变时不会再触发
+       input 事件 —— 同一个词再搜一遍会毫无反应，用户只会觉得搜索坏了。
+       这里显式再跑一次（顺手清掉还没到点的防抖，免得同一句搜两遍）。 */
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      clearTimeout(searchTimer);
+      const q = el.search.value.trim();
+      if (q) runSearch(q); else paintSource();
+    }
   });
   el.btnPlay.addEventListener('click', () => Player.toggle());
   el.btnPrev.addEventListener('click', () => Player.prev());
@@ -13318,12 +19628,19 @@
   bindTopbarScroll(el.viewSettings);
   /* 我的专辑（3D 陈列架）同理 */
   bindTopbarScroll(el.viewMyAlbums);
+  /* 本地音乐（自定义音源）页同理 */
+  bindTopbarScroll(el.viewLocal);
   /* 工具箱整页同理：滚动时 logo / 玻璃下沿暗部也要跟着变 */
   bindTopbarScroll(el.viewTools);
 
   /* ---- 进度条 / 音量条：指针拖拽 ---- */
   function bindBar(barEl, onRatio, opts = {}) {
     const vertical = !!opts.vertical;
+    /* 进度条拖动时只在松手后 seek（2026-11-22）：以前每个 pointermove
+       都写一次 currentTime，一次拖动会打几十个 Range 请求；酷狗概念版
+       的直链扛不住，拖到后面直接静音卡死。音量条仍实时更新。 */
+    const commitOnRelease = !!opts.commitOnRelease;
+    const preview = typeof opts.preview === 'function' ? opts.preview : null;
     const ratioAt = (e) => {
       const r = barEl.getBoundingClientRect();
       /* 竖滑杆：上 = 100%，下 = 0 */
@@ -13334,14 +19651,24 @@
     };
     barEl.addEventListener('pointerdown', (e) => {
       barEl.setPointerCapture(e.pointerId);
-      onRatio(ratioAt(e));
-      const move = (ev) => onRatio(ratioAt(ev));
+      let lastR = ratioAt(e);
+      let moved = false;
+      onRatio(lastR);                     // 单击直接跳过去
+      const move = (ev) => {
+        moved = true;
+        lastR = ratioAt(ev);
+        if (commitOnRelease) { if (preview) preview(lastR); return; }
+        onRatio(lastR);
+      };
       const up = () => {
         barEl.removeEventListener('pointermove', move);
         barEl.removeEventListener('pointerup', up);
+        barEl.removeEventListener('pointercancel', up);
+        if (commitOnRelease && moved) onRatio(lastR);
       };
       barEl.addEventListener('pointermove', move);
       barEl.addEventListener('pointerup', up);
+      barEl.addEventListener('pointercancel', up);
     });
     // 键盘可达：拖动条也要能用方向键（竖条用上下）
     barEl.addEventListener('keydown', (e) => {
@@ -13359,6 +19686,9 @@
   bindBar(el.bar, (r) => {
     Player.seek(r * (Player.audio.duration || 0));
     el.barFill.style.width = r * 100 + '%';
+  }, {
+    commitOnRelease: true,
+    preview: (r) => { el.barFill.style.width = r * 100 + '%'; },
   });
   bindBar(el.vol, (r) => {
     Player.setVolume(r);
@@ -13465,6 +19795,9 @@
     Player.seek(r * (Player.audio.duration || 0));
     dockShown = r;
     paintDock(r);
+  }, {
+    commitOnRelease: true,
+    preview: (r) => { dockShown = r; paintDock(r); },
   });
 
   /* --------------------------------------------------------------------------
@@ -13526,9 +19859,13 @@
   /* ================================================================== *
    * 播放器事件
    * ================================================================== */
-  Player.on('trackchange', ({ track, index }) => {
-    /* 大厅巨幅封面 = 上一首播放的歌，换歌就记一笔 */
-    Hall.saveTrack(track);
+  /* 播放页 / 迷你播放器 / 形态浮层里的「当前曲目」文字与封面。
+     抽成函数是因为冷启动也要补画一次：player.js 的 restoreQueue() 只把队列从
+     localStorage 恢复回来，**不发 trackchange**，界面就停在「未播放」，
+     而大厅海报显示的是同一首「上次听到」——点进去看到空白，按播放才补上。
+     这里只画显示，不碰队列、不取播放地址、不重新记时间戳。 */
+  function paintTrackUI(track) {
+    if (!track) return;
     el.npName.textContent = track.name;
     el.npArtist.innerHTML = track.album
       ? `${artistLinks(track.artists, track.artistIds)} · ${albumLink(track.album, track.albumId)}`
@@ -13552,16 +19889,11 @@
       if (el.dockCover) el.dockCover.removeAttribute('src');
       if (el.nowBg) el.nowBg.style.backgroundImage = '';
     }
-    markCurrent(index);
-    updateQueueCount();                     // 队列长度 / 当前曲目变了，抽屉里的计数要跟上
-    if (queueBox && !queueBox.hidden) renderQueue();
-    applyArtwork(track);
-    /* 铺色态开着时，底色跟着新封面渐变过去（自定义色 / 平台色模式下内部会 no-op） */
-    Hall.recolor(track);
-    beatUI.reset();          // 换歌后节拍要重新估
     // 形态页浮层里的当前歌曲：封面 / 歌名 / 歌手·专辑
     {
-      const n = $('stage-name'), s = $('stage-sub');
+      /* 2026-11-19：这个「歌手 · 专辑」行原来叫 #stage-sub，让位给底部电影字幕层，
+         改名 stage-song-sub（字幕层的 id 按功能约定是 stage-sub）。 */
+      const n = $('stage-name'), s = $('stage-song-sub');
       const img = $('stage-cover'), ph = $('stage-cover-ph');
       if (n) n.textContent = track.name;
       if (s) s.textContent = `${track.artists || ''}${track.album ? ' · ' + track.album : ''}`;
@@ -13577,9 +19909,47 @@
         }
       }
     }
-    StageHost.refresh();
     document.title = `${track.name} · ${track.artists}`;
+  }
+
+  Player.on('trackchange', ({ track, index }) => {
+    /* 大厅巨幅封面 = 上一首播放的歌，换歌就记一笔 */
+    Hall.saveTrack(track);
+    paintTrackUI(track);
+    markCurrent(index);
+    updateQueueCount();                     // 队列长度 / 当前曲目变了，抽屉里的计数要跟上
+    if (queueBox && !queueBox.hidden) renderQueue();
+    applyArtwork(track);
+    /* 铺色态开着时，底色跟着新封面渐变过去（自定义色 / 平台色模式下内部会 no-op） */
+    Hall.recolor(track);
+    beatUI.reset();          // 换歌后节拍要重新估
+    /* 形态浮层的当前曲目 / 标题栏已由 paintTrackUI 画过，这里只把时间轴推给舞台 */
+    StageHost.refresh();
   });
+
+  /* 本地曲目的封面不在 localStorage 里（data URL 太大），player.js 恢复队列后
+     从 IndexedDB 补回来并发这条事件 —— 只补封面，不重记「上次听到」时间。 */
+  Player.on('queuechange', () => {
+    const s = Player.state;
+    const cur = s && Array.isArray(s.queue) ? s.queue[s.index] : null;
+    if (!cur) return;
+    paintTrackUI(cur);
+    applyArtwork(cur);
+    updateQueueCount();
+    if (queueBox && !queueBox.hidden) renderQueue();
+  });
+
+  /* 冷启动补画：player.js 启动时 restoreQueue() 已经把上次的队列和当前曲目读回来了
+     （所以「点海报进播放页」时 ensureHeroTrack 看到队列里就是这首，直接早退、不发
+     trackchange），可界面上的歌名 / 封面 / 歌手还是 HTML 里的「未播放」。
+     结果就是：大厅海报写着「上次听到 · 某首歌」，点进去却是空白的未播放。
+     这里按恢复出来的当前曲目画一遍显示 —— 不加载音频、不自动播放、不重记时间戳；
+     用户按播放时 Player.toggle() 会发现 audio.src 为空，照常按 id 取址开播。 */
+  (function paintRestoredTrack() {
+    const s = Player.state;
+    const cur = s && Array.isArray(s.queue) ? s.queue[s.index] : null;
+    if (cur) paintTrackUI(cur);
+  })();
 
   Player.on('playstate', (playing) => {
     setIcon(el.btnPlay, playing ? ICONS.pause : ICONS.play);
@@ -13617,15 +19987,90 @@
     netease: '网易云', qq: 'QQ 音乐', kugou: '酷狗音乐', qishui: '汽水音乐', bodian: '波点音乐', spotify: 'Spotify',
   };
 
-  Player.on('source', ({ demo, track, reason, preview }) => {
+  /* 试听片段的原因要分平台说，不能一律写"未登录或没有会员"：
+     - QQ：未登录 / 没有会员，上游就只给 preview 直链（登录或开会员能听整曲）
+     - 波点 / 酷狗：未登录，或者这首歌本身上游只放试听（free_part）
+     - 汽水：**和会员无关**。本机走车载协议取不到整曲，会员账号也一样只有 30 秒，
+       而且是从高潮开始播（clipStartMs 就是这段的偏移，歌词靠它对齐）。
+     写错原因比不写更糟 —— 用户会去开会员、开完发现还是 30 秒。 */
+  const PREVIEW_WHY = {
+    qishui: { short: '汽水 · 只能试听', long: '汽水接口只提供 30 秒片段（从高潮开始播）。本机取不到整曲，开通会员也一样。' },
+    bodian: { short: '波点 · 只能试听', long: '波点对这首歌只下发试听片段：通常是未登录，或者这首歌需要会员。' },
+    kugou: { short: '酷狗 · 试听 30 秒', long: '酷狗对这首歌只下发 30 秒免费试听片段（free_part），登录或购买后才能听整曲。' },
+    qq: { short: 'QQ · 只能试听', long: 'QQ 音乐对未登录 / 没有会员的账号只下发试听片段，登录或开通会员后可听整曲。' },
+  };
+
+  /* 试听提示条：同一首只在第一次开始试听时弹一次，6 秒后自己收（点一下也能收）。
+     为什么不能只靠角标：老播放条 footer 里的 #badge 在 pbn-on 下整条 footer 都是隐藏的，
+     新栏 #pbn 的角标又只有悬停才看得到 title；手机上更没法悬停。
+     所以原因得单独浮一层文字出来。 */
+  let previewTipEl = null;
+  let previewTipTimer = 0;
+  let previewTipKey = '';
+  function showPreviewTip(track, why) {
+    const key = `${track.source || 'netease'}:${track.id || track.mid || track.name || ''}`;
+    if (key === previewTipKey) return;          // 同一首重进 / 重播不重复弹
+    previewTipKey = key;
+    if (!previewTipEl) {
+      previewTipEl = document.createElement('div');
+      previewTipEl.className = 'preview-tip';
+      previewTipEl.setAttribute('role', 'status');
+      previewTipEl.addEventListener('click', () => previewTipEl.classList.remove('is-on'));
+      document.body.appendChild(previewTipEl);
+    }
+    previewTipEl.textContent = why.long;
+    previewTipEl.classList.add('is-on');
+    clearTimeout(previewTipTimer);
+    previewTipTimer = setTimeout(() => previewTipEl.classList.remove('is-on'), 6000);
+  }
+
+  Player.on('source', ({ demo, track, reason, preview, empty }) => {
+    /* VIP 曲目 + 当前平台账号没 VIP：右下角提示（查询失败/未知不弹，见 vip-notice.js） */
+    if (window.LIZI_VIP) LIZI_VIP.notice(track, { reason });
     const who = SOURCE_LABEL[track.source] || SOURCE_LABEL.netease;
-    /* 试听片段：有声音，但只有 30~60 秒（QQ 匿名 / 汽水未登录 / 波点未登录都是这样）。
-       必须说清楚 —— 不然用户只会觉得"这首歌怎么放到一半停了"。 */
-    if (preview && !demo) {
+    /* 试听片段：有声音，但只有 30~60 秒（QQ 匿名 / 汽水受限 / 波点未登录都是这样）。
+       必须说清楚"为什么" —— 不然用户只会觉得"这首歌怎么放到一半停了"。 */
+    if (preview && !demo && !empty) {
+      const why = PREVIEW_WHY[track.source]
+        || { short: '试听片段', long: `${who} 对这个账号只下发试听片段（未登录或没有会员）。` };
       el.badge.hidden = false;
-      el.badge.textContent = '试听片段';
-      el.badge.title = `《${track.name}》是 ${who} 的试听片段：这个账号（未登录或没有会员）只能听一小段。`;
+      el.badge.textContent = why.short;
+      el.badge.title = `《${track.name}》${why.long}`;
       el.badge.classList.remove('is-action');
+      showPreviewTip(track, why);
+      return;
+    }
+    /* 远端音源没拿到任何地址：明确空态，不再用合成音冒充。
+       文案只描述「为什么没有声音」，不出现「演示音轨」。 */
+    if (empty) {
+      el.badge.hidden = false;
+      el.badge.classList.remove('is-action');
+      if (reason === 'vip') {
+        el.badge.textContent = 'VIP 专属 · 点此登录';
+        el.badge.title = `《${track.name}》是 VIP 专属歌曲，当前账号没有拿到播放地址，登录后重试。`;
+        el.badge.classList.add('is-action');
+      } else if (reason === 'login') {
+        el.badge.textContent = `${who} · 需登录`;
+        el.badge.title = `《${track.name}》在 ${who} 需要登录才能拿到播放地址（匿名会被风控拦），点设置里的音源去扫码。`;
+      } else if (reason === 'network') {
+        el.badge.textContent = '网络异常';
+        el.badge.title = '取播放地址时网络失败，这首歌暂时无法播放。';
+      } else if (reason === 'region') {
+        el.badge.textContent = `${who} · 仅中国大陆网络`;
+        el.badge.title = `《${track.name}》在 ${who} 受地区限制（上游 407），只有中国大陆网络能播。`;
+      } else if (reason === 'drm') {
+        el.badge.textContent = `${who} · 本期不接音频`;
+        el.badge.title = `${who} 的音频要 Premium + node-librespot 原生二进制，本期只做元数据。`;
+      } else if (reason === 'local-missing') {
+        el.badge.textContent = '本地文件已丢失';
+        el.badge.title = `《${track.name}》的音频不在本机了（可能清过应用数据），重新导入后再试。`;
+      } else if (track.source && track.source !== 'netease') {
+        el.badge.textContent = `${who} · 没有可用地址`;
+        el.badge.title = `《${track.name}》在 ${who} 既没有正片也没有试听链接（未登录 / 地区限制 / 版权）。`;
+      } else {
+        el.badge.textContent = '无版权 · 无法播放';
+        el.badge.title = `《${track.name}》没有取到播放地址（无版权或已下架）。`;
+      }
       return;
     }
     if (!demo) {
@@ -13634,9 +20079,8 @@
       return;
     }
     el.badge.hidden = false;
-    /* 说清楚"为什么放不了"。
-       以前只写「演示音轨」，用户看到的是"音乐播不了"，却不知道为什么 ——
-       绝大多数情况是 VIP 专属 / 要登录，登录就能解决，所以给一个可点的入口。 */
+    /* 只剩本地曲目文件丢失会走到这里（演示音轨仅限本地）。
+       说清楚"为什么放不了"；VIP / 登录类原因在远端空态里已经处理。 */
     if (reason === 'vip') {
       el.badge.textContent = 'VIP 专属 · 点此登录';
       el.badge.title = `《${track.name}》是 VIP 专属歌曲，登录后才能播放。现在放的是演示音轨。`;
@@ -13700,7 +20144,7 @@
     try {
       const s = await API.session();
       if (s.loggedIn) {
-        profile = s.profile;
+        profile = bareProfile(s.profile);
         paintAccount();        // 启动时同步设置页账号块（顶栏登录位已删）
         const lists = await API.userPlaylists(profile.userId);
         const mine = lists.playlists.filter((p) => !p.subscribed);
@@ -14054,6 +20498,54 @@
     }, BOOT_DELAY);
   })();
 
+  /* 设置 → 关于：运行环境诊断（2026-11-14）。
+     vivo Y 系列的系统 WebView 很多停在 oklch / color-mix（要 Chrome 111）之前，
+     大厅铺色态在那类内核上会整块失效；这一行把内核和铺色态的实际尺寸写出来，
+     让用户截图就能定位，不参与任何渲染判断。窗口 resize 时刷新。 */
+  (function initDiagNote() {
+    const node = document.getElementById('set-diag-note');
+    if (!node) return;
+    const sup = (prop, val) => {
+      try { return !!(window.CSS && CSS.supports && CSS.supports(prop, val)); } catch { return null; }
+    };
+    const mark = (v) => (v === null ? '?' : v ? '有' : '无');
+    function paintDiag() {
+      let core = '?';
+      try {
+        const m = /(?:Chrome|Chromium)\/(\d+)/.exec(navigator.userAgent || '');
+        if (m) core = m[1];
+      } catch { /* 老内核没有正则也轮不到这里 */ }
+      const hall = document.getElementById('view-hall');
+      const plat = document.getElementById('hall-plat');
+      const platOn = !!(plat && hall && hall.classList.contains('is-plat-mode') && !plat.hidden);
+      const pid = (plat && plat.dataset && plat.dataset.plat) || (platOn ? '?' : '');
+      const bits = [
+        `内核 ${core}`,
+        `oklch${mark(sup('color', 'oklch(50% 0.1 12)'))}`,
+        `color-mix${mark(sup('color', 'color-mix(in oklab, #fff 74%, transparent)'))}`,
+        `aspect${mark(sup('aspect-ratio', '1'))}`,
+        `inset${mark(sup('inset', '0'))}`,
+        `窗口 ${Math.round(window.innerWidth || 0)}×${Math.round(window.innerHeight || 0)}`,
+        platOn
+          ? `铺色 ${pid || '开'} ${Math.round(plat.offsetWidth)}×${Math.round(plat.offsetHeight)}`
+          : '铺色 关',
+      ];
+      /* 安卓壳：媒体卡片（锁屏 / 通知中心）到底卡在哪一环 —— 通知开关、权限、通道、会话。
+         没有这条就只能靠问用户，截图一行比来回问快。 */
+      try {
+        const nat = window.__liziNative;
+        if (nat && typeof nat.mediaDiag === 'function') {
+          const md = nat.mediaDiag();
+          if (md) bits.push(md);
+        }
+      } catch { /* 壳版本老 / 没有桥：跳过 */ }
+      node.textContent = `运行环境：${bits.join(' · ')}`;
+    }
+    window.LIZI_DIAG = paintDiag;
+    paintDiag();
+    addEventListener('resize', paintDiag, { passive: true });
+  })();
+
   /* 设置 → 关于：QQ 群一行（桌面 / 安卓 / 浏览器都用同一份设置页）。
      桌面壳没有通用 openExternal：window.open 会被主进程的
      setWindowOpenHandler 转给系统浏览器；安卓壳直接走 __liziNative。 */
@@ -14069,4 +20561,133 @@
       window.open(QQ_GROUP_URL, '_blank', 'noopener');
     });
   })();
+
+  /* ================================================================== *
+   * 手机主播放页 3D 悬浮开关（2026-11-21 用户要求）
+   *
+   *   默认关：关着时主播放页和原来完全一样（没有透视、没有层深）。
+   *   设置里打开后 body 带 .now-float，phone.css 的透视 / 层深和
+   *   phone.js 的陀螺仪视差才生效（只有 ≤560px 竖屏有）。
+   *   存 localStorage['lizi.now.float']，'1' 开；行只在触屏窄屏显示，
+   *   桌面设置页看不到这一行（和「陀螺仪转视角」同一套显隐规则）。
+   * ================================================================== */
+  const NowFloat = (() => {
+    const KEY = 'lizi.now.float';
+    const narrowMq = typeof window.matchMedia === 'function'
+      ? window.matchMedia('(max-width:1280px) and (pointer:coarse)')
+      : null;
+    let on = false;
+
+    function storedOn() {
+      try { return localStorage.getItem(KEY) === '1'; } catch { return false; }
+    }
+    function paintSwitch() {
+      const sw = document.getElementById('set-now-float');
+      if (sw && sw.setAttribute) sw.setAttribute('aria-checked', on ? 'true' : 'false');
+    }
+    function syncRow() {
+      const row = document.getElementById('set-nowfloat-row');
+      if (row) row.hidden = !(narrowMq && narrowMq.matches);
+    }
+    function apply(v) {
+      on = !!v;
+      if (document.body) document.body.classList.toggle('now-float', on);
+      paintSwitch();
+      /* phone.js 的视差模块收到这个事件会归零并重新标定基准姿态 */
+      try {
+        document.dispatchEvent(new CustomEvent('lizi:now-float', { detail: { on } }));
+      } catch { /* 老内核 */ }
+    }
+    function save(v) {
+      try { localStorage.setItem(KEY, v ? '1' : '0'); } catch { /* 隐私模式：本次仍生效 */ }
+    }
+
+    const btn = document.getElementById('set-now-float');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        apply(!on);
+        save(on);
+      });
+    }
+    if (narrowMq) {
+      try {
+        if (narrowMq.addEventListener) narrowMq.addEventListener('change', syncRow);
+        else if (narrowMq.addListener) narrowMq.addListener(syncRow);
+      } catch { /* 老环境忽略 */ }
+    }
+    syncRow();
+    apply(storedOn());          // 启动时按存值恢复；缺省是关
+    return { apply, get on() { return on; } };
+  })();
+
+  /* ==========================================================================
+     使用帮助浮层（2026-11-22）
+     - 设置页原来把整份帮助文档铺在 #set-sec-help 里，太长；现在只留一行
+       入口 #set-open-help，全文在 body 末尾的 #helpdoc-sheet 里
+     - 打开：点入口；关闭：关闭按钮 / 点遮罩 / Esc，关掉后焦点回入口
+     - 浮层打开时 Tab 圈在卡片内；不碰任何请求逻辑
+     ========================================================================== */
+  function initHelpSheet() {
+    const sheet = document.getElementById('helpdoc-sheet');
+    const openBtn = document.getElementById('set-open-help');
+    if (!sheet || !openBtn) return;
+    const closeBtn = document.getElementById('helpdoc-sheet-close');
+    const card = sheet.querySelector('.helpdoc-sheet__card');
+    let open = false;
+    let prevFocus = null;
+
+    function openSheet() {
+      if (open) return;
+      open = true;
+      prevFocus = document.activeElement;
+      sheet.hidden = false;
+      requestAnimationFrame(() => { if (open) sheet.classList.add('is-on'); });
+      if (closeBtn) {
+        try { closeBtn.focus({ preventScroll: true }); } catch { closeBtn.focus(); }
+      }
+    }
+
+    function closeSheet() {
+      if (!open) return;
+      open = false;
+      sheet.classList.remove('is-on');
+      setTimeout(() => { if (!open) sheet.hidden = true; }, 200);
+      const back = prevFocus;
+      prevFocus = null;
+      if (back && back.isConnected && back.focus) {
+        try { back.focus({ preventScroll: true }); } catch { back.focus(); }
+      }
+    }
+
+    openBtn.addEventListener('click', openSheet);
+    if (closeBtn) closeBtn.addEventListener('click', closeSheet);
+    sheet.addEventListener('click', (e) => {
+      /* 只有点在卡片外的遮罩上才关；卡片内部（含滚动条）都不关 */
+      if (e.target === sheet) closeSheet();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (!open) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSheet();
+        return;
+      }
+      if (e.key !== 'Tab' || !card) return;
+      /* 浮层打开时把 Tab 圈在卡片里 */
+      const nodes = card.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      const list = Array.prototype.filter.call(nodes, (n) => n.getClientRects().length);
+      if (!list.length) return;
+      const first = list[0];
+      const last = list[list.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }, true);
+  }
+  /* /m/index.html 的 app.js 在浮层标记之前加载：等 DOM 齐了再绑 */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initHelpSheet, { once: true });
+  } else {
+    initHelpSheet();
+  }
 })();

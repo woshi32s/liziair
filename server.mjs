@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
+import os from 'node:os';
 import { spawn, execFileSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -596,9 +597,16 @@ function cookieWith(setCookies, base = '') {
   return [...jar].map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
-/** QQ 封面：拿专辑 mid 拼（y.gtimg.cn 已在 /api/img 的白名单里） */
+/** QQ 封面：拿专辑 mid 拼（y.gtimg.cn 已在 /api/img 的白名单里）
+ *
+ * 尺寸由路径里的 `R<w>x<h>` 决定，`?param=` 对 gtimg 无效（实测：R300 再拼
+ * ?param=800y800，回的还是 300×300）。实测可用档：150/300/500/800/1200，
+ * 其中 R1200 实际出 1000×1000，是 CDN 的上限；R1000/R1600 都是 404。
+ * 这里给大图（形态会把封面铺满画面），播放器缩略图由 public/api.js 的
+ * API.img 按调用尺寸重写回小档，不漏流量到列表里。 */
+const QQ_COVER_SIZE = 1200;
 const qqCover = (albumMid) =>
-  albumMid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumMid}.jpg` : '';
+  albumMid ? `https://y.gtimg.cn/music/photo_new/T002R${QQ_COVER_SIZE}x${QQ_COVER_SIZE}M000${albumMid}.jpg` : '';
 
 /**
  * QQ 账号头像。有效登录态下，上游 `GetLoginUserInfo` 把真头像放在 `profile.info.logo`
@@ -657,6 +665,118 @@ const QQ_CHANNELS = new Set(['qq', 'wechat', 'qqmusic']);
 const qqChannel = (v) => (QQ_CHANNELS.has(v) ? v : 'qqmusic');
 
 /* --------------------------------------------------------------------------
+   QQ 登录态的本地兜底（手机版专项）
+   --------------------------------------------------------------------------
+   边车把登录态封在一枚 HttpOnly cookie：`qqmusic_session=<64 位 hex>`。
+   桌面 Chromium 会一直带着它；Android WebView 有两个额外的失效窗口：
+     1) 803 那一拍主服务还要顺手查一次 /login/status（原来最多等 20s），
+        手机网络慢时前端 20s 的 fetch 先超时，803 的 Set-Cookie 根本没落地；
+     2) Activity 被系统回收 / WebView 后台挂起后，CookieManager 不保证把这枚
+        刚写入的 cookie 立刻刷盘，重新进来时请求可能已经不带了。
+   边车的 `.auth-session.json` 里此时仍有完整凭据，所以主服务在内存里记一份
+   「最近确认成功的 token」：不落盘、不返回给前端，只在 /status 兜底和补发
+   Set-Cookie 时用。`/lizi/session-info` 由边车从文件现读，能证明 token 仍存在。
+   -------------------------------------------------------------------------- */
+const QQ_SESSION_TTL = 24 * 60 * 60 * 1000;   // 与边车 cookie 的 Max-Age 一致
+let qqLastSession = null;                     // { token, nickname, avatar, uin, at }
+
+function qqTokenFromCookieLine(raw) {
+  for (const pair of String(raw || '').split(';')) {
+    const i = pair.indexOf('=');
+    if (i > 0 && pair.slice(0, i).trim() === 'qqmusic_session') {
+      const value = pair.slice(i + 1).trim().replace(/^"|"$/g, '');
+      return /^[A-Za-z0-9._~-]{8,512}$/.test(value) ? value : '';
+    }
+  }
+  return '';
+}
+function qqTokenFromSetCookies(lines) {
+  for (const line of lines || []) {
+    const token = qqTokenFromCookieLine(line);
+    if (token) return token;
+  }
+  return '';
+}
+/** 803 的 body 也带 `cookie: qqmusic_session=…`；Set-Cookie 头缺失时靠它兜底 */
+function qqTokenFromBody(d) {
+  return qqTokenFromCookieLine(d && (d.cookie || (d.data && d.data.cookie)));
+}
+function qqSessionCookieLine(token) {
+  return `qqmusic_session=${token || ''}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${token ? 86400 : 0}`;
+}
+function qqSessionCached(token) {
+  if (!qqLastSession || !token || qqLastSession.token !== token) return null;
+  if (Date.now() - qqLastSession.at > QQ_SESSION_TTL) return null;
+  return qqLastSession;
+}
+/**
+ * 用户态请求实际要带的 cookie。
+ * 手机 WebView 有两个时刻会「请求里没有 qqmusic_session」：803 的响应因前端
+ * 20s 超时被丢掉（Set-Cookie 没落地），或 Activity/WebView 后台挂起后
+ * CookieManager 还没刷盘。此时主服务内存里明明有刚确认成功的 token，
+ * 却会让 /user/* 按匿名处理：每日推荐回 401 → 前端退回雷达「公共内容」并
+ * 缓存下来，只有重启后才正常。这里用内存 token 兜底并补发 Set-Cookie，
+ * 让登录成功后的第一阶段请求就拿得到账号数据。
+ */
+function qqAuthCookie(cookie, res) {
+  if (qqTokenFromCookieLine(cookie)) return cookie;
+  const cached = qqSessionCached(qqLastSession && qqLastSession.token);
+  if (!cached) return cookie;
+  try { if (res) res.setHeader('Set-Cookie', qqSessionCookieLine(cached.token)); } catch { /* 已发头就跳过 */ }
+  return `qqmusic_session=${cached.token}`;
+}
+function qqRememberSession(token, profile) {
+  if (!token) return;
+  const prev = qqSessionCached(token);
+  const info = profile && profile.info && typeof profile.info === 'object' ? profile.info : {};
+  qqLastSession = {
+    token,
+    at: Date.now(),
+    nickname: (profile && (profile.nick || profile.nickname || profile.name || info.nick)) || (prev && prev.nickname) || '',
+    avatar: qqProfileAvatar(profile) || (prev && prev.avatar) || '',
+    uin: (profile && (profile.uin || profile.uin === 0 ? String(profile.uin) : '')) || (prev && prev.uin) || '',
+  };
+}
+function qqIdentityOf(p) {
+  const info = p && p.info && typeof p.info === 'object' ? p.info : {};
+  return {
+    nickname: (p && (p.nick || p.nickname || p.name || info.nick)) || 'QQ 音乐用户',
+    avatar: qqProfileAvatar(p),
+    uin: p && (p.uin || p.uin === 0) ? String(p.uin) : '',
+  };
+}
+/**
+ * 上游超时 / 边车 5xx 时不能直接判「未登录」：本地文件里还有这把凭据。
+ * 用边车的只读路由确认 token 仍在（读文件，不碰上游），在就按登录态返回并补发
+ * cookie。上游明确回 200 + 空 profile（凭据被拒）不会走到这里。
+ */
+async function qqStatusDegraded(res, token, browserToken) {
+  /* 直接打已知端口，不走 ensureQQ：边车真挂了也不能为了兜底再等一次 25s 冷启动。 */
+  const port = qqPortFromFile();
+  if (!port) return null;
+  let local = null;
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/lizi/session-info`, {
+      headers: { Cookie: `qqmusic_session=${token}` },
+      signal: AbortSignal.timeout(1000),
+    });
+    const d = r.ok ? await r.json() : null;
+    if (d && d.hasSession) local = d;
+  } catch { /* 老边车没有这个路由：照旧按未登录处理 */ }
+  if (!local) return null;
+  const cached = qqSessionCached(token);
+  if (browserToken !== token) res.setHeader('Set-Cookie', qqSessionCookieLine(token));
+  return {
+    code: 200,
+    loggedIn: true,
+    degraded: true,               // 前端可据此提示「登录态暂未复核」；不改变已登录判定
+    nickname: local.nickname || (cached && cached.nickname) || 'QQ 音乐用户',
+    avatar: (cached && cached.avatar) || '',
+    uin: local.uid || (cached && cached.uin) || '',
+  };
+}
+
+/* --------------------------------------------------------------------------
    /api/qq/* 分发。前端只看到这一种形状：{ code, ... }
    -------------------------------------------------------------------------- */
 async function handleQQ(req, res, url) {
@@ -684,29 +804,55 @@ async function handleQQ(req, res, url) {
   try {
     /* ---- 登录态 ---- */
     if (part === 'status') {
-      if (!cookie.includes('qqmusic_session')) return json(res, 200, { code: 200, loggedIn: false });
-      const r = await qqRequest('/login/status', { cookie });
-      const p = (r.data && r.data.data && r.data.data.profile) || null;
-      if (!p) {
-        /* 上游 401 时登录态就是失效的（loggedIn 必须 false），但本地封存的旧凭据里
-           还有昵称/头像。只把这两样带出去，别把「已失效」画成「已登录」。 */
-        let stale = null;
+      const browserToken = qqTokenFromCookieLine(cookie);
+      const cachedToken = qqSessionCached(qqLastSession && qqLastSession.token)
+        ? qqLastSession.token : '';
+      const tokens = [...new Set([browserToken, cachedToken].filter(Boolean))];
+      if (!tokens.length) return json(res, 200, { code: 200, loggedIn: false });
+
+      let uncertain = false;             // 上游超时 / 边车 5xx：不知道，不是「明确失效」
+      /* 大厅 accounts.js 对 /status 只等 8 秒：所有上游尝试总共 5 秒封顶，
+         后面还要留给边车本地凭据确认（每个 token 1 秒）。 */
+      const statusDeadline = Date.now() + 5000;
+      for (const token of tokens) {
+        let r = null;
         try {
-          const c = await qqRequest('/lizi/cached-profile', { cookie, timeout: 6000 });
-          if (c.data && !c.data.empty && c.data.avatar) stale = c.data;
-        } catch { /* 没有本地凭据就算了 */ }
-        return json(res, 200, {
-          code: 200, loggedIn: false,
-          ...(stale ? { stale: true, nickname: stale.nickname || '', avatar: stale.avatar, uin: stale.uid || '' } : {}),
-        });
+          const left = statusDeadline - Date.now();
+          if (left <= 0) { uncertain = true; break; }
+          /* 上游慢时用本地凭据兜底，别让前端把「超时」画成「未登录」。 */
+          r = await qqRequest('/login/status', {
+            cookie: `qqmusic_session=${token}`, timeout: Math.min(5000, left),
+          });
+        } catch { uncertain = true; continue; }
+        if (r.status >= 500) { uncertain = true; continue; }
+        const p = (r.data && r.data.data && r.data.data.profile) || null;
+        if (!p) continue;                // 200 + 空 profile = 上游明确说这把凭据失效
+        qqRememberSession(token, p);
+        if (browserToken !== token) res.setHeader('Set-Cookie', qqSessionCookieLine(token));
+        return json(res, 200, { code: 200, loggedIn: true, ...qqIdentityOf(p) });
       }
-      const info = p.info && typeof p.info === 'object' ? p.info : {};
+
+      if (uncertain) {
+        for (const token of tokens) {
+          const degraded = await qqStatusDegraded(res, token, browserToken);
+          if (degraded) return json(res, 200, degraded);
+        }
+      }
+
+      /* 上游 401/200 空 profile 时登录态就是失效的（loggedIn 必须 false），
+         但本地封存的旧凭据里还有昵称/头像。只把这两样带出去，别把「已失效」
+         画成「已登录」。 */
+      const staleCookie = browserToken || (qqLastSession && qqLastSession.token) || '';
+      let stale = null;
+      try {
+        const c = await qqRequest('/lizi/cached-profile', {
+          cookie: staleCookie ? `qqmusic_session=${staleCookie}` : '', timeout: 3000,
+        });
+        if (c.data && !c.data.empty && c.data.avatar) stale = c.data;
+      } catch { /* 没有本地凭据就算了 */ }
       return json(res, 200, {
-        code: 200,
-        loggedIn: true,
-        nickname: p.nick || p.nickname || p.name || info.nick || 'QQ 音乐用户',
-        avatar: qqProfileAvatar(p),
-        uin: p.uin || p.uin === 0 ? String(p.uin) : '',
+        code: 200, loggedIn: false,
+        ...(stale ? { stale: true, nickname: stale.nickname || '', avatar: stale.avatar, uin: stale.uid || '' } : {}),
       });
     }
 
@@ -765,28 +911,68 @@ async function handleQQ(req, res, url) {
       const r = await qqRequest(`/login/qr/check?key=${encodeURIComponent(key)}`, { cookie, timeout: 25000 });
       const d = r.data || {};
       const out = { code: d.code ?? r.status, message: d.message || '' };
-      if (r.setCookies.length) res.setHeader('Set-Cookie', r.setCookies);
+      /* 800 不只有「过期」一种：手机确认之后还要拿票据去上游换身份，那一步可能被直接拒
+         （实测最常见 20279 / auth.device-limit = 账号登录设备数已满）。边车把这些诊断字段
+         放在 800 的响应里，以前这里只留 code/message，全丢了 —— 前端就只能报「二维码过期」，
+         换成新码照样被同一张名单拒，用户看到的是二维码自己闪，以为是我们坏了。
+         原样透传，提示文案交给前端按 failureHint.key 翻中文（见 app.js 的 qrLoginHint）。 */
+      if (out.code !== 803) {
+        if (d.failureStage) out.failureStage = d.failureStage;
+        if (d.failureReason) out.failureReason = d.failureReason;
+        if (d.upstreamCode !== undefined) out.upstreamCode = d.upstreamCode;
+        if (d.upstreamErrorKey) out.upstreamErrorKey = d.upstreamErrorKey;
+        if (d.primaryFailure) out.primaryFailure = d.primaryFailure;
+        if (d.failureHint) out.failureHint = d.failureHint;
+        if (d.retryAfterMs) out.retryAfterMs = d.retryAfterMs;
+      }
       if (out.code === 803) {
         out.loggedIn = true;
-        // 顺手把昵称查出来：前端拿到 803 就能直接显示「已登录 xxx」，不用再等一轮
-        try {
-          const s = await qqRequest('/login/status', { cookie: cookieWith(r.setCookies, cookie) });
-          const p = (s.data && s.data.data && s.data.data.profile) || null;
-          if (p) {
-            const info = p.info && typeof p.info === 'object' ? p.info : {};
-            out.nickname = p.nick || p.nickname || p.name || info.nick || '';
-            out.avatar = qqProfileAvatar(p);
+        /* 803 的 token 既可能在 Set-Cookie 头里，也可能只在 body.cookie 里。
+           两处都取，并且保证响应一定带 Set-Cookie —— 手机 WebView 一旦因为
+           前端 20s 超时丢掉这次响应，登录态就没有第二次下发的机会了。 */
+        const token = qqTokenFromSetCookies(r.setCookies) || qqTokenFromBody(d);
+        const setCookies = [...(r.setCookies || [])];
+        if (token) {
+          qqRememberSession(token, null);
+          if (!setCookies.some((line) => qqTokenFromCookieLine(line) === token)) {
+            setCookies.push(qqSessionCookieLine(token));
           }
-        } catch { /* 昵称查不到不影响登录本身 */ }
+        }
+        if (setCookies.length) res.setHeader('Set-Cookie', setCookies);
+        /* 顺手查昵称只是锦上添花：原实现给 20s，手机网络慢时前端先超时、
+           803 与 Set-Cookie 一起丢掉。现在 5s 内查不到就直接返回登录成功。 */
+        if (token) {
+          try {
+            const s = await qqRequest('/login/status', {
+              cookie: cookieWith(setCookies, cookie), timeout: 5000,
+            });
+            const p = (s.data && s.data.data && s.data.data.profile) || null;
+            if (p) {
+              const identity = qqIdentityOf(p);
+              out.nickname = identity.nickname === 'QQ 音乐用户' ? '' : identity.nickname;
+              out.avatar = identity.avatar;
+              qqRememberSession(token, p);
+            }
+          } catch { /* 昵称查不到不影响登录本身 */ }
+        }
+      } else if (r.setCookies.length) {
+        res.setHeader('Set-Cookie', r.setCookies);
       }
       return json(res, 200, out);
     }
 
     if (part === 'logout') {
       const r = await qqRequest('/logout', { cookie });
-      if (r.setCookies.length) res.setHeader('Set-Cookie', r.setCookies);
+      qqLastSession = null;
+      /* 除了边车自己的失效 cookie，还显式清一次：手机上退出后不能让旧的
+         qqmusic_session 留在 WebView 里又被后续请求带回来。 */
+      res.setHeader('Set-Cookie', [...(r.setCookies || []), qqSessionCookieLine('')]);
       return json(res, 200, { code: 200, loggedIn: false });
     }
+
+    /* 从这里开始是内容接口：手机 WebView 丢掉 803 那枚 cookie 时，用主服务
+       内存里刚确认成功的 token 兜底并补发（见 qqAuthCookie 的注释）。 */
+    const authCookie = qqAuthCookie(cookie, res);
 
     /* ---- 搜索 ---- */
     if (part === 'search') {
@@ -800,21 +986,21 @@ async function handleQQ(req, res, url) {
          不只是省流量：QQ 对匿名搜索有限流，短时间连打同一批词会连续回 2001
          （实测连续 10 次全部 2001，等半分钟才恢复）。用户改一个字又改回来、
          或者前端防抖没按住时，缓存能挡住绝大多数重复请求。 */
-      const cacheKey = `${cookie ? 'auth' : 'anon'}|${s}|${limit}|${page}`;
+      const cacheKey = `${authCookie ? 'auth' : 'anon'}|${s}|${limit}|${page}`;
       const cached = qqSearchCache.get(cacheKey);
       if (cached && Date.now() - cached.at < QQ_SEARCH_TTL) {
         return json(res, 200, { ...cached.data, cached: true });
       }
 
       const api = `/search?keyword=${encodeURIComponent(s)}&limit=${limit}&page=${page}`;
-      let r = await qqRequest(api, { cookie });
+      let r = await qqRequest(api, { cookie: authCookie });
       /* 撞上限流就退避重试（1.2s / 2.5s，最多三次）。
          实测 2001 的冷却在 15 秒上下，重试覆盖不了长时间冷却，
          但轻度限流（最常见）这样就过去了；真不行就把上游码如实告诉用户。 */
       for (const wait of [1200, 2500]) {
         if (r.data.code === 200) break;
         await sleep(wait);
-        r = await qqRequest(api, { cookie });
+        r = await qqRequest(api, { cookie: authCookie });
       }
       if (r.data.code !== 200) {
         const upCode = r.data.upstreamCode;
@@ -843,7 +1029,7 @@ async function handleQQ(req, res, url) {
     if (part === 'lyric') {
       const mid = q.get('mid') || q.get('id') || '';
       if (!mid) return json(res, 400, { code: 400, error: 'mid required' });
-      const r = await qqRequest(`/getLyric?songmid=${encodeURIComponent(mid)}`, { cookie });
+      const r = await qqRequest(`/getLyric?songmid=${encodeURIComponent(mid)}`, { cookie: authCookie });
       const body = (r.data && r.data.response) || {};
       const lyric = body.lyric || '';
       return json(res, 200, {
@@ -861,7 +1047,7 @@ async function handleQQ(req, res, url) {
       if (!mid) return json(res, 400, { code: 400, error: 'mid required' });
       const quality = q.get('quality') || '128';
       const first = await qqRequest(
-        `/getMusicPlay/${encodeURIComponent(mid)}?quality=${quality}`, { cookie }
+        `/getMusicPlay/${encodeURIComponent(mid)}?quality=${quality}`, { cookie: authCookie }
       );
       let got = qqPlayUrlOf(first.data, mid);
       let loginRequired = first.status === 401;
@@ -870,7 +1056,7 @@ async function handleQQ(req, res, url) {
          这是 QQ 那边的硬限制，不是我们的 bug —— 如实标 preview 让界面去说。 */
       if (!got.url) {
         const pv = await qqRequest(
-          `/getMusicPlay/${encodeURIComponent(mid)}?quality=${quality}&preview=1`, { cookie }
+          `/getMusicPlay/${encodeURIComponent(mid)}?quality=${quality}&preview=1`, { cookie: authCookie }
         );
         const p = qqPlayUrlOf(pv.data, mid);
         if (p.url) got = p;
@@ -895,7 +1081,7 @@ async function handleQQ(req, res, url) {
        推荐歌单 / 新歌 / 榜单匿名可用；user/* 需要登录（照实回 401 的说明）。 */
     if (part === 'recommend/playlists') {
       const limit = Math.min(20, Math.max(3, Number(q.get('limit')) || 9));
-      const r = await qqRequest(`/recommend/playlists?limit=${limit}`, { cookie });
+      const r = await qqRequest(`/recommend/playlists?limit=${limit}`, { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, {
@@ -911,7 +1097,7 @@ async function handleQQ(req, res, url) {
 
     if (part === 'recommend/new-songs') {
       const limit = Math.min(60, Math.max(1, Number(q.get('limit')) || 30));
-      const r = await qqRequest(`/recommend/new-songs?limit=${limit}`, { cookie });
+      const r = await qqRequest(`/recommend/new-songs?limit=${limit}`, { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, { code: d.code || 502, source: 'qq', tracks: [], error: d.message || 'QQ 新歌失败' });
@@ -925,7 +1111,40 @@ async function handleQQ(req, res, url) {
     if (part === 'playlist/detail') {
       const id = q.get('id') || '';
       if (!id) return json(res, 400, { code: 400, error: 'id required' });
-      const r = await qqRequest(`/getSongListDetail/${encodeURIComponent(id)}`, { cookie });
+      const dirId = q.get('dirId') || q.get('dirid') || '';
+      /* 用户自己的歌单（含设为「不公开」的）：/user/playlist 给的是目录 id（dirId），
+         而匿名 /getSongListDetail 只认 disstid，读自建歌单会拿到空壳或 -1。
+         已登录时先带凭证走 /user/playlist-detail（tid 或 dirid）；失败/空再退回公开接口，
+         推荐歌单、收藏来的公开歌单和旧路径都不受影响。
+         搬运工具按 offset/limit 翻页：limit/offset 透传给边车，回包带 more/total 供它判断终点。 */
+      const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 100));
+      const offset = Math.max(0, Number(q.get('offset')) || 0);
+      if (authCookie.includes('qqmusic_session') && /^\d+$/.test(String(id))) {
+        const params = new URLSearchParams({ tid: String(id), limit: String(limit), offset: String(offset) });
+        const dir = String(dirId || '');
+        if (/^\d+$/.test(dir) && dir !== String(id)) params.set('dirid', dir);
+        try {
+          const owned = await qqRequest('/user/playlist-detail?' + params.toString(), { cookie: authCookie });
+          const d = (owned && owned.data) || {};
+          const songs = (Array.isArray(d.songs) ? d.songs : []).map(qqTrack).filter((t) => t.id);
+          /* code=200 就返回（空页也返回），否则翻到最后一页会掉进下面的匿名兜底，
+             把整张公开歌单又返回一遍。空页 more=false，搬运工具据此收尾。 */
+          if (Number(d.code) === 200) {
+            const total = Number(d.total) || songs.length;
+            return json(res, 200, {
+              code: 200, source: 'qq',
+              id: String(id),
+              name: '',
+              cover: '',
+              tracks: songs,
+              trackCount: total,
+              total,
+              more: songs.length ? !!d.more : false,
+            });
+          }
+        } catch { /* 边车超时/异常：照旧走下面的公开接口，不让新路径挡住旧路径 */ }
+      }
+      const r = await qqRequest(`/getSongListDetail/${encodeURIComponent(id)}`, { cookie: authCookie });
       const resp = (r.data && r.data.response) || {};
       const cd = (resp.cdlist && resp.cdlist[0]) || null;
       if (!cd) {
@@ -935,6 +1154,7 @@ async function handleQQ(req, res, url) {
         });
       }
       const songs = (cd.songlist || []).map(qqTrack).filter((t) => t.id);
+      /* 匿名兜底拿的是完整 songlist，不分页，more 固定 false */
       return json(res, 200, {
         code: 200, source: 'qq',
         id: String(cd.disstid || id),
@@ -943,12 +1163,15 @@ async function handleQQ(req, res, url) {
         creator: { nickname: cd.nickname || cd.nick || '' },
         tracks: songs,
         trackCount: songs.length,
+        more: false,
       });
     }
 
     if (part === 'user/liked-songs') {
+      /* 搬运工具按 offset/limit 翻页：offset 透传给边车，回包带 more 供它判断终点 */
       const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 100));
-      const r = await qqRequest(`/user/liked-songs?limit=${limit}`, { cookie });
+      const offset = Math.max(0, Number(q.get('offset')) || 0);
+      const r = await qqRequest(`/user/liked-songs?limit=${limit}&offset=${offset}`, { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, {
@@ -960,6 +1183,7 @@ async function handleQQ(req, res, url) {
         code: 200, source: 'qq',
         tracks: (d.songs || []).map(qqTrack).filter((t) => t.id),
         total: d.total || (d.songs || []).length,
+        more: !!d.more,
       });
     }
 
@@ -976,7 +1200,7 @@ async function handleQQ(req, res, url) {
         const path = favoriteOffset > 0
           ? `/user/playlist?favoriteOffset=${favoriteOffset}`
           : '/user/playlist';
-        const r = await qqRequest(path, { cookie });
+        const r = await qqRequest(path, { cookie: authCookie });
         const d = r.data || {};
         if (Number(d.code) !== 200) {
           if (round === 0) {
@@ -1008,7 +1232,7 @@ async function handleQQ(req, res, url) {
     if (part === 'user/albums') {
       const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 100));
       const offset = Math.max(0, Number(q.get('offset')) || 0);
-      const r = await qqRequest(`/user/albums?offset=${offset}&limit=${limit}`, { cookie });
+      const r = await qqRequest(`/user/albums?offset=${offset}&limit=${limit}`, { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, {
@@ -1025,7 +1249,7 @@ async function handleQQ(req, res, url) {
     }
 
     if (part === 'user/daily-songs') {
-      const r = await qqRequest('/user/daily-songs', { cookie });
+      const r = await qqRequest('/user/daily-songs', { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, {
@@ -1042,7 +1266,7 @@ async function handleQQ(req, res, url) {
     /* ---- 雷达推荐：匿名可用，作为「每日推荐」未登录时的兜底 ---- */
     if (part === 'recommend/radar') {
       const page = Math.max(1, Number(q.get('page')) || 1);
-      const r = await qqRequest(`/recommend/radar?page=${page}`, { cookie });
+      const r = await qqRequest(`/recommend/radar?page=${page}`, { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, { code: d.code || 502, source: 'qq', tracks: [], error: d.message || 'QQ 雷达推荐失败' });
@@ -1055,7 +1279,7 @@ async function handleQQ(req, res, url) {
 
     /* ---- 电台：频道目录匿名可读；收听（/radio/tracks）要登录 ---- */
     if (part === 'radio/categories') {
-      const r = await qqRequest('/radio/categories', { cookie });
+      const r = await qqRequest('/radio/categories', { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, { code: d.code || 502, source: 'qq', stations: [], error: d.message || 'QQ 电台目录失败' });
@@ -1080,7 +1304,7 @@ async function handleQQ(req, res, url) {
     if (part === 'radio/tracks') {
       const id = q.get('id') || '';
       if (!id) return json(res, 400, { code: 400, error: 'id required' });
-      const r = await qqRequest(`/radio/tracks?id=${encodeURIComponent(id)}`, { cookie });
+      const r = await qqRequest(`/radio/tracks?id=${encodeURIComponent(id)}`, { cookie: authCookie });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
         return json(res, 200, {
@@ -1104,7 +1328,7 @@ async function handleQQ(req, res, url) {
       const body = req.method === 'POST' ? await readBody(req) : {};
       let name = String(body.name || q.get('name') || '').trim();
       if (!name) return json(res, 400, { code: 400, error: 'name required' });
-      if (!cookie.includes('qqmusic_session')) {
+      if (!authCookie.includes('qqmusic_session')) {
         return json(res, 200, { code: 401, error: '先在卡片上扫码登录 QQ 音乐' });
       }
       /* 上游只收 20 个字（按 Unicode 码点）以内的名字，超长/带控制字符会 400。
@@ -1112,7 +1336,7 @@ async function handleQQ(req, res, url) {
       name = Array.from(name.replace(/[\u0000-\u001f\u007f]/g, '')).slice(0, 20).join('').trim();
       if (!name) return json(res, 400, { code: 400, error: '歌单名不能为空' });
       const r = await qqRequest('/user/playlist/create', {
-        cookie, method: 'POST', payload: { name }, timeout: 25000,
+        cookie: authCookie, method: 'POST', payload: { name }, timeout: 25000,
       });
       const d = r.data || {};
       if (Number(d.code) !== 200) {
@@ -1141,7 +1365,7 @@ async function handleQQ(req, res, url) {
       if (!Number.isSafeInteger(tid) || tid <= 0) {
         return json(res, 400, { code: 400, error: 'tid required' });
       }
-      if (!cookie.includes('qqmusic_session')) {
+      if (!authCookie.includes('qqmusic_session')) {
         return json(res, 200, { code: 401, error: '先在卡片上扫码登录 QQ 音乐' });
       }
       if (!rawSongs.length) return json(res, 400, { code: 400, error: 'songs required' });
@@ -1168,7 +1392,7 @@ async function handleQQ(req, res, url) {
       for (let i = 0; i < needMids.length; i += 20) {
         const chunk = needMids.slice(i, i + 20);
         const br = await qqRequest('/song/batch', {
-          cookie, method: 'POST', payload: { songs: chunk.map((s) => ({ mid: s.mid })) }, timeout: 25000,
+          cookie: authCookie, method: 'POST', payload: { songs: chunk.map((s) => ({ mid: s.mid })) }, timeout: 25000,
         });
         const results = (br.data && br.data.results) || [];
         for (const it of results) {
@@ -1184,7 +1408,7 @@ async function handleQQ(req, res, url) {
       for (let i = 0; i < songs.length; i += 100) {
         const chunk = songs.slice(i, i + 100);
         const r = await qqRequest('/user/playlist/tracks', {
-          cookie, method: 'POST',
+          cookie: authCookie, method: 'POST',
           payload: { tid, op: 'add', songs: chunk.map((s) => ({ id: s.id, type: 0 })) },
           timeout: 30000,
         });
@@ -1210,11 +1434,17 @@ async function handleQQ(req, res, url) {
   }
 }
 
-/** QQ 歌单条目 → 前端那一种形状（推荐歌单用 tid/title/picurl，我的歌单用 dirId/dirName） */
+/** QQ 歌单条目 → 前端那一种形状（推荐歌单用 tid/title/picurl，我的歌单用 tid/dirId/dirName）
+ *
+ *  id 必须是详情接口认的那个：官方选择顺序是 tid → dissid → id，dirId 只兜底。
+ *  dirId 是「用户库里的目录 id」（201 是内置的「我喜欢」），不是 disstid；
+ *  以前把它排在第一位，点进自建歌单就会拿目录 id 去查详情，上游回 -1。
+ *  dirId 仍然单独带出去：详情接口需要它来解析自己的文件夹。 */
 function qqPlaylist(it) {
   const creator = it.creator || {};
   return {
-    id: String(it.dirId ?? it.dissid ?? it.tid ?? it.id ?? ''),
+    id: String(it.tid ?? it.dissid ?? it.disstid ?? it.id ?? it.dirId ?? it.dirid ?? ''),
+    dirId: String(it.dirId ?? it.dirid ?? ''),
     name: it.dirName || it.dissname || it.title || '未命名歌单',
     cover: it.picUrl || it.picurl || it.cover || it.logo || it.pic || '',
     trackCount: Number(it.songNum ?? it.songnum ?? it.song_cnt ?? 0) || 0,
@@ -1244,7 +1474,7 @@ function qqUserAlbum(it) {
     /* 保持网易云 album/sublist 的 artists 类型（对象数组），前端那套映射不用分叉 */
     artists: [{ name: String(singer) }],
     cover: it.albumcover || it.albumCover || it.albumPic || it.albumpic || it.pic || it.cover || it.picUrl
-      || (mid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${mid}.jpg` : ''),
+      || qqCover(mid),
     publishTime: Number(it.pubtime ?? it.pubTime ?? it.publishTime ?? it.publish_time ?? 0) || 0,
     trackCount: Number(it.songnum ?? it.songNum ?? it.trackCount ?? it.track_count ?? it.total ?? 0) || 0,
   };
@@ -1302,6 +1532,13 @@ async function proxyQQAudio(req, res, url) {
 const SIDECARS = {
   // ping：活跃探针的路径。酷狗那个包没有 /health，start.mjs 自己挂了一个 /lizi/health
   kugou: { dir: 'kugou-api', env: 'KUGOU', port: 3211, node24: false, ping: '/lizi/health' },
+  /* 酷狗概念版：同一个包、同一个目录，但 KUGOU_PROFILE=lite 会让 start.mjs 换
+     .port-lite / .log-lite / 3217，并在 require 包之前把 process.env.platform 固定成 lite。
+     两个 profile 共用 .auth-state/device.json（同一台设备），cookie jar 分开。 */
+  kugouLite: {
+    dir: 'kugou-api', env: 'KUGOU_LITE', port: 3217, node24: false, ping: '/lizi/health',
+    profile: 'lite', portFile: '.port-lite', logFile: '.log-lite',
+  },
   /* 网易云（services/netease-api/）：扫码登录交给 @neteasecloudmusicapienhanced/api 那一整套服务，
      不再自己跟 weapi/eapi 的加密和风控较劲（我们手写的那条路稳定回 8821）。
      端口 3215，避开上面四个；NETEASE_API_PORT 可覆盖。 */
@@ -1312,14 +1549,24 @@ const SIDECARS = {
   /* 酷我（services/kuwo-api/）：自写的零依赖边车，端口 3216，避开上面五个。
      网页端没有扫码登录，只能粘 Cookie；用户歌单/我喜欢没有公开接口，前端如实空态。 */
   kuwo: { dir: 'kuwo-api', env: 'KUWO', port: 3216, node24: false, ping: '/health' },
+  /* VST3 离线宿主（services/vst-host/，2026-11-17 加）：和上面几个不同 —— start.mjs 只是
+     启动器，真正干活的是它拉起的 Python（pedalboard）。端口由 Python 绑 127.0.0.1:0 后
+     自己写 .port，所以这里的 port 没有意义（填 0），主服务永远不猜。 */
+  vst: { dir: 'vst-host', env: 'VST', port: 0, node24: false, ping: '/health' },
 };
 
 const scState = {};             // name → { child, starting, jar }
 for (const name of Object.keys(SIDECARS)) scState[name] = { child: null, starting: null, jar: null };
 
 function scPaths(name) {
-  const dir = path.join(__dirname, 'services', SIDECARS[name].dir);
-  return { dir, entry: path.join(dir, 'start.mjs'), portFile: path.join(dir, '.port'), logFile: path.join(dir, '.log') };
+  const meta = SIDECARS[name];
+  const dir = path.join(__dirname, 'services', meta.dir);
+  return {
+    dir,
+    entry: path.join(dir, 'start.mjs'),
+    portFile: path.join(dir, meta.portFile || '.port'),
+    logFile: path.join(dir, meta.logFile || '.log'),
+  };
 }
 function scPort(name) {
   try {
@@ -1352,20 +1599,40 @@ function resolveNode24() {
     node24Cache = { bin: process.execPath, version: process.versions.node };
     return node24Cache;
   }
-  const bin = process.env.LIZI_NODE_BIN || 'node';
-  let version = '';
-  try {
-    version = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 8000, windowsHide: true }).trim();
-  } catch (e) {
-    node24Cache = { error: `本机找不到可用的 node（试过 ${bin}）：${e.message}` };
-    return node24Cache;
+  /* 依次尝试：随包分发的 node → 开发目录 runtime/node → LIZI_NODE_BIN → 系统 node。
+     每一级都真的跑一次 --version，<24 或起不来就继续下一级，最后才报错。 */
+  const exe = process.platform === 'win32' ? 'node.exe' : 'node';
+  const candidates = [];
+  // a. 打包后：<安装目录>/resources/node/node.exe（package.json extraResources 打进去的）
+  if (process.resourcesPath) candidates.push(path.join(process.resourcesPath, 'node', exe));
+  // b. 开发环境：项目内 runtime/node/node.exe
+  candidates.push(path.join(__dirname, 'runtime', 'node', exe));
+  // c. 老兜底：LIZI_NODE_BIN / 系统 node
+  candidates.push(process.env.LIZI_NODE_BIN || 'node');
+
+  const tried = [];
+  let lastBin = '';
+  let lastVersion = '';
+  let lastError = null;
+  for (const bin of [...new Set(candidates)]) {
+    try {
+      const version = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 8000, windowsHide: true }).trim();
+      const vMajor = Number(String(version).replace(/^v/, '').split('.')[0]);
+      if (vMajor >= 24) {
+        node24Cache = { bin, version };
+        return node24Cache;
+      }
+      tried.push(`${bin}（${version}）`);
+      lastBin = bin;
+      lastVersion = version;
+    } catch (e) {
+      tried.push(`${bin}（${e.code === 'ENOENT' ? '不存在' : '跑不起来'}）`);
+      lastError = e;
+    }
   }
-  const vMajor = Number(String(version).replace(/^v/, '').split('.')[0]);
-  if (!(vMajor >= 24)) {
-    node24Cache = { error: `本机 node 版本不足：这个音源要求 ≥ 24，当前是 ${version}（${bin}）` };
-    return node24Cache;
-  }
-  node24Cache = { bin, version };
+  node24Cache = lastVersion
+    ? { error: `本机 node 版本不足：这个音源要求 ≥ 24，当前是 ${lastVersion}（${lastBin}）` }
+    : { error: `本机找不到可用的 node（试过 ${tried.join('、')}）：${lastError ? lastError.message : '没有候选'}` };
   return node24Cache;
 }
 
@@ -1395,17 +1662,25 @@ function scSpawn(name) {
     extraEnv = { ELECTRON_RUN_AS_NODE: '1' };
   }
 
+  const env = {
+    ...process.env,
+    ...extraEnv,
+    // 边车盯着父进程，主服务退出后自己不赖着占端口
+    [`${meta.env}_PARENT_PID`]: String(process.pid),
+  };
+  /* node24 边车跑的是真正的 node.exe（随包/系统），不是 Electron：
+     把这个从父进程继承来的标记摘掉，免得以后谁把它换成 electron.exe 时行为走样。 */
+  if (meta.node24) delete env.ELECTRON_RUN_AS_NODE;
+  /* 酷狗两版靠这个环境变量在 start.mjs 里分叉；普通版显式摘掉，别被开发机的全局变量带成 lite。 */
+  if (meta.profile) env.KUGOU_PROFILE = meta.profile;
+  else delete env.KUGOU_PROFILE;
+
   const fd = fs.openSync(logFile, 'a');
   const child = spawn(bin, [entry], {
     cwd: dir,
     windowsHide: true,
     stdio: ['ignore', fd, fd],
-    env: {
-      ...process.env,
-      ...extraEnv,
-      // 边车盯着父进程，主服务退出后自己不赖着占端口
-      [`${meta.env}_PARENT_PID`]: String(process.pid),
-    },
+    env,
   });
   st.child = child;
   fs.closeSync(fd);
@@ -1413,6 +1688,9 @@ function scSpawn(name) {
   child.on('exit', (code, signal) => {
     console.warn(`  ${name} 边车退出（code=${code}${signal ? ' signal=' + signal : ''}），下次请求会重起`);
     if (st.child === child) st.child = null;
+    /* VST 宿主可能被一个坏插件带崩：记死亡次数，ensureVst() 据此限流（最多自动重启 3 次，
+       免得一个必崩的插件让每个请求都重新拉起 Python）。2026-11-17 */
+    if (name === 'vst') st.deaths = (st.deaths || 0) + 1;
   });
   return child;
 }
@@ -1448,14 +1726,17 @@ async function ensureSidecar(name) {
 }
 
 /** 跟边车说话（cookie 用 query 传的 `cookie=k=v; k=v` 形式，酷狗那套只认这个） */
-async function scRequest(name, pathname, { cookie = '', timeout = 20000, method = 'GET', payload } = {}) {
+async function scRequest(name, pathname, { cookie = '', timeout = 20000, method = 'GET', payload, cookieHeaderOnly = false } = {}) {
   const port = await ensureSidecar(name);
   const sep = pathname.includes('?') ? '&' : '?';
-  const full = cookie ? `${pathname}${sep}cookie=${encodeURIComponent(cookie)}` : pathname;
+  /* cookieHeaderOnly：把 cookie 只放 Cookie 头，不进 URL。边车会自己解析 req.cookies，
+     新加的 VIP 检测用这个，token 就不会出现在边车的 [OK] URL 日志里。
+     注意缓存键只看 URL：调用方要自己带时间戳，别让不同账号/前后两次请求互相命中。 */
+  const full = cookie && !cookieHeaderOnly ? `${pathname}${sep}cookie=${encodeURIComponent(cookie)}` : pathname;
   /* payload 是可选的 JSON body：酷狗边车的路由会把 body 和 query 合并成 params，
      写歌单（tracks/add 的 data 可能很长）走 body 就不用担心 GET URL 长度。原有 GET 不受影响。 */
   const headers = {};
-  if (cookie && method !== 'GET') headers.Cookie = cookie;
+  if (cookie && (method !== 'GET' || cookieHeaderOnly)) headers.Cookie = cookie;
   let body;
   if (payload) {
     headers['Content-Type'] = 'application/json';
@@ -1475,6 +1756,287 @@ async function scRequest(name, pathname, { cookie = '', timeout = 20000, method 
     data,
     setCookies: r.headers.getSetCookie ? r.headers.getSetCookie() : [r.headers.get('set-cookie')].filter(Boolean),
   };
+}
+
+/* ==========================================================================
+   VST3 离线处理（services/vst-host/，2026-11-17 加）
+   --------------------------------------------------------------------------
+   链路：
+     浏览器 POST /api/vst/render { source, url, pluginPath, params?, preset? }
+       → 这里用 AUDIO_HOSTS[source] 校验 url（照抄 proxySourceAudio 的判断，防 SSRF）
+       → 主服务抓音频，落 runtime/vst/in/<sha1>.<ext>（同一个 url 不重抓）
+       → POST 127.0.0.1:<python 端口>/render（传的全是本机绝对路径）
+       → Python 用 pedalboard 处理，写 runtime/vst/out/<id>.wav
+       → 返回 { url: '/api/vst/out/<id>.wav' }
+
+   为什么音频必须由 Node 抓：Python 那边不认白名单，把任意 URL 交给它等于绕过
+   AUDIO_HOSTS，开一个 SSRF 口子。宿主的职责只有「读本地文件 → 插件 → 写本地文件」。
+   ========================================================================== */
+const VST_IN_DIR = path.join(__dirname, 'runtime', 'vst', 'in');
+const VST_OUT_DIR = path.join(__dirname, 'runtime', 'vst', 'out');
+const VST_MAX_RESTARTS = 3;
+fs.mkdirSync(VST_IN_DIR, { recursive: true });
+fs.mkdirSync(VST_OUT_DIR, { recursive: true });
+
+const vstSha1 = (s) => crypto.createHash('sha1').update(String(s)).digest('hex');
+
+/** 按需拉起 Python 宿主。连续崩 3 次就停手 —— 坏插件不该让每个请求都重开一次进程 */
+async function ensureVst() {
+  const st = scState.vst;
+  if ((st.deaths || 0) >= VST_MAX_RESTARTS) {
+    const e = new Error(`VST 宿主已退出 ${st.deaths} 次（上限 ${VST_MAX_RESTARTS}），不再自动重启；详见 services/vst-host/.log`);
+    e.reason = 'vst-restarts';
+    throw e;
+  }
+  return ensureSidecar('vst');
+}
+
+/** 跟 Python 宿主说话（只走回环；端口每次都从 .port 现读） */
+async function vstRequest(pathname, { method = 'GET', payload, timeout = 120000 } = {}) {
+  const port = await ensureVst();
+  const r = await fetch(`http://127.0.0.1:${port}${pathname}`, {
+    method,
+    headers: payload ? { 'Content-Type': 'application/json' } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+    signal: AbortSignal.timeout(timeout),
+  });
+  const text = await r.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { ok: false, error: text.slice(0, 300) }; }
+  return { status: r.status, data };
+}
+
+/** 同一个 url 的输入文件：sha1 前缀 + 任意扩展名（扩展名可能是抓完才知道的） */
+function vstCachedInput(hash) {
+  try {
+    /* 排除 .part-*：抓一半崩掉留下的半截文件不能当输入复用（2026-11-17） */
+    const hit = fs.readdirSync(VST_IN_DIR).find((n) => n.startsWith(hash + '.') && !n.includes('.part-'));
+    return hit ? path.join(VST_IN_DIR, hit) : '';
+  } catch { return ''; }
+}
+
+/** 音频扩展名：先看 URL 路径，再看 Content-Type。pedalboard 靠扩展名选解码器 */
+function vstAudioExt(u, contentType) {
+  const known = new Set(['mp3', 'flac', 'm4a', 'mp4', 'aac', 'wav', 'ogg', 'opus', 'wma']);
+  const m = /\.([a-z0-9]{2,5})$/i.exec(u.pathname);
+  if (m && known.has(m[1].toLowerCase())) return '.' + m[1].toLowerCase();
+  const ct = String(contentType || '').toLowerCase();
+  if (ct.includes('mpeg')) return '.mp3';
+  if (ct.includes('flac')) return '.flac';
+  if (ct.includes('mp4') || ct.includes('m4a')) return '.m4a';
+  if (ct.includes('aac')) return '.aac';
+  if (ct.includes('wav')) return '.wav';
+  if (ct.includes('ogg') || ct.includes('opus')) return '.ogg';
+  return '.bin';
+}
+
+/** 读 Python 写出来的 44 字节 WAV 头，缓存命中时也能报时长/声道（读失败就算了） */
+function vstWavInfo(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const h = Buffer.alloc(44);
+      fs.readSync(fd, h, 0, 44, 0);
+      if (h.toString('ascii', 0, 4) !== 'RIFF' || h.toString('ascii', 8, 12) !== 'WAVE') return null;
+      const channels = h.readUInt16LE(22);
+      const sampleRate = h.readUInt32LE(24);
+      const byteRate = h.readUInt32LE(28);
+      const dataSize = h.readUInt32LE(40);
+      if (!byteRate) return null;
+      return { channels, sampleRate, durationMs: Math.round((dataSize / byteRate) * 1000) };
+    } finally { fs.closeSync(fd); }
+  } catch { return null; }
+}
+
+/** 输出 WAV：必须支持 Range，播放器拖进度条会发 Range 请求 */
+function serveVstOut(req, res, id) {
+  /* id 已经过 ^[0-9a-f-]{8,64}$：没有点、没有斜杠，拼不进 ../ */
+  const file = path.join(VST_OUT_DIR, id + '.wav');
+  let stat;
+  try { stat = fs.statSync(file); } catch { return json(res, 404, { error: 'not found' }); }
+  const total = stat.size;
+  const base = { 'Content-Type': 'audio/wav', 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store' };
+
+  const send = (code, headers, start, end) => {
+    res.writeHead(code, headers);
+    if (req.method === 'HEAD' || start === undefined) return res.end();
+    const stream = fs.createReadStream(file, { start, end });
+    stream.on('error', () => { try { res.destroy(); } catch { /* ignore */ } });
+    stream.pipe(res);
+  };
+
+  const range = req.headers.range;
+  if (!range) {
+    return send(200, { ...base, 'Content-Length': total });
+  }
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+  if (!m || (m[1] === '' && m[2] === '')) {
+    return json(res, 416, { error: 'bad range', total });
+  }
+  let start;
+  let end;
+  if (m[1] === '') {
+    // bytes=-N：最后 N 字节
+    const n = Number(m[2]);
+    start = Math.max(0, total - n);
+    end = total - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1);
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+    res.writeHead(416, { ...base, 'Content-Range': `bytes */${total}` });
+    return res.end();
+  }
+  send(206, {
+    ...base,
+    'Content-Range': `bytes ${start}-${end}/${total}`,
+    'Content-Length': end - start + 1,
+  }, start, end);
+}
+
+async function handleVst(req, res, url) {
+  const part = url.pathname.slice('/api/vst'.length).replace(/^\//, '');
+
+  /* GET /api/vst/status —— 顺带把宿主拉起来（第一次 /api/vst/* 才启动，不影响开机速度） */
+  if ((part === '' || part === 'status') && (req.method === 'GET' || req.method === 'HEAD')) {
+    try {
+      const r = await vstRequest('/health', { timeout: 30000 });
+      const ok = r.status === 200 && r.data && r.data.ok === true;
+      return json(res, 200, {
+        ready: ok,
+        pedalboard: r.data && r.data.pedalboard,
+        pid: r.data && r.data.pid,
+        error: ok ? null : (r.data && r.data.error) || `HTTP ${r.status}`,
+      });
+    } catch (e) {
+      return json(res, 200, { ready: false, error: String(e.message || e) });
+    }
+  }
+
+  /* GET /api/vst/plugins[?probe=1|路径] —— 透传；probe=1 全量逐个 load（很慢），
+     probe=<路径> 只 load 一个。2026-11-17 之前这里只认 probe=1，路径会被丢掉 */
+  if (part === 'plugins' && req.method === 'GET') {
+    const probe = (url.searchParams.get('probe') || '').trim();
+    const probeLow = probe.toLowerCase();
+    const fullProbe = probeLow === '1' || probeLow === 'true' || probeLow === 'yes';
+    const probeOff = !probe || probeLow === '0' || probeLow === 'false' || probeLow === 'no';
+    const probeQuery = probeOff ? '' : '?probe=' + encodeURIComponent(probe);
+    try {
+      const r = await vstRequest('/plugins' + probeQuery, { timeout: fullProbe ? 20 * 60 * 1000 : probeQuery ? 5 * 60 * 1000 : 60000 });
+      return json(res, r.status === 200 ? 200 : 502, r.data);
+    } catch (e) {
+      return json(res, 502, { ok: false, plugins: [], error: String(e.message || e), log: scLogTail('vst') });
+    }
+  }
+
+  /* GET /api/vst/out/<id>.wav —— 处理结果，支持 Range */
+  const outHit = /^out\/([0-9a-f-]{8,64})\.wav$/.exec(part);
+  if (outHit && (req.method === 'GET' || req.method === 'HEAD')) {
+    return serveVstOut(req, res, outHit[1]);
+  }
+
+  /* POST /api/vst/render —— 抓音频 → 交给 Python → 返回可播放的 URL */
+  if (part === 'render' && req.method === 'POST') {
+    const body = await readBody(req);
+    const source = String(body.source || '');
+    const pluginPath = String(body.pluginPath || '');
+    if (!source || !body.url || !pluginPath) {
+      return json(res, 400, { ok: false, error: '需要 source / url / pluginPath' });
+    }
+
+    /* ---- 1) 白名单校验：和 proxySourceAudio 完全同一套判断 ---- */
+    let u;
+    try { u = new URL(String(body.url)); } catch { return json(res, 400, { ok: false, error: 'bad url' }); }
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return json(res, 400, { ok: false, error: 'bad protocol' });
+    const allow = AUDIO_HOSTS[source] || [];
+    if (!allow.length) return json(res, 403, { ok: false, error: `no audio for source ${source}` });
+    if (!allow.some((re) => re.test(u.hostname))) {
+      return json(res, 403, { ok: false, error: 'host not allowed: ' + u.hostname });
+    }
+
+    try {
+      /* ---- 2) 抓音频（同一 url 复用；sha1 用 url 算） ---- */
+      const urlHash = vstSha1(u.href);
+      let inputPath = vstCachedInput(urlHash);
+      let downloaded = false;
+      if (!inputPath) {
+        const headers = { 'User-Agent': 'Mozilla/5.0' };
+        if (AUDIO_REFERER[source]) headers.Referer = AUDIO_REFERER[source];
+        const upstream = await fetch(u, { headers, redirect: 'follow', signal: AbortSignal.timeout(120000) });
+        if (!upstream.ok) {
+          return json(res, 502, { ok: false, error: `上游音频 HTTP ${upstream.status}` });
+        }
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        if (!buf.length) return json(res, 502, { ok: false, error: '上游音频是空的' });
+        inputPath = path.join(VST_IN_DIR, urlHash + vstAudioExt(u, upstream.headers.get('content-type')));
+        /* 先写 .part 再改名：半截文件绝不能留在缓存里被下一次复用 */
+        const tmp = inputPath + '.part-' + process.pid;
+        fs.writeFileSync(tmp, buf);
+        fs.renameSync(tmp, inputPath);
+        downloaded = true;
+      }
+
+      /* ---- 3) 缓存 id：<url sha1 前 16>-<pluginPath sha1 前 8>-<params sha1 前 8> ---- */
+      const params = (body.params && typeof body.params === 'object' && !Array.isArray(body.params)) ? body.params : {};
+      const id = [
+        urlHash.slice(0, 16),
+        vstSha1(pluginPath).slice(0, 8),
+        vstSha1(JSON.stringify(params)).slice(0, 8),
+      ].join('-');
+      const outPath = path.join(VST_OUT_DIR, id + '.wav');
+
+      if (fs.existsSync(outPath)) {
+        const info = vstWavInfo(outPath);
+        return json(res, 200, {
+          ok: true,
+          url: `/api/vst/out/${id}.wav`,
+          cached: true,
+          durationMs: info ? info.durationMs : null,
+          elapsedMs: 0,
+          sampleRate: info ? info.sampleRate : null,
+          channels: info ? info.channels : null,
+        });
+      }
+
+      /* ---- 4) 交给 Python（只传本机路径，不传 URL） ---- */
+      const r = await vstRequest('/render', {
+        method: 'POST',
+        timeout: 15 * 60 * 1000,       // 插件加载 5–23s + 整曲处理；大文件留足余量
+        payload: {
+          inputPath,
+          pluginPath,
+          outPath,
+          params,
+          preset: body.preset ? String(body.preset) : '',
+        },
+      });
+      if (r.status !== 200 || !r.data || r.data.ok !== true) {
+        return json(res, 502, {
+          ok: false,
+          error: (r.data && r.data.error) || `VST 宿主 HTTP ${r.status}`,
+          log: scLogTail('vst'),
+        });
+      }
+      return json(res, 200, {
+        ok: true,
+        url: `/api/vst/out/${id}.wav`,
+        cached: false,
+        durationMs: r.data.durationMs,
+        elapsedMs: r.data.elapsedMs,
+        sampleRate: r.data.sampleRate,
+        channels: r.data.channels,
+        downloaded,
+        plugin: r.data.plugin,
+        appliedParams: r.data.appliedParams,
+        skippedParams: r.data.skippedParams,
+      });
+    } catch (e) {
+      return json(res, 502, { ok: false, error: String(e.message || e), log: scLogTail('vst') });
+    }
+  }
+
+  return json(res, 404, { error: 'unknown vst api: ' + part });
 }
 
 /* ==========================================================================
@@ -1618,7 +2180,14 @@ async function runHarvest(key) {
       const r = await ncRequest('/login/status', { params: {}, timeout: 12000 });
       return { body: r.data, setCookies: r.setCookies };
     },
-    verify: sessionVerify,
+    /* harvest-core 的 verify 契约是「返回裸 profile 或 null」；直接把
+       sessionVerify 传进去会把 { loggedIn, profile } 整包当成 profile，
+       803 登录后前端拿到嵌套对象，左侧 !!profile 已登录、右侧
+       profile.nickname 却为空 —— 就是第一次扫码登录左右不一致的根因。 */
+    verify: async () => {
+      const v = await sessionVerify();
+      return v && v.loggedIn ? v.profile : null;
+    },
     session: { snapshot: sessionSnapshot, apply: sessionApply, restore: sessionRestore },
     record: (info) => {
       lastHarvest = {
@@ -1813,26 +2382,510 @@ async function handleNetease(req, res, url) {
   }
 }
 
-/* ---------------- 酷狗登录态：包只认 Cookie，所以由主服务落盘/回放 ---------------- */
-function kgJarFile() { return path.join(scPaths('kugou').dir, '.auth-cookies.json'); }
-function kgJarGet() {
+/* ---------------- 酷狗登录态 / 版本选择 ----------------
+   普通版和概念版是两个边车进程（包在 require 时就把 process.env.platform 固定了），
+   各自一份 cookie jar：
+     normal → .auth-cookies.json       → kugou（3211）
+     lite   → .auth-cookies-lite.json  → kugouLite（3217）
+   同一台设备：.auth-state/device.json 两边共用。
+
+   版本规则（2026-11-23 用户要求，**不再按 VIP 自动选路**）：
+     · 用户最后成功登录哪一版，就一直用哪一版；
+     · active 没 token 时才退到另一个有 token 的版本；都没有就用 normal 匿名；
+     · VIP 只用于界面显示 / 试听提示，不参与选路。
+   同一酷狗账号在两版的歌单 /「我喜欢」本来同步，所以换版本不会丢内容。
+
+   登录态落盘（server.mjs 是普通 Node 进程，不依赖 Electron app）：
+     · 优先用户可写目录：%APPDATA%\LIZI\kugou（非 Windows：~/.lizi/kugou）；
+     · 开发环境且用户目录不可写时回退到 services/kugou-api；
+     · packaged 模式**绝不写安装目录**；
+     · 旧路径的 jar / active-profile.json 只读兼容，读到后迁移到新目录。
+   线上结果缓存 10 分钟；登录 / 退出立即失效。 */
+const KG_JAR_FILES = { normal: '.auth-cookies.json', lite: '.auth-cookies-lite.json' };
+const KG_ACTIVE_FILE = 'active-profile.json';
+
+function kgProfileName(p) { return p === 'lite' ? 'lite' : 'normal'; }
+function kgOtherProfile(p) { return kgProfileName(p) === 'lite' ? 'normal' : 'lite'; }
+function kgSidecarName(p = 'normal') { return kgProfileName(p) === 'lite' ? 'kugouLite' : 'kugou'; }
+
+/* packaged：__dirname 是 resources/app（extraResources 把 services 放到 app/services），
+   开发目录则是仓库根。两种都认一下，避免以后换打包布局时写回安装目录。 */
+let kgPackagedCache = null;
+function kgIsPackaged() {
+  if (kgPackagedCache != null) return kgPackagedCache;
   try {
-    const j = JSON.parse(fs.readFileSync(kgJarFile(), 'utf8'));
-    return j && typeof j === 'object' ? j : {};
-  } catch { return {}; }
+    if (process.resourcesPath
+      && path.resolve(__dirname).toLowerCase().startsWith(path.resolve(process.resourcesPath).toLowerCase())) {
+      kgPackagedCache = true;
+      return kgPackagedCache;
+    }
+  } catch { /* ignore */ }
+  kgPackagedCache = path.basename(path.dirname(__dirname)).toLowerCase() === 'resources';
+  return kgPackagedCache;
 }
-function kgJarSet(obj) {
+function kgUserDir() {
+  const override = process.env.LIZI_KUGOU_DATA_DIR;
+  if (override) return path.resolve(override);
+  let home = '';
+  try { home = os.homedir(); } catch { /* ignore */ }
+  const appData = process.env.APPDATA
+    || (process.platform === 'win32' && home ? path.join(home, 'AppData', 'Roaming') : '');
+  return appData ? path.join(appData, 'LIZI', 'kugou') : path.join(home || process.cwd(), '.lizi', 'kugou');
+}
+/* LIZI_KUGOU_DATA_DIR 是显式的数据目录覆盖（测试 / 多开）。这时把旧路径
+   整个关掉：既保证测试不会读写真实凭据，也不会在退出时误删项目里的 jar。 */
+const KG_LEGACY_ENABLED = !process.env.LIZI_KUGOU_DATA_DIR;
+function kgLegacyDir() { return KG_LEGACY_ENABLED ? path.join(__dirname, 'services', 'kugou-api') : ''; }
+function kgDataDir(which = 'user') { return which === 'legacy' ? kgLegacyDir() : kgUserDir(); }
+function kgJarFile(profile = 'normal', which = 'user') {
+  const dir = kgDataDir(which);
+  return dir ? path.join(dir, KG_JAR_FILES[kgProfileName(profile)]) : '';
+}
+function kgActiveFile(which = 'user') {
+  const dir = kgDataDir(which);
+  return dir ? path.join(dir, KG_ACTIVE_FILE) : '';
+}
+
+/** 读 JSON：exists 用来区分「文件不存在」和「文件存在但内容坏了」。
+    坏文件不能退到旧路径（可能是刚退出登录后的空文件），只当空处理。 */
+function kgReadJson(file) {
+  /* LIZI_KUGOU_DATA_DIR 模式下旧路径为空串：直接当成「不存在」 */
+  if (!file) return { exists: false, value: null };
   try {
-    if (!obj || !Object.keys(obj).length) { fs.unlinkSync(kgJarFile()); return; }
-    fs.writeFileSync(kgJarFile(), JSON.stringify(obj, null, 2), { mode: 0o600 });
-  } catch (e) { console.warn('  酷狗登录态写盘失败:', e.message); }
+    return { exists: true, value: JSON.parse(fs.readFileSync(file, 'utf8')) };
+  } catch (e) {
+    return { exists: !!e && e.code !== 'ENOENT', value: null };
+  }
 }
-function kgCookie() {
-  const j = kgJarGet();
+function kgDirWritable(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch { return false; }
+}
+/** 原子写：先写临时文件再 rename，登录瞬间断电也不会留下半截 JSON */
+function kgWriteJsonAtomic(file, obj) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 });
+  try { fs.renameSync(tmp, file); }
+  catch (e) { try { fs.unlinkSync(tmp); } catch { /* ignore */ } throw e; }
+}
+
+/** 读 cookie jar：新目录优先；新目录没有才读旧路径并迁移。
+    primary 存在但解析失败时按空 jar 处理，绝不把旧登录态「复活」。 */
+function kgJarRead(profile = 'normal') {
+  const p = kgProfileName(profile);
+  const primary = kgJarFile(p, 'user');
+  const old = kgJarFile(p, 'legacy');
+  const pf = kgReadJson(primary);
+  if (pf.exists) {
+    return { jar: pf.value && typeof pf.value === 'object' ? pf.value : {}, path: primary, source: 'user' };
+  }
+  const lf = kgReadJson(old);
+  if (lf.exists && lf.value && typeof lf.value === 'object') {
+    let migrated = false;
+    try {
+      kgWriteJsonAtomic(primary, lf.value);
+      migrated = true;
+      /* 迁完把旧文件改名，避免以后退出登录后又被「迁移」回来 */
+      try { fs.renameSync(old, old + '.migrated'); } catch { /* 只读安装目录：留着也无害 */ }
+    } catch (e) {
+      console.warn(`  酷狗 ${p} 登录态迁移失败（继续用旧路径）:`, e.message);
+    }
+    return { jar: lf.value, path: migrated ? primary : old, source: migrated ? 'migrated' : 'legacy' };
+  }
+  return { jar: {}, path: primary, source: 'none' };
+}
+function kgJarGet(profile = 'normal') { return kgJarRead(profile).jar; }
+/** 写 jar（空对象 = 退出登录，删除新旧两个路径）。
+    返回 { ok, path, error }：登录流程必须据此判断是否真的写成功了。 */
+function kgJarWrite(obj, profile = 'normal') {
+  const p = kgProfileName(profile);
+  const primary = kgJarFile(p, 'user');
+  const old = kgJarFile(p, 'legacy');
+  if (!obj || !Object.keys(obj).length) {
+    let error = null;
+    for (const f of [primary, old]) {
+      if (!f) continue;
+      try { fs.unlinkSync(f); } catch (e) { if (e && e.code !== 'ENOENT' && !error) error = e.message; }
+    }
+    return { ok: !error, path: primary, error };
+  }
+  try {
+    kgWriteJsonAtomic(primary, obj);
+    /* 已经落到用户目录，旧路径的副本必须清掉，否则下次启动会互相打架 */
+    if (old) { try { fs.unlinkSync(old); } catch { /* 安装目录只读：读的时候新目录优先 */ } }
+    return { ok: true, path: primary, error: null };
+  } catch (e1) {
+    if (!kgIsPackaged() && old) {
+      try {
+        kgWriteJsonAtomic(old, obj);
+        console.warn('  酷狗登录态写不进用户目录，已回退到项目 services/kugou-api:', e1.message);
+        return { ok: true, path: old, error: null, fallback: true };
+      } catch (e2) {
+        return { ok: false, path: primary, error: `${e1.message}；回退也失败：${e2.message}` };
+      }
+    }
+    return { ok: false, path: primary, error: String((e1 && e1.message) || e1) };
+  }
+}
+function kgJarSet(obj, profile = 'normal') { return kgJarWrite(obj, profile).ok; }
+function kgCookie(profile = 'normal') {
+  const j = kgJarGet(profile);
   return Object.entries(j).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+function kgJarMtime(profile = 'normal') {
+  for (const which of ['user', 'legacy']) {
+    const file = kgJarFile(profile, which);
+    if (!file) continue;
+    try { return fs.statSync(file).mtimeMs; } catch { /* 没有这个文件 */ }
+  }
+  return 0;
+}
+
+/* ---- active profile：只认「最后成功登录」，不看 VIP ---- */
+let kgActiveMemo = null;
+function kgValidProfile(p) { return p === 'normal' || p === 'lite'; }
+function kgReadActiveFile() {
+  const primary = kgActiveFile('user');
+  const saved = kgReadJson(primary);
+  if (saved.exists) {
+    /* 文件在就只认它：内容坏了/为空也不能回头读旧路径（那会把已退出/已换版的
+       旧选择复活）。坏文件按「没有保存过」处理，交给 token / mtime 规则。 */
+    if (!saved.value || !kgValidProfile(saved.value.profile)) return null;
+    return { profile: kgProfileName(saved.value.profile), source: 'saved', path: primary };
+  }
+  const old = kgActiveFile('legacy');
+  const legacy = kgReadJson(old);
+  if (legacy.exists && legacy.value && kgValidProfile(legacy.value.profile)) {
+    const profile = kgProfileName(legacy.value.profile);
+    let migrated = false;
+    try {
+      kgWriteJsonAtomic(primary, { ...legacy.value, profile, migratedAt: new Date().toISOString() });
+      migrated = true;
+      try { fs.renameSync(old, old + '.migrated'); } catch { /* ignore */ }
+    } catch (e) {
+      console.warn('  酷狗 active-profile 迁移失败（继续用旧路径）:', e.message);
+    }
+    return { profile, source: migrated ? 'migrated' : 'legacy', path: migrated ? primary : old };
+  }
+  return null;
+}
+function kgSaveActive(profile, source = 'login') {
+  const p = kgProfileName(profile);
+  const obj = { profile: p, source, at: new Date().toISOString() };
+  const primary = kgActiveFile('user');
+  const remember = (pathUsed, fallback) => {
+    kgActiveMemo = { profile: p, source };
+    return { ok: true, profile: p, path: pathUsed, error: null, ...(fallback ? { fallback: true } : {}) };
+  };
+  try {
+    kgWriteJsonAtomic(primary, obj);
+    /* 新目录写成功后清掉旧目录的同名文件，避免以后被误读 */
+    const legacyActive = kgActiveFile('legacy');
+    if (legacyActive) { try { fs.unlinkSync(legacyActive); } catch { /* 不存在 / 只读 */ } }
+    return remember(primary, false);
+  } catch (e1) {
+    const old = kgActiveFile('legacy');
+    if (!kgIsPackaged() && old) {
+      try {
+        kgWriteJsonAtomic(old, obj);
+        console.warn('  酷狗 active-profile 写不进用户目录，已回退到项目 services/kugou-api:', e1.message);
+        return remember(old, true);
+      } catch (e2) {
+        kgActiveMemo = { profile: p, source };
+        return { ok: false, profile: p, path: primary, error: `${e1.message}；回退也失败：${e2.message}` };
+      }
+    }
+    /* 写盘失败也先把本次会话的 active 记住，重启后再按 jar 里最后的登录推断 */
+    kgActiveMemo = { profile: p, source };
+    console.warn('  酷狗 active-profile 写盘失败:', e1.message);
+    return { ok: false, profile: p, path: primary, error: String((e1 && e1.message) || e1) };
+  }
+}
+
+/** 当前应该用哪一版。规则（不涉及 VIP）：
+    1) active-profile.json 里那一版有 token → 用它；
+    2) 它没 token、另一版有 token → 用另一版；
+    3) 都没有 → normal 匿名。
+    首次升级（没有 active-profile.json）时按 jar 的修改时间当作「最后登录」，
+    并立刻落盘，后续不再随 VIP 检测结果漂移。 */
+function kgResolveActive(force = false) {
+  if (!force && kgActiveMemo) return kgActiveMemo;
+  const hasToken = (p) => !!kgJarGet(p).token;
+  const saved = kgReadActiveFile();
+  let profile = 'normal';
+  let source = 'default';
+  let detail = '';
+  if (saved) {
+    if (hasToken(saved.profile)) {
+      profile = saved.profile;
+      source = saved.source;
+    } else {
+      const other = kgOtherProfile(saved.profile);
+      if (hasToken(other)) {
+        profile = other;
+        source = 'fallback-token';
+        detail = `${saved.profile} 没有 token，退回 ${other}`;
+      } else {
+        profile = 'normal';
+        source = 'anonymous';
+        detail = `${saved.profile} 没有 token，两版都未登录`;
+      }
+    }
+  } else {
+    const n = hasToken('normal');
+    const l = hasToken('lite');
+    if (n && l) {
+      profile = kgJarMtime('lite') > kgJarMtime('normal') ? 'lite' : 'normal';
+      source = 'migrated-mtime';
+    } else if (l) {
+      profile = 'lite';
+      source = 'migrated-token';
+    } else if (n) {
+      profile = 'normal';
+      source = 'migrated-token';
+    }
+    if (n || l) kgSaveActive(profile, source);
+  }
+  kgActiveMemo = { profile, source, detail };
+  return kgActiveMemo;
+}
+function kgActiveContext() {
+  const a = kgResolveActive();
+  return {
+    profile: a.profile,
+    source: a.source,
+    sidecar: kgSidecarName(a.profile),
+    cookie: kgCookie(a.profile),
+    jar: kgJarGet(a.profile),
+  };
+}
+/** 账号类接口（我喜欢 / 我的歌单）还要求 userid。active 缺 token 或 userid 时
+    用另一版已登录的 jar —— 同一账号两版同步，不能因为 VIP 判定失败回 401。 */
+function kgUserContext() {
+  const a = kgActiveContext();
+  if (a.jar.token && a.jar.userid) return a;
+  const other = kgOtherProfile(a.profile);
+  const jar = kgJarGet(other);
+  if (jar.token && jar.userid) {
+    return {
+      profile: other,
+      source: 'user-fallback',
+      sidecar: kgSidecarName(other),
+      cookie: kgCookie(other),
+      jar,
+    };
+  }
+  return a;
+}
+
+/** 从 /user/detail、/user/vip/detail 的响应判断某个版本的 VIP。
+ *  envelope / data 嵌套都看；普通版只认非 concept 条目，概念版只认 busi_type==='concept'
+ *  （字段见 kugoumusicapi 的 user_vip_detail.js：busi_vip[].is_vip / busi_type）。 */
+function kgVipInfo(data, profile = 'normal') {
+  if (!data || typeof data !== 'object') return false;
+  const layers = [data];
+  if (data.data && typeof data.data === 'object') layers.push(data.data);
+  for (const d of layers) {
+    if (Number(d.vip_type) > 0) return true;
+    if (d.is_vip === true || d.is_vip === 1 || Number(d.is_vip) > 0) return true;
+  }
+  const busi = [];
+  for (const d of layers) {
+    if (Array.isArray(d.busi_vip)) busi.push(...d.busi_vip);
+  }
+  for (const it of busi) {
+    if (!it || typeof it !== 'object') continue;
+    if (!(it.is_vip === true || it.is_vip === 1 || Number(it.is_vip) > 0)) continue;
+    const type = String(it.busi_type || it.busiType || '').toLowerCase();
+    if (kgProfileName(profile) === 'lite') {
+      if (type === 'concept') return true;
+    } else if (type && type !== 'concept') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* 状态结果缓存：只缓存「两版各自的登录 / VIP 显示」，不参与 active 选路。
+   登录 / 登出 / platform/evaluate 立即失效。 */
+const KG_EVAL_TTL = 10 * 60 * 1000;
+const kgPlatform = {
+  active: 'normal',
+  activeProfile: 'normal',
+  profileSource: 'default',
+  normal: { loggedIn: false, vip: false },
+  lite: { loggedIn: false, vip: false },
+  checkedAt: 0,
+  promise: null,
+};
+let kgEvalGen = 0;
+function kgPlatformSnapshot() {
+  /* 还没算过时用磁盘上的 active，避免启动后第一眼把 lite 误报成 normal */
+  const quick = kgResolveActive();
+  const evaluated = kgPlatform.checkedAt > 0;
+  const active = evaluated ? kgPlatform.active : quick.profile;
+  return {
+    code: 200,
+    active,
+    activeProfile: evaluated ? (kgPlatform.activeProfile || active) : quick.profile,
+    profileSource: evaluated ? (kgPlatform.profileSource || quick.source) : quick.source,
+    normal: { ...kgPlatform.normal },
+    lite: { ...kgPlatform.lite },
+    checkedAt: evaluated ? new Date(kgPlatform.checkedAt).toISOString() : null,
+  };
+}
+function kgActiveSidecar() { return kgActiveContext().sidecar; }
+function kgActiveCookie() { return kgActiveContext().cookie; }
+function kgActiveJar() { return kgActiveContext().jar; }
+function kgInvalidateEval() {
+  kgPlatform.checkedAt = 0;
+  kgEvalGen++;
+  kgActiveMemo = null;       // 登录 / 退出后 active 规则要重新读 jar
+}
+
+/* 2026-11-22：这里原本会「帮用户领」酷狗概念版每日 1 天 VIP
+   （/youth/day/vip + /youth/day/vip/upgrade，同一天一次，记录落
+   .auth-state/vip-claim.json）。用户明确要求不提供这种代领服务，整段移除；
+   这里只读账号当前 VIP。 */
+async function kgLiteVipDetail(cookie, timeout = 20000) {
+  try {
+    /* 加时间戳：边车给所有响应挂了 2 分钟 apicache，登录 / 退出前后同一个 URL 会读到旧结果 */
+    const r = await scRequest('kugouLite', `/user/vip/detail?_=${Date.now()}`,
+      { cookie, timeout, cookieHeaderOnly: true });
+    return r.data;
+  } catch (e) {
+    console.warn('  酷狗概念版 VIP 详情请求失败:', (e && e.code) || 'network');
+    return null;
+  }
+}
+/** 只计算显示用的登录 / VIP，不改 active。active 由 kgResolveActive 按登录记录决定。 */
+async function kgEvaluatePlatform() {
+  const act = kgResolveActive(true);
+  const normal = { loggedIn: !!kgJarGet('normal').token, vip: false };
+  const lite = { loggedIn: !!kgJarGet('lite').token, vip: false };
+
+  /* 两版并行探测，单次 12s 上限；VIP 只用于显示，探测超时按「没探到」处理，
+     不能让它拖垮设置页的 20s 前端超时。 */
+  const normalProbe = (async () => {
+    if (!normal.loggedIn) return;
+    try {
+      const r = await scRequest(kgSidecarName('normal'), `/user/detail?_=${Date.now()}`,
+        { cookie: kgCookie('normal'), timeout: 12000, cookieHeaderOnly: true });
+      normal.vip = kgVipInfo(r.data, 'normal');
+      /* user/detail 明确回 status!=1 才算失效；网络/边车错误时保留 jar 里的登录态 */
+      if (Number(r.data && r.data.status) !== 1) normal.loggedIn = false;
+    } catch (e) {
+      console.warn('  酷狗普通版 VIP 检测失败:', (e && e.code) || 'network');
+    }
+  })();
+  const liteProbe = (async () => {
+    if (!lite.loggedIn) return;
+    const cookie = kgCookie('lite');
+    /* user/detail 和概念版 VIP 详情互不依赖，并行查；串行最坏 24s 太久了。
+       只读状态，不代领 —— 没有 VIP 就按没有处理。 */
+    const detailP = (async () => {
+      try {
+        const r = await scRequest('kugouLite', `/user/detail?_=${Date.now()}`,
+          { cookie, timeout: 12000, cookieHeaderOnly: true });
+        lite.vip = kgVipInfo(r.data, 'lite');
+        if (Number(r.data && r.data.status) !== 1) lite.loggedIn = false;
+      } catch (e) {
+        console.warn('  酷狗概念版 VIP 检测失败:', (e && e.code) || 'network');
+      }
+    })();
+    const vipP = (async () => {
+      const v = kgVipInfo(await kgLiteVipDetail(cookie, 12000), 'lite');
+      if (v) lite.vip = true;
+    })();
+    await Promise.all([detailP, vipP]);
+  })();
+  await Promise.all([normalProbe, liteProbe]);
+
+  /* VIP 只影响显示，绝不参与 active */
+  const active = act.profile;
+  console.log(`  酷狗版本：active=${active}(${act.source}) normal logged=${normal.loggedIn} vip=${normal.vip}；lite logged=${lite.loggedIn} vip=${lite.vip}`);
+  return { normal, lite, active, activeProfile: active, profileSource: act.source };
+}
+async function kgEnsureEvaluated(force = false) {
+  const fresh = () => kgPlatform.checkedAt > 0 && Date.now() - kgPlatform.checkedAt < KG_EVAL_TTL;
+  if (!force && fresh()) return kgPlatformSnapshot();
+  if (kgPlatform.promise) {
+    try { await kgPlatform.promise; } catch { /* 内部已吞 */ }
+    if (!force && fresh()) return kgPlatformSnapshot();
+  }
+  const gen = ++kgEvalGen;
+  kgPlatform.promise = kgEvaluatePlatform()
+    .then((out) => {
+      if (gen !== kgEvalGen) return;   // 期间登录 / 登出过：这份结果作废
+      kgPlatform.normal = out.normal;
+      kgPlatform.lite = out.lite;
+      kgPlatform.active = out.active;
+      kgPlatform.activeProfile = out.activeProfile || out.active;
+      kgPlatform.profileSource = out.profileSource || kgResolveActive().source;
+      kgPlatform.checkedAt = Date.now();
+    })
+    .catch((e) => console.warn('  酷狗状态检测失败:', (e && e.code) || (e && e.message) || 'unknown'))
+    .finally(() => { if (gen === kgEvalGen) kgPlatform.promise = null; });
+  await kgPlatform.promise;
+  return kgPlatformSnapshot();
+}
+
+/** 扫码成功那一轮：token / userid / vip_type / vip_token 可能在 Set-Cookie，
+    也可能只在上游 body（data 里）。两处都抓；空值不覆盖已有字段。 */
+function kgLoginFields(r) {
+  const out = {};
+  const keys = ['token', 'userid', 'vip_type', 'vip_token'];
+  const put = (k, v) => {
+    if (!keys.includes(k) || v === undefined || v === null) return;
+    const s = String(v).trim();
+    if (!s || s === 'undefined' || s === 'null') return;
+    if (k === 'userid' && s === '0') return;
+    out[k] = s;
+  };
+  /* body：酷狗是 { status, data: { status:4, token, userid, … } }，多包几层都认 */
+  let d = r && r.data;
+  for (let depth = 0; depth < 4; depth++) {
+    if (!d || typeof d !== 'object') break;
+    for (const k of keys) put(k, d[k]);
+    d = d.data;
+  }
+  for (const line of (r && r.setCookies) || []) {
+    const pair = String(line).split(';')[0];
+    const i = pair.indexOf('=');
+    if (i > 0) put(pair.slice(0, i).trim(), pair.slice(i + 1));
+  }
+  return out;
+}
+
+/** 诊断字段：只给「有没有 token / userid」和目录是否可写，绝不返回 token 本身。 */
+function kgDiagnostics() {
+  const profiles = {};
+  for (const p of ['normal', 'lite']) {
+    const jar = kgJarGet(p);
+    profiles[p] = {
+      hasToken: !!jar.token,
+      hasUserid: !!jar.userid,
+      vipType: jar.vip_type != null && String(jar.vip_type) !== '' ? String(jar.vip_type) : '',
+    };
+  }
+  return {
+    jarDir: kgUserDir(),
+    jarWritable: kgDirWritable(kgUserDir()),
+    packaged: kgIsPackaged(),
+    profiles,
+  };
 }
 
 /* ---------------- 各平台「原始条目 → 前端只认的那一种形状」 ---------------- */
+/* 酷狗封面模板里的 {size} 是路径段（/stdmusic/{size}/…、/soft/collection/{size}/…），
+   实测 240/400/480/500/800/1200 都能出图。曲目默认给 800（形态大图用）；
+   缩略图由 API.img 按调用尺寸重写回小档。 */
+const KUGOU_TRACK_COVER_SIZE = '800';
 /** 酷狗：字段是 PascalCase，hash 才是播放键（不是数字 id） */
 function kugouTrack(it) {
   const singers = Array.isArray(it.Singers) ? it.Singers : [];
@@ -1853,12 +2906,16 @@ function kugouTrack(it) {
     artistIds: singers.map((s) => s.id).filter(Boolean).map(String),
     album: it.AlbumName || '',
     albumId: it.AlbumID ? String(it.AlbumID) : '',
-    cover: tpl ? String(tpl).replace('{size}', '240') : '',
+    cover: tpl ? String(tpl).replace('{size}', KUGOU_TRACK_COVER_SIZE) : '',
     duration: (it.Duration || 0) * 1000,
     // PayType: 0 免费 / 2 试听或付费 / 3 付费。只用来打小签，实际能不能放看 /song/url
     fee: Number(it.PayType) > 0 ? 1 : 0,
     hash: it.FileHash,
-    albumAudioId: it.Audioid || it.MixSongID || 0,
+    /* 播放取流只认 FileHash + MixSongID。Audioid / Scid 不是 album_audio_id：
+       实测把它当 album_audio_id 传给 /v5/url，上游会按它返回**另一首**的音频
+       （2026-11-13：请求 5A94CCD… 热爱105°C的你，拿到 8044B902… You Are My Joy）。
+       搜索条目没有 album_audio_id，MixSongID 才是这一条的曲目键。 */
+    albumAudioId: Number(it.MixSongID || it.EMixSongID || it.AlbumAudioID || it.album_audio_id) || 0,
     albumIdNum: Number(it.AlbumID) || 0,
   };
 }
@@ -1875,11 +2932,14 @@ function pickCover(c) {
      https://p3-luna.douyinpic.com/img/<uri>           → 400 application/json
      https://p3-luna.douyinpic.com/img/<uri>~tplv-…    → 200 image/jpeg）
      template 为空时用 `~<template_prefix>-image.image`，这是实测能出图的那个。 */
-  /* 列表/跑马带只要 200~400px，原图一张 0.5~2MB，20 张能把首屏拖垮。
-     汽水的图片模板支持 resize：`~tplv-<id>-resize:480:480.image`（实测 38KB），
-     缩图失败（老数据没模板）就退回完整图。 */
+  /* 汽水的 resize 模板接受任意尺寸（实测 120~2000 都出图），480 只够列表小图，
+     形态把封面放大时会糊。服务端统一给 800（约 86KB/张），列表缩略图由
+     API.img 按调用尺寸改回小档；模板里已经写死 resize 尺寸的也一并改成 800。 */
+  const QISHUI_COVER_SIZE = '800';
   const suffix = c.template_prefix
-    ? (c.template ? `~${c.template_prefix}-${c.template}` : `~${c.template_prefix}-resize:480:480.image`)
+    ? (c.template
+        ? `~${c.template_prefix}-${String(c.template).replace(/resize:\d+:\d+/, `resize:${QISHUI_COVER_SIZE}:${QISHUI_COVER_SIZE}`)}`
+        : `~${c.template_prefix}-resize:${QISHUI_COVER_SIZE}:${QISHUI_COVER_SIZE}.image`)
     : '';
   return base + uri + suffix;
 }
@@ -1952,8 +3012,13 @@ function bodianTrack(it) {
   };
 }
 
-/** 波点歌单：推荐流给 pic/musicCount/creatorName，收藏页给别的名字，这里一起兜住 */
-function bodianPlaylist(it) {
+/** 波点歌单：推荐流给 pic/musicCount/creatorName，收藏页给别的名字，这里一起兜住
+ *  sourceType 决定取曲目时传给上游的 source，传错会回 200 + 空列表（不是报错）：
+ *    - 公开集合/推荐/收藏歌单：4（默认）
+ *    - 系统红心歌单、自建歌单：5。自建歌单在 userCreate 里可能整条没有 sourceType，
+ *      协议要求宿主归一化为 5（bodian-music-api docs/protocol.md）。
+ *  所以这里默认 4，调用方按来源（owned/liked）传 fallbackSource=5。 */
+function bodianPlaylist(it, fallbackSource = 4) {
   return {
     id: String(it.id || it.playlistId || it.fid || ''),
     source: 'bodian',
@@ -1962,8 +3027,7 @@ function bodianPlaylist(it) {
     trackCount: Number(it.musicCount ?? it.songCount ?? it.total ?? it.count ?? it.songNum) || 0,
     playCount: Number(it.playNum ?? it.play_count ?? it.playCount) || 0,
     creator: { nickname: it.creatorName || it.nickname || it.userName || '' },
-    // 取曲目时上游要 source：红心歌单是 5，自建/收藏一般是 4
-    sourceType: Number(it.sourceType) || 0,
+    sourceType: Number(it.sourceType) || fallbackSource,
   };
 }
 
@@ -1989,14 +3053,21 @@ function bodianPlaylistRows(x) {
  */
 function bodianUserAlbum(it) {
   const artist = it.artist || it.artistName || it.singer || it.singerName || it.creatorName || it.nickname || '未知歌手';
+  const cover = it.pic || it.cover || it.img || it.coverUrl || it.albumPic || it.albumPic120 || '';
+  const size = Number(it.musicCount ?? it.songCount ?? it.total ?? it.count ?? it.songNum ?? 0) || 0;
   return {
     id: String(it.id || it.albumId || it.albumIdStr || it.rid || it.musicRid || ''),
     name: it.name || it.title || it.albumName || it.album_name || '未知专辑',
     /* 和网易云一样给对象数组，前端 impAlbum 不用为波点再写一套 */
     artists: [{ name: String(artist) }],
-    cover: it.pic || it.cover || it.img || it.coverUrl || it.albumPic || it.albumPic120 || '',
+    /* 契约字段（和 /api/kugou/user/albums 一致） */
+    picUrl: cover,
+    size,
+    source: 'bodian',
+    /* 兼容旧字段：之前的波点映射只给 cover / trackCount */
+    cover,
+    trackCount: size,
     publishTime: Number(it.publishTime ?? it.pubTime ?? it.pubtime ?? it.releaseTime ?? 0) || 0,
-    trackCount: Number(it.musicCount ?? it.songCount ?? it.total ?? it.count ?? it.songNum ?? 0) || 0,
   };
 }
 
@@ -2025,11 +3096,14 @@ function kuwoTrack(it) {
   );
   const name = it.name || it.NAME || it.SONGNAME || '';
   const artist = it.artist || it.ARTIST || it.FARTIST || '';
-  /* 搜索接口只给相对路径（120/s3s94/93/211513640.jpg），歌单给完整 URL */
+  /* 搜索接口只给相对路径（120/s3s94/93/211513640.jpg），歌单给完整 URL。
+     相对路径的 120 是缩略档，实测 CDN 的 /star/albumcover/ 支持 120/300/500/800，
+     统一换 800（约 90~245KB，形态大图够用）；歌单/榜单原本就是 500 的顺手升到 800。 */
   let cover = it.pic || it.albumpic || it.albumpic_short || it.web_albumpic_short || '';
   if (cover && !/^https?:\/\//i.test(cover)) {
     cover = 'https://img1.kuwo.cn/star/albumcover/' + String(cover).replace(/^\/+/, '');
   }
+  cover = String(cover).replace(/\/star\/albumcover\/(?:120|300|500|750|800)\//, '/star/albumcover/800/');
   const albumId = it.albumid || it.ALBUMID || '';
   return {
     id: rid,
@@ -2064,84 +3138,250 @@ function kuwoPlaylist(it) {
 async function handleKugou(req, res, url) {
   const part = url.pathname.slice('/api/kugou/'.length);
   const q = url.searchParams;
-  const cookie = kgCookie();
+
+  /* 当前用哪一版只看登录记录（最后登录 / token），VIP 不参与选路。
+     业务请求直接读这个上下文，不再等待 VIP 检测 —— 检测失败也不会退回无 token 的 normal。 */
+  const ctx = kgActiveContext();
+  const active = ctx.profile;
+  const sidecar = ctx.sidecar;
+  const cookie = ctx.cookie;
+  const jar = ctx.jar;
+  let logSidecar = sidecar;   // 出错时读对应边车的 .log（登录接口可能用的是另一版）
+
+  /* 平台信息：evaluate 强制重算，platform 读 10 分钟缓存（没有缓存就先算一次） */
+  if (part === 'platform' || part === 'platform/evaluate') {
+    const ev = await kgEnsureEvaluated(part === 'platform/evaluate');
+    return json(res, 200, ev);
+  }
+
+  /* status 才需要探测两版 VIP；其它接口（含 health）不碰它。
+     health 是存活/启动探测，没必要为了显示 VIP 先等两轮 /user/detail。 */
+  let ev = null;
+  const needEval = async (force = false) => {
+    if (!ev || force) ev = await kgEnsureEvaluated(force);
+    return ev;
+  };
 
   if (part === 'health') {
+    /* active / 登录态只看 jar 有没有 token；VIP 显示由 /status 负责 */
+    const act = kgResolveActive(true);
+    const normalState = { loggedIn: !!kgJarGet('normal').token, vip: false };
+    const liteState = { loggedIn: !!kgJarGet('lite').token, vip: false };
     try {
-      const port = await ensureSidecar('kugou');
-      return json(res, 200, { code: 200, ok: true, port, node: process.versions.node, loggedIn: !!kgJarGet().token });
-    } catch (e) {
-      return json(res, 502, { code: 502, ok: false, error: String(e.message), reason: e.reason || null, log: scLogTail('kugou') });
+      /* 设置页两行各有各的 profile：普通版探 kugou，概念版探 kugouLite；
+         带了 profile 就起那一版，没带才跟当前 active。 */
+      const probe = q.get('profile') === 'lite' ? 'lite' : (q.get('profile') === 'normal' ? 'normal' : active);
+      const probeSidecar = kgSidecarName(probe);
+      logSidecar = probeSidecar;
+      const port = await ensureSidecar(probeSidecar);
+      return json(res, 200, {
+        code: 200, ok: true, port, node: process.versions.node,
+        platform: act.profile, activeProfile: act.profile, profileSource: act.source,
+        probe,
+        loggedIn: normalState.loggedIn || liteState.loggedIn,
+        normal: normalState, lite: liteState,
+      });
+    } catch (err) {
+      return json(res, 502, {
+        code: 502, ok: false, error: String(err.message), reason: err.reason || null,
+        platform: act.profile, activeProfile: act.profile, profileSource: act.source,
+        normal: normalState, lite: liteState, log: scLogTail(logSidecar),
+      });
     }
   }
 
   try {
     if (part === 'status') {
-      const jar = kgJarGet();
-      if (!jar.token) return json(res, 200, { code: 200, loggedIn: false });
-      // 有 token 就问一次「我是谁」，顺便验它还有效
-      const r = await scRequest('kugou', '/user/detail', { cookie });
-      const d = (r.data && r.data.data) || {};
-      const ok = Number(r.data && r.data.status) === 1;
-      return json(res, 200, {
+      const diag = kgDiagnostics();
+      /* active / 两版有没有 token 都只看磁盘，不依赖 VIP 探测 */
+      const act = kgResolveActive(true);
+      const activeNow = act.profile;
+      /* 两版 VIP 显示评估 + 当前版身份探测并行：以前先 await 评估再探测，
+         两次等待叠加会顶穿前端 20s 超时。 */
+      const evalP = needEval();
+      /* 候选只看 jar 里有没有 token；VIP 判定失败不参与「是否登录」 */
+      const candidates = [];
+      if (kgJarGet(activeNow).token) candidates.push(activeNow);
+      for (const p of ['normal', 'lite']) {
+        if (p !== activeNow && kgJarGet(p).token) candidates.push(p);
+      }
+      /* 候选并行问；结果按 candidates 的顺序取第一个成功的（active 优先）。 */
+      const probeP = candidates.length
+        ? Promise.all(candidates.map(async (who) => {
+            try {
+              const r = await scRequest(kgSidecarName(who), `/user/detail?_=${Date.now()}`,
+                { cookie: kgCookie(who), timeout: 12000, cookieHeaderOnly: true });
+              if (Number(r.data && r.data.status) !== 1) return null;
+              const d = (r.data && r.data.data) || {};
+              return { who, r, d };
+            } catch { return null; }
+          })).then((list) => list.find(Boolean) || null)
+        : Promise.resolve(null);
+      const e = await evalP;
+      const hit = await probeP;
+      const base = {
         code: 200,
-        loggedIn: ok,
-        nickname: ok ? (d.nickname || d.user_name || '酷狗用户') : '',
-        avatar: ok ? (d.pic || d.avatar || '') : '',
-        uid: ok ? String(d.userid || jar.userid || '') : '',
-        vip: ok ? Number(d.vip_type || 0) > 0 : false,
-        error: ok ? null : '登录态可能已过期（重新扫码）',
+        platform: e.activeProfile || e.active || activeNow,
+        activeProfile: e.activeProfile || e.active || activeNow,
+        profileSource: e.profileSource || act.source,
+        normal: e.normal,
+        lite: e.lite,
+        /* 诊断用：路径 / 是否可写 / 两版 jar 里有没有 token（不含 token 值） */
+        jarDir: diag.jarDir,
+        jarWritable: diag.jarWritable,
+        packaged: diag.packaged,
+        profiles: diag.profiles,
+      };
+      if (!candidates.length) {
+        return json(res, 200, { ...base, loggedIn: false, vip: false, error: null });
+      }
+      if (hit) {
+        /* VIP 只属于「真正回答 /user/detail 的这一版」，不能拿另一版的 VIP 冒充 */
+        return json(res, 200, {
+          ...base,
+          loggedIn: true,
+          profile: hit.who,
+          vipProfile: hit.who,
+          nickname: hit.d.nickname || hit.d.user_name || '酷狗用户',
+          avatar: hit.d.pic || hit.d.avatar || '',
+          uid: String(hit.d.userid || kgJarGet(hit.who).userid || ''),
+          vip: kgVipInfo(hit.r.data, hit.who),
+          error: null,
+        });
+      }
+      return json(res, 200, {
+        ...base, loggedIn: false, vip: false,
+        error: '登录态可能已过期（重新扫码）',
       });
     }
 
+    /* ---- 登录 / 登出：?profile=lite 走概念版边车和概念版 jar（默认 normal） ---- */
+    const loginProfile = q.get('profile') === 'lite' ? 'lite' : 'normal';
+    const loginSidecar = kgSidecarName(loginProfile);
+
     if (part === 'login/qr/key') {
-      const r = await scRequest('kugou', '/login/qr/key', { timeout: 20000 });
+      logSidecar = loginSidecar;
+      const r = await scRequest(loginSidecar, '/login/qr/key', { timeout: 20000 });
       const key = r.data && r.data.data && (r.data.data.qrcode || r.data.data.key);
       if (!key) return json(res, 200, { code: 502, key: null, error: (r.data && (r.data.error || r.data.message)) || '拿不到二维码 key' });
-      return json(res, 200, { code: 200, key });
+      return json(res, 200, { code: 200, key, profile: loginProfile });
     }
 
     if (part === 'login/qr/create') {
+      logSidecar = loginSidecar;
       const key = q.get('key') || '';
       if (!key) return json(res, 400, { code: 400, error: 'key required' });
-      const r = await scRequest('kugou', `/login/qr/create?key=${encodeURIComponent(key)}&qrimg=true`);
+      const r = await scRequest(loginSidecar, `/login/qr/create?key=${encodeURIComponent(key)}&qrimg=true`);
       const img = r.data && r.data.data && r.data.data.base64;
       if (!img) return json(res, 200, { code: 502, qrimg: '', key, error: (r.data && r.data.message) || '二维码生成失败（上游没给图片）' });
-      return json(res, 200, { code: 200, key, qrimg: img });
+      return json(res, 200, { code: 200, key, qrimg: img, profile: loginProfile });
     }
 
     if (part === 'login/qr/check') {
+      logSidecar = loginSidecar;
       const key = q.get('key') || '';
       if (!key) return json(res, 400, { code: 400, error: 'key required' });
-      const r = await scRequest('kugou', `/login/qr/check?key=${encodeURIComponent(key)}`, { timeout: 25000 });
+      /* 12s 上限：前端每次轮询只等 20s，成功那一轮后面还要查昵称/VIP，
+         这里等太久会把 803 整条顶穿（登录其实已成功，界面却报超时）。 */
+      const r = await scRequest(loginSidecar, `/login/qr/check?key=${encodeURIComponent(key)}`, { timeout: 12000 });
       // 酷狗：0 过期 / 1 等待 / 2 待确认 / 4 成功（成功那一轮带 token+userid）
       const st = Number(r.data && r.data.data && r.data.data.status);
       const MAP = { 0: 800, 1: 801, 2: 802, 4: 803 };
-      const out = { code: MAP[st] || 801, state: st };
+      const out = { code: MAP[st] || 801, state: st, profile: loginProfile };
       if (st === 4) {
-        const jar = { ...kgJarGet() };
-        for (const line of r.setCookies) {
-          const pair = String(line).split(';')[0];
-          const i = pair.indexOf('=');
-          if (i <= 0) continue;
-          const k = pair.slice(0, i).trim();
-          if (['token', 'userid', 'vip_type', 'vip_token'].includes(k)) jar[k] = pair.slice(i + 1).trim();
+        /* 两处都抓：Set-Cookie + body/data。以前只看 Set-Cookie，
+           概念版有一轮只在 body 里给 token，结果「扫完还是未登录」。 */
+        const fields = kgLoginFields(r);
+        const missing = ['token', 'userid'].filter((k) => !fields[k]);
+        if (missing.length) {
+          return json(res, 200, {
+            code: 502, state: 4, profile: loginProfile, loggedIn: false,
+            error: `酷狗已确认扫码，但上游没有返回 ${missing.join(' / ')}，登录未保存；请重新扫码`,
+          });
         }
-        kgJarSet(jar);
+        const next = { ...kgJarGet(loginProfile), ...fields };
+        const wrote = kgJarWrite(next, loginProfile);
+        if (!wrote.ok) {
+          return json(res, 200, {
+            code: 502, state: 4, profile: loginProfile, loggedIn: false,
+            error: `酷狗登录凭据写盘失败（${wrote.error || '未知原因'}），登录未保存；请检查用户数据目录权限后重试`,
+          });
+        }
+        /* 回读校验：token + userid 必须都在，且就是刚写进去的那两个值。
+           不通过就不能对前端说「已登录」。 */
+        const saved = kgJarGet(loginProfile);
+        const verified = saved.token && saved.userid
+          && String(saved.token) === String(fields.token)
+          && String(saved.userid) === String(fields.userid);
+        if (!verified) {
+          return json(res, 200, {
+            code: 502, state: 4, profile: loginProfile, loggedIn: false,
+            error: '酷狗登录凭据回读校验失败（token / userid 缺失或与本次扫码不一致），请重新扫码',
+          });
+        }
+        /* 最后成功登录的版本 = 以后一直使用的版本；VIP 不参与 */
+        const act = kgSaveActive(loginProfile, 'login');
+        kgInvalidateEval();
         out.loggedIn = true;
-        try {
-          const who = await scRequest('kugou', '/user/detail', { cookie: kgCookie() });
-          const d = (who.data && who.data.data) || {};
-          out.nickname = d.nickname || d.user_name || '';
-          out.avatar = d.pic || '';
-        } catch { /* 昵称查不到不影响登录 */ }
+        /* active-profile 没写成功时按磁盘现状重新解析，不能只是嘴上说已经切换 */
+        const resolved = act.ok ? act : kgResolveActive(true);
+        out.activeProfile = resolved.profile;
+        out.platform = resolved.profile;
+        out.profileSource = act.ok ? 'login' : resolved.source;
+        out.jarPath = wrote.path;
+        out.jarFallback = !!wrote.fallback;
+        if (!act.ok) out.activePersistError = act.error || 'active-profile 写入失败';
+        /* 昵称 / VIP 并行取，各自 6s 上限。**不再在 803 里做两版全量评估**：
+           前端这次请求只等 20s，两版 /user/detail（各 12s）会把成功响应顶穿，
+           用户看到的是超时，登录其实已经保存了。另一个版本的 VIP/登录态
+           由设置页 1.2s 后自己调 /status 校正。
+           VIP 只用于显示，绝不参与版本选择。 */
+        const detailProbe = (async () => {
+          try {
+            const who = await scRequest(loginSidecar, `/user/detail?_=${Date.now()}`,
+              { cookie: kgCookie(loginProfile), timeout: 6000, cookieHeaderOnly: true });
+            const d = (who.data && who.data.data) || {};
+            out.nickname = d.nickname || d.user_name || '';
+            out.avatar = d.pic || '';
+            if (loginProfile === 'normal' && Number(who.data && who.data.status) === 1) {
+              out.vip = kgVipInfo(who.data, 'normal');
+            }
+          } catch { /* 昵称查不到不影响登录 */ }
+        })();
+        const vipProbe = loginProfile === 'lite'
+          ? kgLiteVipDetail(kgCookie('lite'), 6000).then((v) => { out.vip = kgVipInfo(v, 'lite'); })
+          : Promise.resolve();
+        await Promise.all([detailProbe, vipProbe]);
+        out.vip = !!out.vip;
+        out.normal = { loggedIn: !!kgJarGet('normal').token, vip: loginProfile === 'normal' ? out.vip : false };
+        out.lite = { loggedIn: !!kgJarGet('lite').token, vip: loginProfile === 'lite' ? out.vip : false };
       }
       return json(res, 200, out);
     }
 
     if (part === 'logout') {
-      kgJarSet({});
-      return json(res, 200, { code: 200, loggedIn: false });
+      const before = kgResolveActive(true);
+      kgJarWrite({}, loginProfile);
+      kgInvalidateEval();
+      /* 退出的是当前使用的那一版：切到另一个已登录版本；两边都没有就 normal 匿名。
+         退出另一版不动 active。 */
+      if (before.profile === loginProfile) {
+        const other = kgOtherProfile(loginProfile);
+        const next = kgJarGet(other).token ? other : 'normal';
+        kgSaveActive(next, 'logout-switch');
+      }
+      /* 退出请求里不再等两版探测（最坏十几秒，会把前端 20s 超时顶穿）。
+         前端退出后会立刻重读 /status，这里只回落盘现状：先让界面马上收回来，
+         VIP 由紧接着的 /status 再算。 */
+      const act = kgResolveActive(true);
+      const stateOf = (p) => ({ loggedIn: !!kgJarGet(p).token, vip: false });
+      return json(res, 200, {
+        code: 200, loggedIn: false, profile: loginProfile,
+        platform: act.profile, active: act.profile,
+        activeProfile: act.profile,
+        profileSource: act.source,
+        normal: stateOf('normal'), lite: stateOf('lite'),
+      });
     }
 
     if (part === 'search') {
@@ -2149,7 +3389,7 @@ async function handleKugou(req, res, url) {
       if (!s) return json(res, 200, { code: 200, source: 'kugou', tracks: [], songCount: 0 });
       const limit = Math.min(30, Math.max(1, Number(q.get('limit')) || 20));
       const page = Math.max(1, Number(q.get('page')) || 1);
-      const r = await scRequest('kugou',
+      const r = await scRequest(sidecar,
         `/search?keywords=${encodeURIComponent(s)}&page=${page}&pagesize=${limit}`, { cookie });
       const d = (r.data && r.data.data) || {};
       const lists = Array.isArray(d.lists) ? d.lists : [];
@@ -2174,48 +3414,77 @@ async function handleKugou(req, res, url) {
       const audioId = Number(q.get('albumAudioId')) || 0;
       const quality = ['128', '320', 'flac'].includes(q.get('quality')) ? q.get('quality') : '128';
       const base = `/song/url?hash=${hash}&album_id=${albumId}&album_audio_id=${audioId}&quality=${quality}`;
-      let r = await scRequest('kugou', base, { cookie });
-      let pick = kugouUrlOf(r.data);
-      /* 没有会员/没登录：正片拿不到，退回「试听片段」（free_part=1）。
-         酷狗对匿名播放会回 20028「本次请求需要验证」（天御风控），那就是要登录。 */
-      if (!pick.url) {
-        const pv = await scRequest('kugou', base + '&free_part=1', { cookie });
-        const p = kugouUrlOf(pv.data);
-        if (p.url) pick = p;
-        else if (!pick.upstream) pick.upstream = p.upstream;
+      /* 上游 /v5/url 以 album_audio_id 为准：它指向哪首就返回哪首，URL 里写的是那首的
+         hash，我们传进去的 hash 被忽略。历史映射把 Audioid / audio_id 当成
+         album_audio_id 传，所以出现「点 A 放 B」（2026-11-13 实测：
+         热爱105°C的你 → You Are My Joy）。现在每个 URL 都核对 URL 里的文件 hash，
+         不一致就丢弃，再用 hash-only（album_id=0、album_audio_id=0）重取；
+         仍不一致就如实返回空地址，绝不把别人的音频交给播放器。 */
+      const hashOnly = `/song/url?hash=${hash}&album_id=0&album_audio_id=0&quality=${quality}`;
+      let upstream = '';
+      const tryOne = async (path) => {
+        try {
+          const r = await scRequest(sidecar, path, { cookie });
+          const p = kugouUrlOf(r.data);
+          if (p.upstream && !upstream) upstream = p.upstream;
+          if (!p.url) return null;
+          const got = kugouUrlHash(p.url);
+          if (got && got !== hash) {
+            if (!upstream) upstream = `hash mismatch (requested ${hash}, got ${got})`;
+            return null;
+          }
+          return p;
+        } catch (e) {
+          if (!upstream) upstream = String((e && e.message) || e);
+          return null;
+        }
+      };
+      let pick = null;
+      /* 先按条目给的 album_audio_id 取（有会员时这是唯一能定位到具体录音的键），
+         失败/串号再试 hash-only；试听片段最后（free_part=1）。
+         酷狗对匿名播放会回 20028「本次请求需要验证」（天御风控），四条都失败才算要登录。 */
+      for (const path of [base, hashOnly, base + '&free_part=1', hashOnly + '&free_part=1']) {
+        pick = await tryOne(path);
+        if (pick) break;
       }
-      const needLogin = /20028|需要验证|check r failed/.test(String(pick.upstream || ''));
+      pick = pick || { url: '', preview: false };
+      const needLogin = /20028|需要验证|check r failed/.test(String(upstream || ''));
       return json(res, 200, {
         code: 200,
         hash,
+        profile: active,          // 本次取流实际用的版本（排查用，不含 token）
         url: pick.url || '',
         preview: !!pick.preview,
         quality: pick.preview ? 'preview' : quality,
         reason: pick.url ? null : (needLogin ? 'login' : 'unavailable'),
         // 上游原话带出去，排查时不用猜（前端不显示）
-        upstream: pick.upstream || null,
+        upstream: upstream || null,
       });
     }
 
     if (part === 'lyric') {
       const hash = (q.get('hash') || q.get('id') || '').toLowerCase();
       const keyword = (q.get('s') || '').trim();
+      const singer = (q.get('singer') || q.get('artists') || q.get('artist') || '').trim();
+      const durationMs = Number(q.get('duration')) || 0;
       if (!hash && !keyword) return json(res, 400, { code: 400, error: 'hash or s required' });
       /* 歌词要两步：先 search/lyric 拿 id+accesskey，再 /lyric?decode=1&fmt=krc。
          边车里 /lyric 默认就是 krc；拿不到 id/accesskey（匿名限流等）时回空歌词，
-         歌词接口本身不报错（海报、播放页都按「没有歌词」处理）。 */
+         歌词接口本身不报错（海报、播放页都按「没有歌词」处理）。
+         候选必须和当前曲目对得上（见 kugouLyricPick 上方实测记录），
+         对不上就回空词 —— 绝不退回「随便挑第一个候选」。 */
       try {
-        const sr = await scRequest('kugou',
+        const sr = await scRequest(sidecar,
           `/search/lyric?keywords=${encodeURIComponent(keyword || hash)}&hash=${hash}&man=no&client=android`, { cookie });
         const sd = sr.data || {};
         /* 边车的 /search/lyric 是平铺返回；别的路由会包一层 data，两种都认 */
         const cand = Array.isArray(sd.candidates) ? sd.candidates
           : Array.isArray(sd.data && sd.data.candidates) ? sd.data.candidates : [];
-        const hit = cand.find((c) => c && c.id && c.accesskey) || cand[0];
+        const hit = kugouLyricPick(cand, { title: keyword, artists: singer, duration: durationMs });
         if (!hit || !hit.id || !hit.accesskey) {
           return json(res, 200, { code: 200, lyric: '', yrc: '', tlyric: '', format: 'none' });
         }
-        const lr = await scRequest('kugou',
+        const lr = await scRequest(sidecar,
           `/lyric?id=${encodeURIComponent(hit.id)}&accesskey=${encodeURIComponent(hit.accesskey)}&decode=1&fmt=krc&charset=utf8`, { cookie });
         const ld = lr.data || {};
         const content = String(ld.decodeContent || (ld.data && ld.data.decodeContent) || '');
@@ -2244,7 +3513,7 @@ async function handleKugou(req, res, url) {
       /* 上游这个接口的 type 不是「1=新歌」：带 type=1/2 都回 rankid不存在，
          不带参数才是新歌速递。所以只有明确给了别的 type 才透传。 */
       const type = Number(q.get('type')) || 0;
-      const r = await scRequest('kugou', type > 1 ? `/top/song?type=${type}` : '/top/song', { cookie });
+      const r = await scRequest(sidecar, type > 1 ? `/top/song?type=${type}` : '/top/song', { cookie });
       const d = r.data || {};
       const list = Array.isArray(d.data) ? d.data : [];
       if (!list.length) {
@@ -2260,7 +3529,7 @@ async function handleKugou(req, res, url) {
     }
 
     if (part === 'everyday/recommend') {
-      const r = await scRequest('kugou', '/everyday/recommend', { cookie });
+      const r = await scRequest(sidecar, '/everyday/recommend', { cookie });
       const d = (r.data && r.data.data) || {};
       const list = Array.isArray(d.song_list) ? d.song_list : [];
       return json(res, 200, {
@@ -2276,7 +3545,51 @@ async function handleKugou(req, res, url) {
       if (!id) return json(res, 400, { code: 400, error: 'id required' });
       const page = Math.max(1, Number(q.get('page')) || 1);
       const pagesize = Math.min(100, Math.max(1, Number(q.get('limit')) || 30));
-      const r = await scRequest('kugou',
+      /* all=1（2026-11-22）：大厅跑马带 / 歌单详情要整张歌单，而酷狗上游
+         单页最多 100 首，前端传 limit=100 就只能看到前 100 首。这里替前端
+         按 100/页翻完并按 id 去重；单页接口原样保留给 migrate.js 等需要
+         逐页取的调用方。 */
+      if (q.get('all') === '1' || q.get('all') === 'true') {
+        const PAGE = 100;
+        const MAX_PAGES = 20;
+        const seen = new Set();
+        const tracks = [];
+        let total = 0;
+        let limited = false;
+        for (let p = 1; p <= MAX_PAGES; p += 1) {
+          let r;
+          try {
+            r = await scRequest(sidecar,
+              `/playlist/track/all?id=${encodeURIComponent(id)}&page=${p}&pagesize=${PAGE}`, { cookie });
+          } catch (e) {
+            if (p === 1) throw e; /* 第一页就失败：让前端看到真实错误 */
+            limited = true;       /* 后面某页失败：先给已经拿到的 */
+            break;
+          }
+          const d = (r.data && r.data.data) || {};
+          const list = d.songs || d.info || d.list || [];
+          const n = Number(d.count || d.total || 0);
+          if (n > total) total = n;
+          if (!Array.isArray(list) || !list.length) break;
+          for (const it of list) {
+            const t = kugouPlaylistTrack(it);
+            if (!t.id || !t.name || seen.has(t.id)) continue;
+            seen.add(t.id);
+            tracks.push(t);
+          }
+          if (list.length < PAGE) break;
+          if (total > 0 && tracks.length >= total) break;
+          if (p === MAX_PAGES) limited = true;
+        }
+        if (total > 0 && tracks.length < total) limited = true;
+        return json(res, 200, {
+          code: 200, source: 'kugou',
+          tracks,
+          trackCount: total || tracks.length,
+          limited,
+        });
+      }
+      const r = await scRequest(sidecar,
         `/playlist/track/all?id=${encodeURIComponent(id)}&page=${page}&pagesize=${pagesize}`, { cookie });
       const d = (r.data && r.data.data) || {};
       const list = d.songs || d.info || d.list || [];
@@ -2287,47 +3600,127 @@ async function handleKugou(req, res, url) {
       });
     }
 
+    if (part === 'liked/songs') {
+      /* 酷狗的「我喜欢」不是独立接口：它是 user/playlist 返回的系统歌单
+         （name=「我喜欢」、id=collection_…_2_0），曲目走和普通歌单相同的
+         /playlist/track/all。这里替前端把「找歌单 + 翻曲目」两步合成一个
+         { tracks } 响应，和其他平台的「我的喜欢」形状对齐。
+         账号类接口用 kgUserContext：active 缺 token / userid 时改用在另一版
+         已登录的 jar（同一账号两边同步），不因为 VIP 检测失败回 401。 */
+      const u = kgUserContext();
+      logSidecar = u.sidecar;
+      if (!u.jar.token || !u.jar.userid) {
+        return json(res, 200, {
+          code: 401, source: 'kugou', profile: u.profile, tracks: [],
+          error: '先在设置里扫码登录酷狗，才能看「我的喜欢」',
+        });
+      }
+      const l = await kugouUserPlaylistList(u.cookie, u.sidecar);
+      if (l.failed) {
+        return json(res, 200, {
+          code: 401, source: 'kugou', profile: u.profile, tracks: [],
+          error: l.error || '酷狗登录态可能已过期，重新扫码后再试',
+        });
+      }
+      const like = l.items.find((p) => p.name === '我喜欢' || p.name === '我喜欢的音乐'
+        || /collection_[^_]+_[^_]+_2_0$/.test(p.id));
+      if (!like) {
+        return json(res, 200, {
+          code: 200, source: 'kugou', profile: u.profile, tracks: [],
+          error: l.error || '没找到酷狗的「我喜欢」歌单（在酷狗 App 里点几首红心再回来）',
+        });
+      }
+      const PAGE_SIZE = 100;
+      const limit = Math.min(500, Math.max(1, Number(q.get('limit')) || PAGE_SIZE));
+      const tracks = [];
+      let trackCount = like.trackCount || 0;
+      for (let page = 1; page <= Math.ceil(limit / PAGE_SIZE); page++) {
+        const r = await scRequest(u.sidecar,
+          `/playlist/track/all?id=${encodeURIComponent(like.id)}&page=${page}&pagesize=${PAGE_SIZE}&_=${Date.now()}`,
+          { cookie: u.cookie });
+        const d = (r.data && r.data.data) || {};
+        const rows = Array.isArray(d.songs) ? d.songs
+          : Array.isArray(d.info) ? d.info
+            : (Array.isArray(d.list) ? d.list : []);
+        trackCount = Number(d.count || d.total || 0) || trackCount;
+        for (const it of rows) {
+          const t = kugouPlaylistTrack(it);
+          if (!t.id || !t.name) continue;
+          tracks.push(t);
+          if (tracks.length >= limit) break;
+        }
+        if (!rows.length || rows.length < PAGE_SIZE || tracks.length >= limit) break;
+      }
+      return json(res, 200, { code: 200, source: 'kugou', profile: u.profile, tracks, trackCount });
+    }
+
     if (part === 'user/playlists') {
       /* 上游 kugoumusicapi 的 /user/playlist 默认 page=1、pagesize=30，只取一次会把
-         30 张以后的歌单截掉。边车的动态路由把 query 原样透传给 module/user_playlist.js，
-         所以这里逐页翻到底，再按 id 去重。 */
-      const PAGE_SIZE = Math.min(100, Math.max(1, Number(q.get('pagesize')) || 100));
-      const MAX_PAGES = 20;
-      const playlists = [];
-      const seen = new Set();
-      let total = 0;
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const r = await scRequest('kugou', `/user/playlist?page=${page}&pagesize=${PAGE_SIZE}`, { cookie });
-        const d = (r.data && r.data.data) || {};
-        if (!Array.isArray(d.info)) {
-          if (page === 1) {
-            return json(res, 200, {
-              code: 401, source: 'kugou', playlists: [],
-              error: '先在卡片上扫码登录酷狗（这个接口要登录）',
-            });
-          }
-          break;
-        }
-        if (d.total != null && Number.isFinite(Number(d.total))) total = Number(d.total);
-        for (const it of d.info) {
-          const p = kugouPlaylist(it);
-          if (!p.id || seen.has(p.id)) continue;
-          seen.add(p.id);
-          playlists.push(p);
-        }
-        /* 停法：空页、短页、累计到上游 total、翻到页数上限 */
-        if (d.info.length === 0 || d.info.length < PAGE_SIZE) break;
-        if (total > 0 && seen.size >= total) break;
+         30 张以后的歌单截掉。这里逐页翻到底再按 id 去重（见 kugouUserPlaylistList）。 */
+      const u = kgUserContext();
+      logSidecar = u.sidecar;
+      if (!u.jar.token || !u.jar.userid) {
+        return json(res, 200, {
+          code: 401, source: 'kugou', profile: u.profile, playlists: [],
+          error: '先在卡片上扫码登录酷狗（这个接口要登录）',
+        });
+      }
+      const l = await kugouUserPlaylistList(u.cookie, u.sidecar);
+      if (l.failed) {
+        return json(res, 200, {
+          code: 401, source: 'kugou', profile: u.profile, playlists: [],
+          error: l.error || '先在卡片上扫码登录酷狗（这个接口要登录）',
+        });
       }
       return json(res, 200, {
-        code: 200, source: 'kugou',
-        playlists,
+        code: 200, source: 'kugou', profile: u.profile,
+        playlists: l.items,
+      });
+    }
+
+    /* 「我收藏的专辑」：酷狗没有独立接口，专辑和歌单混在 /user/playlist 的 info 里
+       （raw source=2 或带 musiclib_id）。这里先把混合列表翻到底，再筛专辑、
+       按 limit/offset 自己切 —— 不能像上游那样「先按混合列表分页再筛」，
+       否则某页全是歌单时专辑会被整页截掉，hasMore 也不可信。
+       没登录 / 登录态失效时和 QQ、波点一样回 code 401（HTTP 仍是 200）。 */
+    if (part === 'user/albums') {
+      const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 50));
+      const offset = Math.max(0, Number(q.get('offset')) || 0);
+      const u = kgUserContext();
+      logSidecar = u.sidecar;
+      if (!u.jar.token || !u.jar.userid) {
+        return json(res, 200, {
+          code: 401, source: 'kugou', profile: u.profile, data: [], hasMore: false,
+          error: '先在设置里扫码登录酷狗，才能导入收藏的专辑',
+        });
+      }
+      const l = await kugouUserPlaylistList(u.cookie, u.sidecar);
+      if (l.failed) {
+        return json(res, 200, {
+          code: 401, source: 'kugou', profile: u.profile, data: [], hasMore: false,
+          error: l.error || '酷狗登录态可能已过期，重新扫码后再试',
+        });
+      }
+      const albums = [];
+      const seen = new Set();
+      for (const it of l.rawItems) {
+        if (!kugouIsUserAlbum(it)) continue;
+        const a = kugouUserAlbum(it);
+        if (!a.id || seen.has(a.id)) continue;
+        seen.add(a.id);
+        albums.push(a);
+      }
+      return json(res, 200, {
+        code: 200, source: 'kugou', profile: u.profile,
+        data: albums.slice(offset, offset + limit),
+        hasMore: offset + limit < albums.length,
+        total: albums.length,
       });
     }
 
     /* ---- 电台：/fm/class 是频道目录（匿名），/fm/songs 按 fmid 取歌（匿名） ---- */
     if (part === 'fm/class') {
-      const r = await scRequest('kugou', '/fm/class', { cookie });
+      const r = await scRequest(sidecar, '/fm/class', { cookie });
       const d = (r.data && r.data.data) || {};
       const classes = Array.isArray(d.class_list) ? d.class_list : [];
       const stations = [];
@@ -2344,7 +3737,7 @@ async function handleKugou(req, res, url) {
       const fmid = q.get('fmid') || q.get('id') || '';
       if (!fmid) return json(res, 400, { code: 400, error: 'fmid required' });
       const size = Math.min(100, Math.max(1, Number(q.get('limit')) || 30));
-      const r = await scRequest('kugou',
+      const r = await scRequest(sidecar,
         `/fm/songs?fmid=${encodeURIComponent(fmid)}&size=${size}`, { cookie, timeout: 25000 });
       const blocks = Array.isArray(r.data && r.data.data) ? r.data.data : [];
       const songs = blocks.flatMap((b) => (Array.isArray(b && b.songs) ? b.songs : []));
@@ -2364,7 +3757,7 @@ async function handleKugou(req, res, url) {
     if (part === 'top/playlists') {
       const page = Math.max(1, Number(q.get('page')) || 1);
       const size = Math.min(50, Math.max(1, Number(q.get('limit')) || 12));
-      const r = await scRequest('kugou', `/top/playlist?page=${page}&pagesize=${size}`, { cookie });
+      const r = await scRequest(sidecar, `/top/playlist?page=${page}&pagesize=${size}`, { cookie });
       const d = (r.data && r.data.data) || {};
       const list = Array.isArray(d.special_list) ? d.special_list : [];
       return json(res, 200, {
@@ -2375,7 +3768,7 @@ async function handleKugou(req, res, url) {
 
     if (part === 'recommend/songs' || part === 'personal/fm') {
       const path = part === 'personal/fm' ? '/personal/fm' : '/recommend/songs';
-      const r = await scRequest('kugou', path, { cookie, timeout: 25000 });
+      const r = await scRequest(sidecar, path, { cookie, timeout: 25000 });
       const d = (r.data && r.data.data) || {};
       const list = Array.isArray(d.song_list) ? d.song_list : [];
       return json(res, 200, {
@@ -2395,21 +3788,22 @@ async function handleKugou(req, res, url) {
     if (part === 'playlist/create') {
       const body = req.method === 'POST' ? await readBody(req) : {};
       const name = String(body.name || q.get('name') || '').trim();
-      const jar = kgJarGet();
-      if (!jar.token || !jar.userid) {
+      const u = kgUserContext();
+      logSidecar = u.sidecar;
+      if (!u.jar.token || !u.jar.userid) {
         return json(res, 200, { code: 401, error: '先在卡片上扫码登录酷狗' });
       }
       if (!name) return json(res, 400, { code: 400, error: 'name required' });
       /* 不要传 type=0：边车从 query 拿到的是字符串 "0"，module 里用的是严格 === 0，
          省略它才能命中「新建」分支并保持上游 body 里 type 是数字 0。
          list_create_listid 也省略：新建没有来源歌单，传 0 反而可能被当成真实 listid。 */
-      const r = await scRequest('kugou',
+      const r = await scRequest(u.sidecar,
         `/playlist/add?name=${encodeURIComponent(name)}&source=1`
-        + `&list_create_userid=${encodeURIComponent(String(jar.userid))}`
+        + `&list_create_userid=${encodeURIComponent(String(u.jar.userid))}`
         /* 酷狗边车给所有成功响应挂了 2 分钟 apicache；同名重建命中缓存会拿到
            上一次的 listid（写进旧歌单）。加一个只会被忽略的时间戳破缓存。 */
         + `&_=${Date.now()}`,
-        { cookie, timeout: 25000 });
+        { cookie: u.cookie, timeout: 25000 });
       const d = r.data || {};
       const ok = r.status === 200 && Number(d.error_code || 0) === 0
         && (d.status === undefined || Number(d.status) === 1);
@@ -2429,7 +3823,7 @@ async function handleKugou(req, res, url) {
         || (named && (named.listid || named.list_id || named.list_create_listid));
       let listid = picked ? String(picked) : '';
       if (!listid) {
-        const lr = await scRequest('kugou', '/user/playlist', { cookie });
+        const lr = await scRequest(u.sidecar, '/user/playlist', { cookie: u.cookie });
         const info = (lr.data && lr.data.data && Array.isArray(lr.data.data.info)) ? lr.data.data.info : [];
         const hit = info.find((x) => x && x.listname === name
           && (x.listid || x.list_id || x.list_create_listid));
@@ -2449,8 +3843,9 @@ async function handleKugou(req, res, url) {
       const listid = String(body.listid ?? body.pid ?? q.get('listid') ?? q.get('pid') ?? '');
       const picks = Array.isArray(body.picks) ? body.picks
         : (Array.isArray(body.songs) ? body.songs : []);
-      const jar = kgJarGet();
-      if (!jar.token || !jar.userid) {
+      const u = kgUserContext();
+      logSidecar = u.sidecar;
+      if (!u.jar.token || !u.jar.userid) {
         return json(res, 200, { code: 401, error: '先在卡片上扫码登录酷狗' });
       }
       if (!listid) return json(res, 400, { code: 400, error: 'listid required' });
@@ -2478,8 +3873,8 @@ async function handleKugou(req, res, url) {
       /* data 可能很长，走 POST body（边车会把 body 合并进 params），不塞进 URL。
          但酷狗边车的缓存键只看 URL、不看 body：同一歌单第二次加歌会命中
          第一次的成功缓存，直接「假成功」而不发请求。加时间戳让每次都是新键。 */
-      const r = await scRequest('kugou', `/playlist/tracks/add?_=${Date.now()}`, {
-        cookie, method: 'POST', payload: { listid, data: rows.join(',') }, timeout: 30000,
+      const r = await scRequest(u.sidecar, `/playlist/tracks/add?_=${Date.now()}`, {
+        cookie: u.cookie, method: 'POST', payload: { listid, data: rows.join(',') }, timeout: 30000,
       });
       const d = r.data || {};
       const ok = r.status === 200 && Number(d.error_code || 0) === 0
@@ -2495,14 +3890,132 @@ async function handleKugou(req, res, url) {
 
     return json(res, 404, { code: 404, error: 'unknown kugou api: ' + part });
   } catch (e) {
-    return json(res, 502, { code: 502, error: String(e.message), reason: e.reason || null, log: scLogTail('kugou') });
+    return json(res, 502, { code: 502, error: String(e.message), reason: e.reason || null, log: scLogTail(logSidecar) });
   }
+}
+
+/* --------------------------------------------------------------------------
+   酷狗歌词候选匹配（2026-11-12 实测 sidecar /search/lyric）
+   --------------------------------------------------------------------------
+   证据：
+   1) candidates 里**没有 hash 字段**，没法在候选层直接比 hash；
+   2) 带合法 hash 也不保证对：纯音乐 / 钢琴曲大量返回同一首不相干的词
+      （"The Seasons Op. 37b: June - Barcarole" / arkady sevidov / duration
+      320317），实测 40 首钢琴、古筝、小提琴曲目全部命中这一条；
+      它的歌词内容只有 298 字节表头，但 candidates 元数据已经和当前曲目完全不符；
+   3) 按歌名搜（没给 hash / hash 非法）时，上游会用 song=singer=关键词 的
+      第三方占位词，时长字段还混用秒和毫秒，不能单独当依据。
+   所以候选必须能和当前曲目对上：歌名（含括号里的别名）匹配 > 歌手匹配 >
+   时长佐证；对不上就返回空词。**不要**退回 cand[0]。
+   -------------------------------------------------------------------------- */
+/** 标题/歌手归一化：去括号、标点、空格，全小写（只用于比较，不改原字段） */
+function kgNorm(s) {
+  return String(s || '').toLowerCase()
+    .replace(/（/g, '(').replace(/）/g, ')')
+    .replace(/【/g, '[').replace(/】/g, ']')
+    .replace(/《/g, '<').replace(/》/g, '>')
+    .replace(/[·•,，.。:：;；/／\-—_'"“”‘’!！?？~～&+<>]/g, '')
+    .replace(/\s+/g, '');
+}
+
+/** 歌名的所有写法：去括号后的主名 + 每一段括号里的别名
+ *  例：`연애의 조건 (恋爱的条件)` → [恋爱的条件, 연애의조건]；
+ *      `若月亮没来 (若是月亮还没来)` → [若是月亮还没来, 若月亮没来]。 */
+function kgTitleVariants(s) {
+  let base = String(s || '').toLowerCase()
+    .replace(/（/g, '(').replace(/）/g, ')')
+    .replace(/【/g, '[').replace(/】/g, ']')
+    .replace(/《/g, '<').replace(/》/g, '>');
+  const out = [];
+  for (let i = 0; i < 3; i++) {
+    const inner = [];
+    base = base
+      .replace(/\(([^()]*)\)/g, (m, x) => { inner.push(x); return ''; })
+      .replace(/\[([^\[\]]*)\]/g, (m, x) => { inner.push(x); return ''; });
+    if (!inner.length) break;
+    for (const x of inner) { const n = kgNorm(x); if (n) out.push(n); }
+  }
+  const main = kgNorm(base);
+  if (main) out.push(main);
+  return [...new Set(out)];
+}
+
+/** 歌手拆成可比较的 token（`周杰伦 / Lara梁心颐`、`A、B` 这种都拆）
+ *  「未知歌手 / 群星」不含辨识度，当作没有信息，不拿它排除歌词。 */
+function kgArtistTokens(s) {
+  const list = String(s || '').toLowerCase()
+    .replace(/（[^）]*）/g, ' ').replace(/\([^)]*\)/g, ' ')
+    .split(/[\/／、,，&;；|+]+/)
+    .map((x) => String(x).replace(/[·•.。\s'"“”‘‘’\-—_]/g, ''))
+    .filter((x) => x.length >= 2);
+  if (!list.length) return [];
+  if (list.every((x) => /^(未知歌手|未知|群星|variousartists|va)$/.test(x))) return [];
+  return list;
+}
+
+/** 上游 duration 混用毫秒和秒：< 1200 当秒；> 4 小时的明显是占位值
+ *  （实测见过 124528385），当没有时长处理。 */
+function kgDurationMs(v) {
+  const n = Number(v) || 0;
+  if (n <= 0) return 0;
+  const ms = n < 1200 ? n * 1000 : n;
+  return ms >= 10000 && ms <= 4 * 3600 * 1000 ? ms : 0;
+}
+
+/** 从 candidates 里挑出和当前曲目对得上的那一条；没有就返回 null。 */
+function kugouLyricPick(cands, req) {
+  const pool = (Array.isArray(cands) ? cands : []).filter((c) => c && c.id && c.accesskey);
+  if (!pool.length) return null;
+  const titles = kgTitleVariants(req && req.title);
+  const artists = kgArtistTokens(req && req.artists);
+  const wantMs = kgDurationMs(req && req.duration);
+  /* 老调用只给 hash、没有任何可核对的信息：沿用上游按 hash 过滤的结果 */
+  if (!titles.length && !artists.length && !wantMs) return pool[0];
+
+  let best = null;
+  let bestScore = -1;
+  for (const c of pool) {
+    const ctitles = kgTitleVariants(c.song);
+    let titleScore = 0;                   // 100=严格同名（含括号别名），50=包含
+    for (const a of titles) {
+      for (const b of ctitles) {
+        if (a === b) { titleScore = 100; break; }
+        if (titleScore < 50 && a.length >= 4 && b.length >= 4
+            && (a.includes(b) || b.includes(a))) titleScore = 50;
+      }
+      if (titleScore === 100) break;
+    }
+    const candArtists = kgArtistTokens(c.singer);
+    let artistOk = null;                  // null = 信息不足，不能据此排除
+    if (artists.length && candArtists.length) {
+      artistOk = artists.some((a) => candArtists.some((b) => a === b || a.includes(b) || b.includes(a)));
+    }
+    const candMs = kgDurationMs(c.duration);
+    let durOk = null;
+    if (wantMs && candMs) durOk = Math.abs(candMs - wantMs) <= Math.max(8000, wantMs * 0.08);
+
+    /* 规则：
+       - 严格同名：歌手对得上、或歌手信息不足、或时长与本曲吻合，三者有其一即可
+         （翻唱/搬运词常见 singer 是搬运号，但时长和录音完全一致，内容仍是这首歌）；
+       - 只是包含关系（别名/翻译名）：要歌手或时长佐证；
+       - 歌名完全对不上：只有调用方没给歌名时，才允许「歌手+时长」双吻合。
+       DJ/现场版时长会差很多，所以时长只做佐证，不能单独把词捞回来。 */
+    const acceptable = (titleScore >= 100 && (artistOk !== false || durOk === true))
+      || (titleScore >= 50 && (artistOk === true || durOk === true))
+      || (!titles.length && artistOk === true && durOk === true);
+    if (!acceptable) continue;
+    /* 同分时官方词优先；分数只用来说明先后，不合格的候选上面已经跳过 */
+    const score = titleScore + (artistOk ? 40 : 0) + (durOk ? 20 : 0)
+      + (/官方/.test(String(c.product_from || '')) ? 5 : 0);
+    if (score > bestScore) { best = c; bestScore = score; }
+  }
+  return best;
 }
 
 /** 酷狗「列表型」条目（新歌速递 / 每日推荐 / 歌单曲目）：小写字段，播放键仍是 hash */
 function kugouListTrack(it) {
   const cover = (it.trans_param && it.trans_param.union_cover)
-    ? String(it.trans_param.union_cover).replace('{size}', '240')
+    ? String(it.trans_param.union_cover).replace('{size}', KUGOU_TRACK_COVER_SIZE)
     : (it.sizable_cover || it.album_sizable_cover || '');
   const fn = String(it.filename || '');
   const cut = fn.indexOf(' - ');
@@ -2522,7 +4035,11 @@ function kugouListTrack(it) {
     duration: Number(it.timelength || 0) || (Number(it.time_length || 0) * 1000),
     fee: Number(it.pay_type) > 0 ? 1 : 0,
     hash: it.hash || '',
-    albumAudioId: Number(it.album_audio_id) || 0,
+    /* 和 kugouTrack 同一条规矩：只传真正的 album_audio_id / mixsongid。
+       新歌速递、每日推荐/推荐流都带 album_audio_id；个人 FM 只有 mixsongid；
+       两者都没有时传 0 让上游按 hash 取流。audio_id 不是曲目键，不能拿来顶替
+       （传错 id 会直接放到别的歌，见 /api/kugou/song/url 的说明）。 */
+    albumAudioId: Number(it.album_audio_id || it.mixsongid) || 0,
     albumIdNum: Number(it.album_id) || 0,
   };
 }
@@ -2543,11 +4060,14 @@ function kugouPlaylistTrack(it) {
     artistIds: singers.map((s) => s.id).filter(Boolean).map(String),
     album: (it.albuminfo && it.albuminfo.name) || '',
     albumId: it.album_id ? String(it.album_id) : '',
-    cover: String(tpl).replace('{size}', '240'),
+    cover: String(tpl).replace('{size}', KUGOU_TRACK_COVER_SIZE),
     duration: Number(it.timelen || it.timelength || 0),
     fee: Number(it.feetype || it.pay_type || 0) > 0 ? 1 : 0,
     hash: it.hash || '',
-    albumAudioId: Number(it.audio_id || it.mixsongid) || 0,
+    /* 这个形状里 audio_id 是「音频 id」，不是 album_audio_id；拿它取流会点到另一首
+       （实测 宣美 - Siren：audio_id 42747457 → 返回 2FE001B8… 的另一首）。
+       歌单条目带 mixsongid（曲目键），没有 album_audio_id 就用 0 走 hash。 */
+    albumAudioId: Number(it.album_audio_id || it.mixsongid) || 0,
     albumIdNum: Number(it.album_id) || 0,
   };
 }
@@ -2568,7 +4088,9 @@ function kugouFmTrack(it) {
     duration: Number(it.time || it.timelength || 0),
     fee: Number(it.pay_type) > 0 ? 1 : 0,
     hash: it.hash || '',
-    albumAudioId: Number(it.album_audio_id || it.audio_id) || 0,
+    /* 电台条目同时有 album_audio_id 和 audio_id；只有前者是曲目键。
+       没有 album_audio_id 时用 mixsongid，再没有就传 0（按 hash 取），不拿 audio_id 顶替。 */
+    albumAudioId: Number(it.album_audio_id || it.mixsongid) || 0,
     albumIdNum: Number(it.album_id) || 0,
   };
 }
@@ -2579,18 +4101,25 @@ function kugouFmStation(it, cls) {
     id: String(it.fmid || ''),
     source: 'kugou',
     name: it.fmname || '未命名电台',
-    cover: String(it.imgurl || '').replace('{size}', '240'),
+    /* FM 频道只是卡片（不会当形态大图铺屏），400 够用，别跟着曲目上 800 */
+    cover: String(it.imgurl || '').replace('{size}', '400'),
     trackCount: Array.isArray(it.songlist) ? it.songlist.length : 0,
     playCount: 0,
     creator: { nickname: (cls && cls.classname) || '' },
   };
 }
 
-/** 酷狗「我的歌单」条目 → { id,name,cover,trackCount,creator }（id 用 global_collection_id 或 listid） */
+/** 酷狗「我的歌单」条目 → { id,name,cover,trackCount,creator }（id 用 global_collection_id 或 listid）
+ *
+ *  /v7/get_all_list 把「收藏的歌单」和「收藏的专辑」混在同一个 info 数组里：
+ *  专辑条目的 raw `source` 是 2（歌单是 1），并带 musiclib_id。这里不能把 raw source
+ *  直接写进 source —— 那个字段一直是平台标记（'kugou'），前端按它分流。所以另存
+ *  rawSource，并把 musiclib_id 原样保留，/user/albums 再据此筛。 */
 function kugouPlaylist(it) {
   const id = it.global_collection_id || it.listid || it.list_id || it.specialid || '';
   const cover = String(it.img_url || it.imgurl || it.pic || it.cover || '')
     .replace('{size}', '400');
+  const musiclibId = it.musiclib_id ?? it.musicLibId;
   return {
     id: String(id),
     name: it.listname || it.name || it.specialname || '未命名歌单',
@@ -2599,13 +4128,100 @@ function kugouPlaylist(it) {
     playCount: Number(it.playcount ?? it.play_count ?? 0) || 0,
     creator: { nickname: it.nickname || it.username || '' },
     source: 'kugou',
+    /* 收藏专辑判定用的原始字段（不影响现有歌单字段） */
+    rawSource: Number(it.source) || 0,
+    musiclibId: musiclibId != null ? String(musiclibId) : '',
+    musiclib_id: musiclibId != null ? String(musiclibId) : '',
   };
+}
+
+/** 酷狗收藏专辑条目（/user/playlist 里混着的那一类）→ 网易云 album/sublist 形状。
+ *  判定见 kugouIsUserAlbum；专辑 id 用 musiclib_id（folia 文档和 kugouProvider 的约定）。
+ *  极少数条目可能只有 source=2 没有 musiclib_id，此时退回 album_id / list_create_listid，
+ *  都没有就让调用方丢掉（不拿别的 id 凑数）。 */
+function kugouUserAlbum(it) {
+  const musiclibId = it.musiclib_id ?? it.musicLibId;
+  const hasMusiclib = musiclibId != null && String(musiclibId) !== '' && String(musiclibId) !== '0';
+  const fallbackId = it.album_id ?? it.AlbumID ?? it.albumId ?? it.list_create_listid ?? '';
+  const id = hasMusiclib ? String(musiclibId) : String(fallbackId || '');
+  const singers = Array.isArray(it.singer)
+    ? it.singer.map((s) => (s && s.name) || s || '').filter(Boolean).join(' / ')
+    : '';
+  const artist = it.singername || it.singer_name || it.author_name || it.artist || singers || '未知歌手';
+  const cover = String(it.img_url || it.imgurl || it.pic || it.cover || it.album_cover || it.albumcover || '')
+    .replace('{size}', '400');
+  const publishTime = it.publish_time ?? it.publishTime ?? it.pubtime ?? it.release_date ?? it.releaseDate ?? 0;
+  const size = it.song_count ?? it.songcount ?? it.music_num ?? it.musicNum ?? it.count ?? it.total ?? 0;
+  return {
+    id,
+    name: it.album_name || it.albumname || it.albumName || it.listname || it.name || '未知专辑',
+    picUrl: cover,
+    artists: [{ name: String(artist) }],
+    publishTime: Number(publishTime) || 0,
+    size: Number(size) || 0,
+    source: 'kugou',
+  };
+}
+
+/** 混合列表里哪一行是「收藏的专辑」：raw source=2，或带 musiclib_id。
+ *  用「有值」而不是「键存在」判定：个别歌单条目也带 musiclib_id: 0/null。 */
+function kugouIsUserAlbum(it) {
+  if (!it || typeof it !== 'object') return false;
+  if (Number(it.source) === 2) return true;
+  const id = it.musiclib_id ?? it.musicLibId;
+  return id != null && String(id) !== '' && String(id) !== '0';
+}
+
+/** 酷狗用户歌单列表（/user/playlist 逐页翻到底，按 id 去重）。
+ *  「我喜欢」就在这份列表里（系统歌单 collection_…_2_0），
+ *  /api/kugou/liked/songs 从它里面挑出来再取曲目。 */
+async function kugouUserPlaylistList(cookie, sidecar = 'kugou') {
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 20;
+  const items = [];
+  /* rawItems：翻页时原样留下的 info 行。歌单链路只认 items（按歌单 id 去重），
+     收藏专辑要从同一份混合列表里筛（见 /user/albums），不能靠 items —— 专辑条目的
+     歌单 id 可能为空，会被 items 的过滤丢掉。 */
+  const rawItems = [];
+  const seen = new Set();
+  let total = 0;
+  let failed = false;
+  let error = '';
+  for (let page = 1; page <= MAX_PAGES; page++) {
+    const r = await scRequest(sidecar, `/user/playlist?page=${page}&pagesize=${PAGE_SIZE}`, { cookie });
+    const d = (r.data && r.data.data) || {};
+    if (!Array.isArray(d.info)) {
+      if (page === 1) failed = true;
+      error = (r.data && (r.data.error || r.data.errmsg)) || '';
+      break;
+    }
+    if (d.total != null && Number.isFinite(Number(d.total))) total = Number(d.total);
+    for (const it of d.info) {
+      if (it && typeof it === 'object') rawItems.push(it);
+      const p = kugouPlaylist(it);
+      if (!p.id || seen.has(p.id)) continue;
+      seen.add(p.id);
+      items.push(p);
+    }
+    /* 停法：空页、短页、累计到上游 total、翻到页数上限 */
+    if (d.info.length === 0 || d.info.length < PAGE_SIZE) break;
+    if (total > 0 && seen.size >= total) break;
+  }
+  return { items, rawItems, total, failed, error };
 }
 
 /** 酷狗 /song/url 的返回有好几种形状：data 是数组，或者 {url,...}，失败时只有 errcode。
  *  kugoumusicapi 1.6.0 起 /song/url 直接把 trackercdn 的根级对象透传出来
  *  （{ status:1, url:[...], backupUrl:[...] }），不再包一层 data；
  *  url 也可能本身就是数组。两种结构都要认，否则永远取到空串、只能放示例音乐。 */
+/** 酷狗 /v5/url 返回的文件直链形如 …/v3/<32 位文件 hash>/yp/…：
+ *  取出 URL 里真正的文件 hash，用来核对「拿到的音频」是不是请求的那一首。
+ *  别的 CDN 形状里没有这段时返回空串，调用方只能放过。 */
+function kugouUrlHash(u) {
+  const m = String(u || '').match(/\/(?:v\d+)\/([0-9a-f]{32})\//i);
+  return m ? m[1].toLowerCase() : '';
+}
+
 function kugouUrlOf(data) {
   const d = (data && data.data) || data || null;
   const one = Array.isArray(d) ? d[0] : d;
@@ -2732,9 +4348,11 @@ async function handleQishui(req, res, url) {
     if (part === 'playlist/tracks') {
       const id = q.get('id') || '';
       if (!id) return json(res, 400, { code: 400, error: 'id required' });
+      /* 搬运工具按 offset/limit 翻页：offset 透传给边车（边车回包只有 hasMore，没有 total） */
       const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 50));
+      const offset = Math.max(0, Number(q.get('offset')) || 0);
       const r = await scRequest('qishui',
-        `/playlist/tracks?id=${encodeURIComponent(id)}&limit=${limit}`, { timeout: 25000 });
+        `/playlist/tracks?id=${encodeURIComponent(id)}&limit=${limit}&offset=${offset}`, { timeout: 25000 });
       const d = r.data || {};
       if (d.code !== 200) {
         return json(res, 200, { code: d.code || 502, source: 'qishui', tracks: [], error: d.error || '歌单取不到' });
@@ -2813,6 +4431,24 @@ async function handleQishui(req, res, url) {
         });
       }
       return json(res, 200, { code: 200, source: 'qishui', ids: d.ids || [], total: d.total || 0 });
+    }
+
+    /* 汽水红心写入：POST { id, liked }；统一 /api/like 也复用同一个边车路由 */
+    if (part === 'like') {
+      if (req.method !== 'POST') return json(res, 405, { code: 405, ok: false, error: 'POST required' });
+      const body = await readBody(req);
+      const id = String(body.id ?? body.songId ?? q.get('id') ?? '').trim();
+      if (!id) return json(res, 400, { code: 400, ok: false, error: 'id required' });
+      const liked = likeFlag(body.liked ?? q.get('liked'), true);
+      const out = await qishuiLikeSet({ id }, liked);
+      if (!out.ok) {
+        return json(res, 200, {
+          code: out.error === 'LOGIN_REQUIRED' ? 401 : 502,
+          ok: false,
+          error: out.message || '汽水红心写入失败',
+        });
+      }
+      return json(res, 200, { code: 200, ok: true, liked: out.liked });
     }
 
     if (part === 'playlist/detail') {
@@ -3041,18 +4677,31 @@ async function handleBodian(req, res, url) {
     if (part === 'playlist/tracks') {
       const id = q.get('id') || '';
       if (!id) return json(res, 400, { code: 400, error: 'id required' });
+      /* 搬运工具按 offset/limit 翻页：offset 透传给边车；source / count 逻辑不动 */
       const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 50));
+      const offset = Math.max(0, Number(q.get('offset')) || 0);
       const source = Number(q.get('source'));
       const sourceQs = [1, 2, 3, 4, 5, 6].includes(source) ? `&source=${source}` : '';
+      /* count 是列表里这首歌单的曲目数（musicCount）。上游对错误的 source 不是报错，
+         而是回 code=200 + 空列表；只有拿到 count 才能把「参数不对」和「真空歌单」区分开，
+         否则界面只会显示一个没有任何提示的空列表。 */
+      const expect = Math.max(0, Number(q.get('count')) || 0);
       const r = await scRequest('bodian',
-        `/playlist/tracks?id=${encodeURIComponent(id)}&limit=${limit}${sourceQs}`, { timeout: 25000 });
+        `/playlist/tracks?id=${encodeURIComponent(id)}&limit=${limit}&offset=${offset}${sourceQs}`, { timeout: 25000 });
       const d = r.data || {};
       if (d.code !== 200) {
         return json(res, 200, { code: d.code || 502, source: 'bodian', tracks: [], error: d.error || '歌单取不到' });
       }
+      const tracks = (d.items || []).map(bodianTrack).filter((t) => t.id && t.name);
+      if (!tracks.length && expect > 0) {
+        return json(res, 200, {
+          code: 502, source: 'bodian', tracks: [],
+          error: `上游返回 0 首（歌单标记 ${expect} 首，source=${source || '默认 4'}）；来源参数可能和歌单类型不匹配`,
+        });
+      }
       return json(res, 200, {
         code: 200, source: 'bodian',
-        tracks: (d.items || []).map(bodianTrack).filter((t) => t.id && t.name),
+        tracks,
         more: !!(d.more || d.hasMore),
       });
     }
@@ -3106,9 +4755,12 @@ async function handleBodian(req, res, url) {
       const MAX_PAGES = 20;
       const playlists = [];
       const seen = new Set();
-      const addRows = (src) => {
+      /* fallbackSource：自建/红心歌单缺 sourceType 时归一化为 5，
+         收藏歌单/公开集合用 4。source 传错时上游会回 200 + 0 首，
+         所以必须在这里把来源带对，不能指望取曲目时兜底。 */
+      const addRows = (src, fallbackSource) => {
         for (const it of bodianPlaylistRows(src)) {
-          const p = bodianPlaylist(it);
+          const p = bodianPlaylist(it, fallbackSource);
           if (!p.id || seen.has(p.id)) continue;
           seen.add(p.id);
           playlists.push(p);
@@ -3129,11 +4781,11 @@ async function handleBodian(req, res, url) {
           break;
         }
         if (page === 0) {
-          addRows(d.owned);
-          addRows(d.liked);
-          if (d.liked && d.liked.id) addRows([d.liked]);
+          addRows(d.owned, 5);
+          addRows(d.liked, 5);
+          if (d.liked && d.liked.id) addRows([d.liked], 5);
         }
-        addRows(d.collected);
+        addRows(d.collected, 4);
         /* 停法：hasMore=false、nextOffset 缺失或不前进、翻到页数上限 */
         const pg = (d.collected && d.collected.bodianPagination) || {};
         if (!pg.hasMore) break;
@@ -3146,11 +4798,15 @@ async function handleBodian(req, res, url) {
 
     /* 「我收藏的专辑」：边车返回 { data:{ albumList, bodianPagination } }，
        这里统一成网易云 album/sublist 的 { data, hasMore }。
-       注意：边车的 /user/albums 目前不把 offset/limit 转给库（services/ 不许改），
-       永远只给第一页（默认 50 张）。所以 hasMore 固定 false —— 否则前端会按
-       nextOffset 反复拿同一页，把列表叠成一堆重复项。 */
+       边车现在会把 limit/offset 转给库（库自己按上游原始页分页，并在 albumList 里
+       只留 sourceType=6 的专辑），所以 hasMore 直接取 bodianPagination.hasMore。
+       注意：一页原始数据里可能只有一部分是专辑，data.length < limit 时仍可能有下一页；
+       前端不要拿「短页」当结束条件，只认 hasMore。 */
     if (part === 'user/albums') {
-      const r = await scRequest('bodian', '/user/albums', { timeout: 25000 });
+      const limit = Math.min(100, Math.max(1, Number(q.get('limit')) || 50));
+      const offset = Math.max(0, Number(q.get('offset')) || 0);
+      const r = await scRequest('bodian',
+        `/user/albums?limit=${limit}&offset=${offset}`, { timeout: 25000 });
       const d = r.data || {};
       if (d.code !== 200) {
         return json(res, 200, {
@@ -3159,10 +4815,11 @@ async function handleBodian(req, res, url) {
         });
       }
       const wrap = d.data || {};
+      const pg = wrap.bodianPagination || {};
       return json(res, 200, {
         code: 200, source: 'bodian',
         data: (Array.isArray(wrap.albumList) ? wrap.albumList : []).map(bodianUserAlbum).filter((a) => a.id),
-        hasMore: false,
+        hasMore: !!pg.hasMore,
       });
     }
 
@@ -3179,6 +4836,24 @@ async function handleBodian(req, res, url) {
         code: 200, source: 'bodian',
         tracks: (d.items || []).map(bodianTrack).filter((t) => t.id && t.name),
       });
+    }
+
+    /* 波点红心写入：POST { id, liked }；统一 /api/like 也复用同一个边车路由 */
+    if (part === 'like') {
+      if (req.method !== 'POST') return json(res, 405, { code: 405, ok: false, error: 'POST required' });
+      const body = await readBody(req);
+      const id = String(body.id ?? body.songId ?? q.get('id') ?? '').trim();
+      if (!id) return json(res, 400, { code: 400, ok: false, error: 'id required' });
+      const liked = likeFlag(body.liked ?? q.get('liked'), true);
+      const out = await bodianLikeSet({ id }, liked);
+      if (!out.ok) {
+        return json(res, 200, {
+          code: out.error === 'LOGIN_REQUIRED' ? 401 : 502,
+          ok: false,
+          error: out.message || '波点红心写入失败',
+        });
+      }
+      return json(res, 200, { code: 200, ok: true, liked: out.liked });
     }
 
     if (part === 'playlist/detail') {
@@ -3209,6 +4884,567 @@ async function handleBodian(req, res, url) {
     return json(res, 404, { code: 404, error: 'unknown bodian api: ' + part });
   } catch (e) {
     return json(res, 502, { code: 502, error: String(e.message), reason: e.reason || null, log: scLogTail('bodian') });
+  }
+}
+
+/* ==========================================================================
+   统一红心（网易云 / QQ / 酷狗 / 汽水 / 波点）
+   --------------------------------------------------------------------------
+   前端契约：
+     GET  /api/like/state?source=&id=&mid=&songId=&hash=
+       200 { ok:true, liked, limited? }
+       200 { ok:false, error:'LOGIN_REQUIRED'|'UNSUPPORTED'|'FAILED', message }
+     POST /api/like  body { source, track, liked }
+       200 { ok:true, liked } | { ok:false, error, message }
+
+   规矩：
+     - 未登录一律 LOGIN_REQUIRED + 中文提示，绝不假装成功；
+     - 平台失败把可读的 message 带出去，但不回传 cookie / token；
+     - 重复点赞 / 取消不报错（先查后写或平台自身幂等）。
+   ========================================================================== */
+const LIKE_SOURCES = new Set(['netease', 'qq', 'kugou', 'qishui', 'bodian']);
+
+/** liked 兼容布尔、"true"/"false"、1/0；缺省按 fallback（写接口默认点赞） */
+function likeFlag(value, fallback = true) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const s = String(value).trim().toLowerCase();
+  if (s === 'false' || s === '0' || s === 'no' || s === 'off') return false;
+  if (s === 'true' || s === '1' || s === 'yes' || s === 'on') return true;
+  return fallback;
+}
+
+function likeErr(error, message) {
+  return { ok: false, error, message };
+}
+
+/** 兜底异常信息先脱敏：scRequest 的酷狗请求会把 cookie 放在 URL 上，
+ *  万一 fetch 报错把 URL 带进 message，不能原样回给前端。 */
+function likeSafeMessage(e) {
+  let m = String((e && e.message) || e || '红心操作失败');
+  m = m
+    .replace(/([?&]cookie=)[^&\s]*/gi, '$1[已隐藏]')
+    .replace(/(qqmusic_session=)[^;,\s]+/gi, '$1[已隐藏]')
+    .replace(/(MUSIC_U=)[^;,\s]+/gi, '$1[已隐藏]')
+    .replace(/(token=)[^;,\s]+/gi, '$1[已隐藏]');
+  return m.slice(0, 500);
+}
+
+function likeOk(liked, limited) {
+  const out = { ok: true, liked: !!liked };
+  if (limited) out.limited = true;
+  return out;
+}
+
+/* ---------------- 网易云 ----------------
+   登录态只看 MUSIC_U；uid 不在 cookie 里，问一次 /login/status 并缓存 10 分钟。
+   state 优先 /song/like/check（不需要 uid），形状不认识再退回 /likelist。
+   写入 /song/like 必须带 uid + like=true/false。 */
+let neUidCache = { musicU: '', uid: 0, at: 0 };
+
+async function neteaseUid() {
+  const musicU = String(cookies.MUSIC_U || '');
+  if (!musicU) return 0;
+  if (neUidCache.musicU === musicU && Date.now() - neUidCache.at < 10 * 60 * 1000) {
+    return neUidCache.uid;
+  }
+  const r = await ncRequest('/login/status', { params: {}, cookie: cookieHeader(), timeout: 12000 });
+  const d = r.data || {};
+  const profile = (d.data && d.data.profile) || d.profile || {};
+  const uid = Number(profile.userId) || 0;
+  if (uid > 0) neUidCache = { musicU, uid, at: Date.now() };
+  return uid;
+}
+
+function neteaseIdOf(track) {
+  const n = Number(track && (track.id ?? track.songId));
+  return Number.isSafeInteger(n) && n > 0 ? n : 0;
+}
+
+/** /song/like/check 的返回形状在不同版本里变过：数组可能在 ids / data / data.ids 里 */
+function neteaseLikedIds(d) {
+  if (!d || typeof d !== 'object') return null;
+  for (const c of [d.ids, d.data, d.data && d.data.ids, d.data && d.data.trackIds, d.songLikes]) {
+    if (Array.isArray(c)) return c.map((x) => String(x));
+  }
+  if (d.data && typeof d.data === 'object') {
+    const keys = Object.keys(d.data);
+    if (keys.length && keys.every((k) => /^\d+$/.test(k))) {
+      return keys.filter((k) => d.data[k]).map(String);
+    }
+  }
+  return null;
+}
+
+async function neteaseLikeState(track) {
+  if (!cookies.MUSIC_U) return likeErr('LOGIN_REQUIRED', '先在设置里登录网易云音乐');
+  const id = neteaseIdOf(track);
+  if (!id) return likeErr('FAILED', '缺少网易云歌曲 id');
+
+  let checkCode = 0;
+  let checkMessage = '';
+  try {
+    const r = await ncRequest('/song/like/check', {
+      params: { ids: JSON.stringify([id]) }, cookie: cookieHeader(), timeout: 20000,
+    });
+    const d = r.data || {};
+    checkCode = Number(d.code) || 0;
+    checkMessage = d.message || d.msg || '';
+    if (checkCode === 200) {
+      const ids = neteaseLikedIds(d);
+      if (ids) return likeOk(ids.includes(String(id)));
+    }
+  } catch (e) {
+    checkMessage = e.message || '';
+  }
+
+  /* check 拿不到 / 形状不认识：退回「我喜欢的音乐」全量列表 */
+  const uid = await neteaseUid().catch(() => 0);
+  if (!uid) {
+    if (checkCode === 301 || checkCode === 401) {
+      return likeErr('LOGIN_REQUIRED', '网易云登录态已失效，重新登录后再试');
+    }
+    return likeErr('FAILED', checkMessage || '拿不到网易云红心状态（登录态或接口异常）');
+  }
+  try {
+    const r = await ncRequest('/likelist', { params: { uid }, cookie: cookieHeader(), timeout: 20000 });
+    const d = r.data || {};
+    const code = Number(d.code) || 0;
+    const ids = Array.isArray(d.ids) ? d.ids
+      : (d.data && Array.isArray(d.data.ids) ? d.data.ids : null);
+    if (code === 200 && ids) {
+      return likeOk(ids.map((x) => String(x)).includes(String(id)));
+    }
+    if (code === 301 || code === 401) {
+      return likeErr('LOGIN_REQUIRED', '网易云登录态已失效，重新登录后再试');
+    }
+    return likeErr('FAILED', d.message || d.msg || '拿不到网易云「我喜欢」列表');
+  } catch (e) {
+    return likeErr('FAILED', e.message || '拿不到网易云「我喜欢」列表');
+  }
+}
+
+async function neteaseLikeSet(track, liked) {
+  if (!cookies.MUSIC_U) return likeErr('LOGIN_REQUIRED', '先在设置里登录网易云音乐');
+  const id = neteaseIdOf(track);
+  if (!id) return likeErr('FAILED', '缺少网易云歌曲 id');
+
+  /* 幂等：已经是要的状态就直接返回，不重复写；登录态明确失效也提前返回 */
+  const cur = await neteaseLikeState(track).catch(() => null);
+  if (cur && cur.ok && cur.liked === !!liked) return likeOk(!!liked);
+  if (cur && !cur.ok && cur.error === 'LOGIN_REQUIRED') return cur;
+
+  const uid = await neteaseUid().catch(() => 0);
+  if (!uid) return likeErr('FAILED', '网易云登录态里拿不到 uid，请重新登录');
+
+  const r = await ncRequest('/song/like', {
+    params: { id, uid, like: String(!!liked) }, cookie: cookieHeader(), timeout: 20000,
+  });
+  const d = r.data || {};
+  const code = Number(d.code) || 0;
+  if (code === 200) return likeOk(!!liked);
+  if (code === 301 || code === 401) {
+    return likeErr('LOGIN_REQUIRED', '网易云登录态已失效，重新登录后再试');
+  }
+  return likeErr('FAILED', d.message || d.msg || `网易云返回 ${code || r.status}`);
+}
+
+/* ---------------- QQ ----------------
+   track.id 就是 mid；写入还必须有数字 songId。
+   state 只看「我喜欢」前 100 首；total > 100 且没命中时带 limited。 */
+function qqIdOf(track) {
+  const t = track || {};
+  const rawId = String(t.id || '').trim();
+  const mid = String(t.mid || '').trim()
+    || (/^[A-Za-z0-9]{1,64}$/.test(rawId) && !/^\d+$/.test(rawId) ? rawId : '');
+  const songId = Number(t.songId) > 0
+    ? Number(t.songId)
+    : (/^\d+$/.test(rawId) && !mid ? Number(rawId) : 0);
+  return { mid, songId: Number.isSafeInteger(songId) && songId > 0 ? songId : 0 };
+}
+
+async function qqLikeState(track, authCookie) {
+  if (!qqTokenFromCookieLine(authCookie)) {
+    return likeErr('LOGIN_REQUIRED', '先在设置里登录 QQ 音乐');
+  }
+  const { mid, songId } = qqIdOf(track);
+  if (!mid && !songId) return likeErr('FAILED', '缺少 QQ 歌曲 mid 或数字 songId');
+
+  const r = await qqRequest('/user/liked-songs?limit=100&offset=0', { cookie: authCookie, timeout: 20000 });
+  const d = r.data || {};
+  const code = Number(d.code) || 0;
+  if (r.status === 401 || code === 401) {
+    return likeErr('LOGIN_REQUIRED', 'QQ 音乐登录态已失效，重新扫码登录');
+  }
+  if (code !== 200) {
+    return likeErr('FAILED', d.message || d.errorKey || `QQ 返回 ${code || r.status}`);
+  }
+
+  const songs = Array.isArray(d.songs) ? d.songs : [];
+  const total = Number(d.total) || songs.length;
+  const hit = songs.some((it) => {
+    const itMid = String(it.mid || it.songmid || '');
+    const itId = Number(it.id ?? it.songid) || 0;
+    return (mid && itMid === mid) || (songId && itId === songId);
+  });
+  /* more 是上游明确的「还有下一页」；total 缺失时只看条数会漏判 */
+  return likeOk(hit, !hit && (!!d.more || total > songs.length));
+}
+
+async function qqLikeSet(track, liked, authCookie) {
+  if (!qqTokenFromCookieLine(authCookie)) {
+    return likeErr('LOGIN_REQUIRED', '先在设置里登录 QQ 音乐');
+  }
+  const { mid, songId } = qqIdOf(track);
+  if (!mid || !songId) {
+    return likeErr('FAILED', '缺少 QQ 歌曲 mid 或数字 songId（重新搜索后再试）');
+  }
+  const r = await qqRequest('/user/song/like', {
+    cookie: authCookie,
+    method: 'POST',
+    payload: { song: { id: songId, mid, type: 0 }, liked: !!liked },
+    timeout: 25000,
+  });
+  const d = r.data || {};
+  const code = Number(d.code) || 0;
+  if (r.status === 401 || code === 401) {
+    return likeErr('LOGIN_REQUIRED', 'QQ 音乐登录态已失效，重新扫码登录');
+  }
+  if (code !== 200) {
+    return likeErr('FAILED', d.message || d.errorKey || `QQ 返回 ${code || r.status}`);
+  }
+  if (d.liked !== undefined && !!d.liked !== !!liked) {
+    return likeErr('FAILED', 'QQ 返回的红心状态与请求不一致');
+  }
+  return likeOk(!!liked);
+}
+
+/* ---------------- 酷狗 ----------------
+   「我喜欢」是 /user/playlist 里的系统歌单：
+     - 取曲目用 items 里的 global_collection_id（collection_…_2_0）；
+     - 写歌单的 add/del 只认 raw 行里的 listid。
+   state 翻 /playlist/track/all 最多 5 页 / 500 首，按 hash 小写比对，缓存 60 秒。
+   取消时还需要曲目原始行里的 fileid。 */
+const KG_LIKE_TTL = 60 * 1000;
+const kgLikeCache = new Map();
+
+function kugouLikeCacheKey(jar = kgActiveJar()) {
+  return String(jar.userid || '') || String(jar.token || '');
+}
+
+function kugouLikedName(it) {
+  return String((it && (it.listname || it.name || it.specialname)) || '');
+}
+
+function kugouRawListid(raw) {
+  for (const key of ['listid', 'list_id', 'specialid', 'list_create_listid']) {
+    const v = raw && raw[key];
+    if (v !== undefined && v !== null && String(v) !== '' && String(v) !== '0') return String(v);
+  }
+  return '';
+}
+
+async function kugouLikedPlaylist(cookie, sidecar = kgActiveSidecar()) {
+  const l = await kugouUserPlaylistList(cookie, sidecar);
+  if (l.failed) {
+    return likeErr('LOGIN_REQUIRED', l.error || '酷狗登录态可能已过期，重新扫码后再试');
+  }
+  const like = l.items.find((p) => p.name === '我喜欢' || p.name === '我喜欢的音乐'
+    || /collection_[^_]+_[^_]+_2_0$/.test(p.id));
+  if (!like) {
+    return likeErr('FAILED', '没找到酷狗的「我喜欢」歌单（在酷狗 App 里点几首红心再回来）');
+  }
+  /* rawItems 就是 /user/playlist 的原始 info 行：按 id 或名字回找那一行，listid 才是写入键 */
+  const raw = l.rawItems.find((it) => String(kugouPlaylist(it).id) === String(like.id))
+    || l.rawItems.find((it) => {
+      const name = kugouLikedName(it);
+      return name === '我喜欢' || name === '我喜欢的音乐';
+    });
+  const listid = kugouRawListid(raw);
+  if (!listid) {
+    return likeErr('FAILED', '拿不到酷狗「我喜欢」的 listid（歌单列表里缺少 listid 字段）');
+  }
+  return {
+    ok: true,
+    id: like.id,
+    listid,
+    trackCount: Number(like.trackCount || (raw && (raw.songcount ?? raw.song_count)) || 0) || 0,
+  };
+}
+
+/** 拉「我喜欢」曲目构建 hash -> fileid 索引；限 5 页 / 500 首，60 秒缓存。
+    显式接收 sidecar / jar，跟着 kgUserContext 走（active 缺 userid 时可能是另一版）。 */
+async function kugouLikedIndex(cookie, force = false, sidecar = kgActiveSidecar(), jar = kgActiveJar()) {
+  const key = kugouLikeCacheKey(jar);
+  const hit = kgLikeCache.get(key);
+  if (!force && hit && Date.now() - hit.at < KG_LIKE_TTL) return hit.value;
+
+  const lp = await kugouLikedPlaylist(cookie, sidecar);
+  if (!lp.ok) return lp;
+
+  const rows = new Map();
+  let total = Number(lp.trackCount) || 0;
+  let complete = false;
+  for (let page = 1; page <= 5; page++) {
+    /* 酷狗边车给成功响应挂 2 分钟 apicache：带时间戳，保证写完红心后重建索引
+       拿到的是新列表，而不是写之前的缓存。 */
+    const r = await scRequest(sidecar,
+      `/playlist/track/all?id=${encodeURIComponent(lp.id)}&page=${page}&pagesize=100&_=${Date.now()}`,
+      { cookie, timeout: 25000 });
+    const d = (r.data && r.data.data) || {};
+    const list = Array.isArray(d.songs) ? d.songs
+      : Array.isArray(d.info) ? d.info
+        : (Array.isArray(d.list) ? d.list : null);
+    if (!list) {
+      if (page === 1) {
+        return likeErr('FAILED',
+          (r.data && (r.data.error || r.data.errmsg || r.data.message)) || '酷狗「我喜欢」曲目取不到');
+      }
+      break;
+    }
+    total = Number(d.count || d.total) || total;
+    for (const it of list) {
+      const hash = String((it && it.hash) || '').toLowerCase();
+      if (!hash) continue;
+      const fileid = Number(it.fileid ?? it.file_id ?? it.fileId ?? 0) || 0;
+      rows.set(hash, { fileid });
+    }
+    if (list.length < 100) { complete = true; break; }
+    if (total > 0 && rows.size >= total) { complete = true; break; }
+  }
+
+  const limited = !complete && (total === 0 || rows.size < total);
+  const value = { ok: true, listid: lp.listid, rows, total, limited };
+  kgLikeCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+function kugouWriteOk(r) {
+  const d = r.data || {};
+  return r.status === 200
+    && Number(d.error_code || 0) === 0
+    && (d.status === undefined || Number(d.status) === 1);
+}
+
+function kugouWriteMessage(r) {
+  const d = r.data || {};
+  return d.error_msg || d.errmsg || d.message
+    || `酷狗返回 status ${d.status ?? r.status}`;
+}
+
+async function kugouLikeState(track) {
+  /* 不先跑 VIP 检测：账号接口只看 jar 里有没有 token / userid。
+     active 缺时 kgUserContext 会退到另一版已登录的 jar（同一账号同步）。 */
+  const ctx = kgUserContext();
+  if (!ctx.jar.token || !ctx.jar.userid) return likeErr('LOGIN_REQUIRED', '先在设置里扫码登录酷狗音乐');
+  const hash = String((track && (track.hash || track.id)) || '').toLowerCase();
+  if (!/^[0-9a-f]{32}$/.test(hash)) return likeErr('FAILED', '缺少酷狗歌曲 hash');
+
+  const idx = await kugouLikedIndex(ctx.cookie, false, ctx.sidecar, ctx.jar);
+  if (!idx.ok) return idx;
+  const liked = idx.rows.has(hash);
+  return likeOk(liked, !liked && idx.limited);
+}
+
+async function kugouLikeSet(track, liked) {
+  const ctx = kgUserContext();
+  if (!ctx.jar.token || !ctx.jar.userid) return likeErr('LOGIN_REQUIRED', '先在设置里扫码登录酷狗音乐');
+  const rawHash = String((track && (track.hash || track.id)) || '');
+  if (!/^[0-9a-f]{32}$/i.test(rawHash)) return likeErr('FAILED', '缺少酷狗歌曲 hash');
+  const hash = rawHash.toLowerCase();   // 只用于和索引比对；写入保留原大小写
+
+  const cookie = ctx.cookie;
+  const idx = await kugouLikedIndex(cookie, false, ctx.sidecar, ctx.jar);
+  if (!idx.ok) return idx;
+
+  /* 幂等：已经点过红心就不再写；已经不在列表里且索引完整，就当取消成功 */
+  if (liked && idx.rows.has(hash)) return likeOk(true);
+  if (!liked && !idx.rows.has(hash) && !idx.limited) return likeOk(false);
+
+  if (liked) {
+    const name = String((track && track.name) || '').replace(/[|,]/g, ' ').trim() || '未知歌曲';
+    const data = [
+      name,
+      rawHash,
+      Number(track && track.albumIdNum) || 0,
+      Number(track && track.albumAudioId) || 0,
+    ].join('|');
+    /* 酷狗边车的缓存键只看 URL，加时间戳避免同一歌单第二次写入命中上次的成功缓存 */
+    const r = await scRequest(ctx.sidecar, `/playlist/tracks/add?_=${Date.now()}`, {
+      cookie, method: 'POST',
+      payload: { listid: idx.listid, data },
+      timeout: 30000,
+    });
+    if (!kugouWriteOk(r)) return likeErr('FAILED', kugouWriteMessage(r));
+    kgLikeCache.delete(kugouLikeCacheKey(ctx.jar));
+    return likeOk(true);
+  }
+
+  const entry = idx.rows.get(hash);
+  if (!entry) {
+    return likeErr('FAILED', '酷狗「我喜欢」前 500 首里没找到这首歌，无法取消红心');
+  }
+  if (!entry.fileid) {
+    return likeErr('FAILED', '在酷狗「我喜欢」里找到了这首歌，但上游没给 fileid，无法取消红心');
+  }
+  const r = await scRequest(ctx.sidecar, `/playlist/tracks/del?_=${Date.now()}`, {
+    cookie, method: 'POST',
+    payload: { listid: idx.listid, fileids: String(entry.fileid) },
+    timeout: 30000,
+  });
+  if (!kugouWriteOk(r)) return likeErr('FAILED', kugouWriteMessage(r));
+  kgLikeCache.delete(kugouLikeCacheKey(ctx.jar));
+  return likeOk(false);
+}
+
+/* ---------------- 汽水 ----------------
+   边车 /like_song 把写操作交给库；state 直接用 /liked_songs 的 ids。
+   库的 mediaId 只收纯数字字符串，这里先校验，错误更可读。 */
+function qishuiIdOf(track) {
+  const id = String((track && (track.id ?? track.songId)) || '').trim();
+  return /^\d{1,30}$/.test(id) ? id : '';
+}
+
+async function qishuiLikeState(track) {
+  const id = qishuiIdOf(track);
+  if (!id) return likeErr('FAILED', '缺少汽水歌曲 id（应为数字）');
+  const r = await scRequest('qishui', '/liked_songs', { timeout: 25000 });
+  const d = r.data || {};
+  const code = Number(d.code) || 0;
+  if (r.status === 401 || code === 401) {
+    return likeErr('LOGIN_REQUIRED', '先在设置里登录汽水音乐');
+  }
+  if (code !== 200) return likeErr('FAILED', d.error || `汽水返回 ${code || r.status}`);
+  const ids = Array.isArray(d.ids) ? d.ids.map((x) => String(x)) : [];
+  const liked = ids.includes(id);
+  return likeOk(liked, !liked && d.whole === false);
+}
+
+async function qishuiLikeSet(track, liked) {
+  const id = qishuiIdOf(track);
+  if (!id) return likeErr('FAILED', '缺少汽水歌曲 id（应为数字）');
+
+  /* 幂等：已经是要的状态就不重复写；列表被截断且没命中时不能当成「未赞」 */
+  const cur = await qishuiLikeState(track).catch(() => null);
+  if (cur && cur.ok && cur.liked === !!liked && (!cur.limited || cur.liked)) return likeOk(!!liked);
+  if (cur && !cur.ok && cur.error === 'LOGIN_REQUIRED') return cur;
+
+  const r = await scRequest('qishui', '/like_song', {
+    method: 'POST', payload: { id, liked: !!liked }, timeout: 25000,
+  });
+  const d = r.data || {};
+  const code = Number(d.code) || 0;
+  if (r.status === 401 || code === 401) {
+    return likeErr('LOGIN_REQUIRED', '先在设置里登录汽水音乐');
+  }
+  if (code !== 200) return likeErr('FAILED', d.error || `汽水返回 ${code || r.status}`);
+  return likeOk(d.liked !== undefined ? !!d.liked : !!liked);
+}
+
+/* ---------------- 波点 ----------------
+   边车 /liked_songs 目前只取前 50 首；没命中且总数 / hasMore 更大时带 limited。
+   写入走边车 /like_song（库要求数字 id + boolean）。 */
+function bodianIdOf(track) {
+  const id = String((track && (track.id ?? track.songId ?? track.musicRid)) || '').trim();
+  return /^\d{1,30}$/.test(id) ? id : '';
+}
+
+async function bodianLikeState(track) {
+  const id = bodianIdOf(track);
+  if (!id) return likeErr('FAILED', '缺少波点歌曲 id（应为数字）');
+  const r = await scRequest('bodian', '/liked_songs', { timeout: 25000 });
+  const d = r.data || {};
+  const code = Number(d.code) || 0;
+  if (r.status === 401 || code === 401) {
+    return likeErr('LOGIN_REQUIRED', '先在设置里登录波点音乐');
+  }
+  if (code !== 200) return likeErr('FAILED', d.error || `波点返回 ${code || r.status}`);
+  const items = Array.isArray(d.items) ? d.items : [];
+  const liked = items.some((it) => String(it.id ?? it.musicRid ?? '') === id);
+  const total = Number(d.total) || items.length;
+  return likeOk(liked, !liked && (!!d.more || total > items.length));
+}
+
+async function bodianLikeSet(track, liked) {
+  const id = bodianIdOf(track);
+  if (!id) return likeErr('FAILED', '缺少波点歌曲 id（应为数字）');
+
+  /* 幂等：已经是要的状态就不重复写；列表被截断且没命中时不能当成「未赞」 */
+  const cur = await bodianLikeState(track).catch(() => null);
+  if (cur && cur.ok && cur.liked === !!liked && (!cur.limited || cur.liked)) return likeOk(!!liked);
+  if (cur && !cur.ok && cur.error === 'LOGIN_REQUIRED') return cur;
+
+  const r = await scRequest('bodian', '/like_song', {
+    method: 'POST', payload: { id, liked: !!liked }, timeout: 25000,
+  });
+  const d = r.data || {};
+  const code = Number(d.code) || 0;
+  if (r.status === 401 || code === 401) {
+    return likeErr('LOGIN_REQUIRED', '先在设置里登录波点音乐');
+  }
+  if (code !== 200) return likeErr('FAILED', d.error || `波点返回 ${code || r.status}`);
+  return likeOk(d.liked !== undefined ? !!d.liked : !!liked);
+}
+
+/* ---------------- 统一入口 ---------------- */
+function likeSourceOf(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+async function handleLikeState(req, res, url) {
+  const q = url.searchParams;
+  const source = likeSourceOf(q.get('source'));
+  if (!LIKE_SOURCES.has(source)) {
+    return json(res, 200, likeErr('UNSUPPORTED',
+      '这个音源不支持红心（只支持网易云、QQ、酷狗、汽水、波点）'));
+  }
+  const track = {
+    id: q.get('id') || q.get('songId') || '',
+    mid: q.get('mid') || '',
+    songId: q.get('songId') || '',
+    hash: q.get('hash') || q.get('id') || '',
+    name: q.get('name') || '',
+    albumIdNum: q.get('albumIdNum') || 0,
+    albumAudioId: q.get('albumAudioId') || 0,
+  };
+  try {
+    let out;
+    if (source === 'netease') out = await neteaseLikeState(track);
+    else if (source === 'qq') out = await qqLikeState(track, qqAuthCookie(req.headers.cookie || '', res));
+    else if (source === 'kugou') out = await kugouLikeState(track);
+    else if (source === 'qishui') out = await qishuiLikeState(track);
+    else out = await bodianLikeState(track);
+    return json(res, 200, out);
+  } catch (e) {
+    return json(res, 200, likeErr('FAILED', likeSafeMessage(e)));
+  }
+}
+
+async function handleLikeSet(req, res) {
+  if (req.method !== 'POST') {
+    return json(res, 405, likeErr('FAILED', '/api/like 只支持 POST'));
+  }
+  const body = await readBody(req);
+  const source = likeSourceOf(body.source);
+  if (!LIKE_SOURCES.has(source)) {
+    return json(res, 200, likeErr('UNSUPPORTED',
+      '这个音源不支持红心（只支持网易云、QQ、酷狗、汽水、波点）'));
+  }
+  if (typeof body.liked !== 'boolean') {
+    return json(res, 200, likeErr('FAILED', 'liked 必须是 true 或 false'));
+  }
+  const track = body.track && typeof body.track === 'object' ? body.track : {};
+  try {
+    let out;
+    if (source === 'netease') out = await neteaseLikeSet(track, body.liked);
+    else if (source === 'qq') out = await qqLikeSet(track, body.liked, qqAuthCookie(req.headers.cookie || '', res));
+    else if (source === 'kugou') out = await kugouLikeSet(track, body.liked);
+    else if (source === 'qishui') out = await qishuiLikeSet(track, body.liked);
+    else out = await bodianLikeSet(track, body.liked);
+    return json(res, 200, out);
+  } catch (e) {
+    return json(res, 200, likeErr('FAILED', likeSafeMessage(e)));
   }
 }
 
@@ -3567,23 +5803,50 @@ async function proxySourceAudio(req, res, url, source) {
   const headers = { 'User-Agent': 'Mozilla/5.0' };
   if (AUDIO_REFERER[source]) headers.Referer = AUDIO_REFERER[source];
   if (req.headers.range) headers.Range = req.headers.range;
+  /* If-Range 也要转发：拖进度条时浏览器可能带它，丢了会让 CDN 把
+     条件 Range 当成整段请求。 */
+  if (req.headers['if-range']) headers['If-Range'] = req.headers['if-range'];
+  /* 只给「等响应头」设超时，不设整段超时：音频是长流，15 秒总超时
+     会把正在播的歌在第 15 秒掐断。拿到响应头后立刻清计时器。 */
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15000);
+  let upstream;
   try {
-    const upstream = await fetch(u, { headers, redirect: 'follow' });
-    const out = {
-      'Content-Type': upstream.headers.get('content-type') || 'audio/mpeg',
-      'Cache-Control': 'no-store',
-      'Accept-Ranges': 'bytes',
-    };
-    for (const k of ['content-length', 'content-range']) {
-      const v = upstream.headers.get(k);
-      if (v) out[k] = v;
-    }
-    res.writeHead(upstream.status, out);
-    if (!upstream.body) return res.end();
-    pipeUpstream(upstream, res);
+    upstream = await fetch(u, { headers, redirect: 'follow', signal: ctl.signal });
   } catch (e) {
-    json(res, 502, { code: 502, error: String(e.message) });
+    clearTimeout(timer);
+    const timedOut = e && (e.name === 'AbortError' || /abort/i.test(String(e.message)));
+    return json(res, timedOut ? 504 : 502, {
+      code: timedOut ? 504 : 502,
+      error: timedOut ? '上游音频 15 秒没有响应' : String(e.message),
+    });
   }
+  clearTimeout(timer);
+  /* 上游没兑现 Range 时不要谎报 Accept-Ranges: bytes。之前无条件写，
+     浏览器以为任意位置都能拖；实际 CDN 回 200/403/挂起时，<audio>
+     会永久 waiting 且不触发 error（酷狗概念版拖动静音就是这么来的）。 */
+  const ranged = !!req.headers.range;
+  const honorsRange = upstream.status === 206
+    || /bytes/i.test(String(upstream.headers.get('accept-ranges') || ''));
+  const out = {
+    'Content-Type': upstream.headers.get('content-type') || 'audio/mpeg',
+    'Cache-Control': 'no-store',
+  };
+  if (honorsRange) out['Accept-Ranges'] = upstream.headers.get('accept-ranges') || 'bytes';
+  for (const k of ['content-length', 'content-range']) {
+    const v = upstream.headers.get(k);
+    if (v) out[k] = v;
+  }
+  if (ranged && upstream.status !== 206) {
+    console.warn(`  [audio] Range 没兑现：${source} ${u.hostname} 请求 ${req.headers.range}`
+      + ` → ${upstream.status}`
+      + (upstream.headers.get('content-range')
+        ? ` Content-Range=${upstream.headers.get('content-range')}`
+        : ' 无 Content-Range'));
+  }
+  res.writeHead(upstream.status, out);
+  if (!upstream.body) return res.end();
+  pipeUpstream(upstream, res);
 }
 
 /* --------------------------------------------------------------------------
@@ -4108,6 +6371,215 @@ async function normalize(name, data, channel = 'weapi') {
   }
 }
 
+/* ==========================================================================
+   高潮 / 副歌节点（2026-11-15）
+   --------------------------------------------------------------------------
+   给形态用的一条统一接口：不同音源把「副歌从哪到哪」放在完全不同的地方，
+   这里抹平成一个 { start, end }（毫秒，从歌曲开头算）。
+
+   GET /api/chorus?plat=<bodian|netease>&id=<曲目 id>
+     → { code:200, ok:true,  plat, id, start, end, length, unit:'ms' }
+     → { code:200, ok:false, plat, id, reason:'no-chorus' }                这首没有
+     → { code:200, ok:false, plat, id, reason:'unsupported', supported:[] } 这个音源接不了
+
+   GET /api/chorus/capabilities
+     → { code:200, unit:'ms', supported:['bodian','netease'], detail:{...}, note:'...' }
+     形态在开跑之前先问一次这个，就知道当前音源能不能拿高潮、字段是什么。
+
+   为什么只有这两家（2026-11-15 实测，不是猜的）：
+     · 波点：song/detail 原本就返回 payInfo.refrain_start / refrain_end，白拿；
+     · 网易云：边车里已有 /song/chorus?id= → chorus[0].startTime / endTime，多一次请求；
+     · 酷狗：kugoumusicapi 里有 song_climax 模块（/v1/audio_climax/audio），
+       但端点要酷狗 App 的签名 + cookie，本机直连是超时 / ECONNRESET，还没打通；
+     · QQ：qq-music-api 的能力表里写死 getChorusRanges:false，库没实现；
+     · 汽水 / 酷我 / Spotify：详情和歌词里都没有 refrain / chorus 字段。
+   实测样本：波点 晴天 84346–142843、稻香 53951–77968；
+             网易 晴天 98393–141783、稻香 115653–139682、告白气球 43000–86500。
+   结果缓存 6 小时：同一个 id 反复问不会反复打边车（形态里可能每帧都要）。
+   ========================================================================== */
+const CHORUS_SOURCES = {
+  bodian: {
+    detail: 'song/detail → track.payInfo.refrain_start / refrain_end',
+    async get(id) {
+      const r = await scRequest('bodian', `/song/detail?id=${encodeURIComponent(id)}`, { timeout: 8000 });
+      if (r.status !== 200) throw new Error(`波点边车 HTTP ${r.status}`);
+      const p = r.data && r.data.track && r.data.track.payInfo;
+      if (!p) return null;
+      const s = Number(p.refrain_start), e = Number(p.refrain_end);
+      if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || s < 0) return null;
+      return { start: s, end: e };
+    },
+  },
+  netease: {
+    detail: '/song/chorus?id= → chorus[0].startTime / endTime',
+    async get(id) {
+      const r = await scRequest('netease', `/song/chorus?id=${encodeURIComponent(id)}`, { timeout: 8000 });
+      if (r.status !== 200) throw new Error(`网易云边车 HTTP ${r.status}`);
+      const d = r.data || {};
+      const row = (d.chorus && d.chorus[0]) || (d.data && d.data[0]);
+      if (!row) return null;
+      const s = Number(row.startTime), e = Number(row.endTime);
+      if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s || s < 0) return null;
+      return { start: s, end: e };
+    },
+  },
+};
+
+const CHORUS_TTL = 6 * 3600 * 1000;
+const CHORUS_MAX = 400;
+const chorusCache = new Map();          // `plat:id` → { at, value }
+
+async function chorusLookup(plat, id) {
+  const key = `${plat}:${id}`;
+  const hit = chorusCache.get(key);
+  if (hit && Date.now() - hit.at < CHORUS_TTL) return hit.value;
+  const value = await CHORUS_SOURCES[plat].get(id);
+  chorusCache.delete(key);              // 重新插入，让它排到队尾（LRU 近似的淘汰顺序）
+  chorusCache.set(key, { at: Date.now(), value });
+  while (chorusCache.size > CHORUS_MAX) chorusCache.delete(chorusCache.keys().next().value);
+  return value;
+}
+
+async function handleChorus(req, res, url) {
+  const supported = Object.keys(CHORUS_SOURCES);
+
+  if (url.pathname === '/api/chorus/capabilities') {
+    return json(res, 200, {
+      code: 200,
+      unit: 'ms',
+      supported,
+      detail: Object.fromEntries(supported.map((k) => [k, CHORUS_SOURCES[k].detail])),
+      note: '酷狗协议里有（/v1/audio_climax/audio）但还没打通签名；QQ 库未实现；汽水/酷我/Spotify 没有字段。',
+    });
+  }
+  if (url.pathname !== '/api/chorus') return json(res, 404, { code: 404, ok: false, error: 'not found' });
+
+  const plat = String(url.searchParams.get('plat') || '').toLowerCase();
+  const id = String(url.searchParams.get('id') || '').trim();
+  if (!CHORUS_SOURCES[plat]) return json(res, 200, { code: 200, ok: false, plat, id, reason: 'unsupported', supported });
+  if (!id) return json(res, 400, { code: 400, ok: false, plat, error: 'id required' });
+
+  try {
+    const v = await chorusLookup(plat, id);
+    if (!v) return json(res, 200, { code: 200, ok: false, plat, id, reason: 'no-chorus' });
+    return json(res, 200, {
+      code: 200, ok: true, plat, id,
+      start: v.start, end: v.end, length: v.end - v.start, unit: 'ms',
+    });
+  } catch (e) {
+    /* 边车抽风 / 这首查不到：仍然回 200，让形态拿到一个能判断的结构，
+       而不是被 fetch 的非 2xx 当异常吞掉（API.chorus 用的是会抛错的 call()）。 */
+    return json(res, 200, { code: 200, ok: false, plat, id, reason: 'sidecar', error: String((e && e.message) || e) });
+  }
+}
+
+/* ==========================================================================
+   手机本地曲目（路径引用）—— GET /api/local-file?path=<绝对路径>
+   --------------------------------------------------------------------------
+   安卓壳扫描 MediaStore 导入的曲目不复制进 IndexedDB，曲目里只存 path，
+   播放时由这条路由按需流式读取。桌面上没有 /storage，一律 403/404。
+
+   安全边界（这是唯一一个能按路径读文件的接口，别放宽）：
+     · 只允许 GET；
+     · realpath 之后必须落在 /storage/emulated、/sdcard、/storage/self/primary
+       之下（/sdcard 在 Android 上常是指向 /storage/self/primary 的软链，
+       所以三个前缀都按 realpath 结果判断）；
+     · 扩展名只放音频；文件必须存在、不是目录、≤ 300 MB；
+     · 校验失败一律 403/404，不回显服务器目录结构。
+   支持 Range（bytes=start-end / bytes=-N），播放器拖进度条要靠它。
+   ========================================================================== */
+const LOCAL_AUDIO_EXT = new Set([
+  '.mp3', '.flac', '.wav', '.m4a', '.m4b', '.aac',
+  '.ogg', '.oga', '.opus', '.wma', '.aiff',
+]);
+const LOCAL_AUDIO_MIME = {
+  '.mp3': 'audio/mpeg',
+  '.flac': 'audio/flac',
+  '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4',
+  '.m4b': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.wma': 'audio/x-ms-wma',
+  '.aiff': 'audio/aiff',
+};
+const LOCAL_FILE_ROOTS = ['/storage/emulated/', '/sdcard/', '/storage/self/primary/'];
+const LOCAL_FILE_MAX = 300 * 1024 * 1024;
+
+async function handleLocalFile(req, res, url) {
+  if (req.method !== 'GET') {
+    res.writeHead(405, { 'Content-Type': 'application/json; charset=utf-8', Allow: 'GET' });
+    return res.end(JSON.stringify({ error: 'method not allowed' }));
+  }
+
+  let raw = url.searchParams.get('path') || '';
+  try { raw = decodeURIComponent(raw); } catch { /* 路径里本来就有 % 之类，保持原样 */ }
+  if (!raw || raw.indexOf('\0') >= 0) return json(res, 404, { error: 'not found' });
+
+  let file;
+  try {
+    file = await fs.promises.realpath(path.resolve(raw));
+  } catch {
+    return json(res, 404, { error: 'not found' });
+  }
+  if (!LOCAL_FILE_ROOTS.some((root) => file.startsWith(root))) {
+    return json(res, 403, { error: 'forbidden' });
+  }
+  const ext = path.extname(file).toLowerCase();
+  if (!LOCAL_AUDIO_EXT.has(ext)) return json(res, 403, { error: 'forbidden' });
+
+  let stat;
+  try { stat = await fs.promises.stat(file); } catch { return json(res, 404, { error: 'not found' }); }
+  if (!stat.isFile()) return json(res, 404, { error: 'not found' });
+  const total = stat.size;
+  if (total > LOCAL_FILE_MAX) return json(res, 403, { error: 'file too large' });
+
+  const base = {
+    'Content-Type': LOCAL_AUDIO_MIME[ext] || 'application/octet-stream',
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+  };
+  const send = (code, headers, start, end) => {
+    res.writeHead(code, headers);
+    if (start === undefined) return res.end();
+    const stream = fs.createReadStream(file, { start, end });
+    stream.on('error', () => { try { res.destroy(); } catch { /* ignore */ } });
+    stream.pipe(res);
+  };
+
+  if (total === 0) return send(200, { ...base, 'Content-Length': 0 });
+
+  const range = req.headers.range;
+  if (!range) return send(200, { ...base, 'Content-Length': total });
+
+  const m = /^bytes=(\d*)-(\d*)$/.exec(String(range).trim());
+  if (!m || (m[1] === '' && m[2] === '')) {
+    return json(res, 416, { error: 'bad range', total });
+  }
+  let start;
+  let end;
+  if (m[1] === '') {
+    // bytes=-N：最后 N 字节
+    const n = Number(m[2]);
+    start = Math.max(0, total - n);
+    end = total - 1;
+  } else {
+    start = Number(m[1]);
+    end = m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1);
+  }
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= total) {
+    res.writeHead(416, { ...base, 'Content-Range': `bytes */${total}` });
+    return res.end();
+  }
+  send(206, {
+    ...base,
+    'Content-Range': `bytes ${start}-${end}/${total}`,
+    'Content-Length': end - start + 1,
+  }, start, end);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
@@ -4116,11 +6588,23 @@ const server = http.createServer(async (req, res) => {
     return proxyImage(res, url.searchParams.get('url') || '');
   }
 
+  /* ---- 高潮 / 副歌节点（形态用）：必须在下面 /api/ 通用转发之前，
+         否则会被当成 unknown api 直接 404。字段说明见 handleChorus 上面那段。 */
+  if (url.pathname === '/api/chorus' || url.pathname.startsWith('/api/chorus/')) {
+    return handleChorus(req, res, url);
+  }
+
   /* ---- Wallpaper Engine 壁纸（见 wallpaper-api.mjs） ----
      必须排在 /api/ 通用转发之前，否则会被当成 unknown api 直接 404 */
   if (url.pathname === '/api/wallpaper' || url.pathname.startsWith('/api/wallpaper/')) {
     return handleWallpaper(req, res, url);
   }
+
+  /* ---- 统一红心：网易云 / QQ / 酷狗 / 汽水 / 波点 ----
+     必须排在下面 /api/ 通用转发之前，否则会被当成 unknown api。
+     契约见 handleLikeState / handleLikeSet 上方那段说明。 */
+  if (url.pathname === '/api/like/state') return handleLikeState(req, res, url);
+  if (url.pathname === '/api/like') return handleLikeSet(req, res, url);
 
   /* ---- QQ 音乐（独立边车，见文件上半部分的说明） ----
      必须在网易云那个 /api/ 分支之前：否则会被当成 unknown api: qq/... 直接 404 */
@@ -4136,6 +6620,13 @@ const server = http.createServer(async (req, res) => {
   for (const [name, handler] of [['kugou', handleKugou], ['qishui', handleQishui], ['bodian', handleBodian], ['spotify', handleSpotify], ['kuwo', handleKuwo]]) {
     if (url.pathname === `/api/${name}/audio`) return proxySourceAudio(req, res, url, name);
     if (url.pathname === `/api/${name}` || url.pathname.startsWith(`/api/${name}/`)) return handler(req, res, url);
+  }
+
+  /* ---- VST3 离线处理（services/vst-host/，Python 边车，2026-11-17 加） ----
+     必须排在下面 /api/ 通用转发之前，否则 /api/vst/* 会被当成 unknown api。
+     音频白名单在 handleVst 里按 AUDIO_HOSTS 单独判断（它要拿原始 full URL）。 */
+  if (url.pathname === '/api/vst' || url.pathname.startsWith('/api/vst/')) {
+    return handleVst(req, res, url);
   }
 
   /* 网易云音频代理：必须排在下面 handleNetease 的兜底转发之前，否则会被当成边车路径。
@@ -4187,6 +6678,12 @@ const server = http.createServer(async (req, res) => {
       /* 收 cookie 的最近一次结果：试过哪几处 / 拿没拿到 / 来自哪个字段（不含值） */
       harvest: lastHarvest,
     });
+  }
+
+  /* ---- 手机扫描导入的曲目：按路径流式读本机音频（白名单见 handleLocalFile） ----
+     必须排在下面 /api/ 通用转发之前，否则会被当成 unknown api 直接 404。 */
+  if (url.pathname === '/api/local-file') {
+    return handleLocalFile(req, res, url);
   }
 
   /* ---- 网易云接口转发 ---- */

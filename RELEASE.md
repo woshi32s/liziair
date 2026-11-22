@@ -6,27 +6,27 @@
 
 ## 日常发版：一条命令
 
-先把版本号改好（两处必须一致）：
+只需要改 `package.json` 的 `version`，例如 `1.1.5`。
 
-- `package.json` 的 `version`，例如 `1.0.0`
-- `E:\DSHdesktop\work\lizi-android\app\build.gradle` 的 `versionName` / `versionCode`
+`E:\DSHdesktop\work\lizi-android\app\build.gradle` 里的版本已经自动读桌面 `package.json`：
+`versionName desktopVersion` / `versionCode vCode`，不需要再手改。
 
 然后：
 
 ```powershell
-npm run release -- v1.0.0
+npm run release -- v1.1.5
 ```
 
 等价于：
 
 ```powershell
-node release.mjs v1.0.0
+node release.mjs v1.1.5
 ```
 
 脚本按顺序做，任何一步失败都会停：
 
 1. 校验 `package.json`、Android `versionName` / `versionCode`、命令行 tag 三者一致。
-2. `npm run dist` 打 Windows NSIS 安装包（`dist/LIZI Setup <版本>.exe` + `.blockmap` + `latest.yml`）。
+2. `npm run dist` 打 Windows NSIS 安装包（`dist/LIZI-Setup-<版本>.exe` + `.blockmap` + `latest.yml`）。
 3. 调 `../lizi-android/sync.js` 同步网页资源，再 `gradlew assembleDebug` 出 debug APK。
 4. `gh release create` 上传 `.exe` / `.blockmap` / `latest.yml` / APK；同名 tag 已存在时改用 `gh release upload --clobber` 覆盖。
 5. 打开夸克、百度网盘的上传页，把安装包和 APK 路径复制到剪贴板。
@@ -141,22 +141,39 @@ const PAN_BAIDU_URL = 'https://pan.baidu.com/s/PLACEHOLDER';
 ## 自动更新怎么工作
 
 - 只在 `app.isPackaged`（打包版）启用；开发环境 `npm start` 不联网检查。
-- 启动后延迟 6 秒检查一次 GitHub Releases。
-- `autoDownload = false`：先弹原生对话框，四个按钮分别是「立即下载 / 打开下载页 / 网盘备用 / 以后再说」。
-  只有「立即下载」会在应用内下载；「打开下载页」只打开 GitHub Release 页，不会在后台偷偷下。
-- 下载进度用任务栏进度条 + 窗口标题 + 托盘提示显示，不往页面里加任何 UI。
+- 启动后延迟 6 秒检查一次 GitHub Releases；应用一直开着不会轮询，设置页「检查更新」可以手动查。
+- 有新版时：窗口可见 → 页面右下角小提示条；窗口收进托盘 → 原生对话框兜底。
+- `autoDownload = false`：点「立即下载」才在应用内下载；「打开下载页」只打开 GitHub Release；
+  「夸克网盘 / 百度网盘」打开固定分享目录。
 - 下载完提示「立即重启 / 稍后」；选稍后会在下次退出时自动安装（`autoInstallOnAppQuit`）。
 - 检查/下载的任何错误只写日志，**不会影响启动**。
 - 增量更新靠 electron-builder 自动生成的 `.blockmap`，不要手动处理。
 
+### 客户端什么时候能看到更新
+
+**桌面端（electron-updater）**
+
+1. GitHub Release 必须是 **Published**，不能是 draft，也不能是 prerelease。
+2. tag 必须是 `vX.Y.Z`（例如 `v1.1.5`），且版本大于用户当前安装的版本。
+3. Release 资产里必须有 `latest.yml`、`LIZI-Setup-<版本>.exe`、`.exe.blockmap`；
+   `latest.yml` 里的 `version`、`sha512`、`size` 必须和安装包一致。
+4. 用户启动应用 6 秒后自动检查；已经在运行的应用要重启，或去设置页点「检查更新」。
+5. 当前是 `1.1.0` 的用户会看到 `1.1.5`；已经是 `1.1.5` 的用户不会再收到同版本提示。
+
+**安卓端**
+
+1. 必须有一个 **Latest** Release（不能是 draft / prerelease），`releases/latest` 能读到它。
+2. 每次启动 6 秒后查 `api.github.com/repos/woshi32s/liziair/releases/latest`，比较 tag 和本地版本；
+   设置页「检查更新」也能手动查。
+3. 国内网络打不开 `api.github.com` 时会静默失败，用户需要从网盘手动下载新 APK。
+
 ### 发版产物
 
 ```
-dist/LIZI Setup <版本>.exe
-dist/LIZI Setup <版本>.exe.blockmap
+dist/LIZI-Setup-<版本>.exe
+dist/LIZI-Setup-<版本>.exe.blockmap
 dist/latest.yml
-dist/LIZI-Android-<版本>-arm64-v8a-debug.apk
-dist/LIZI-Android-<版本>-x86_64-debug.apk
+dist/LIZI-Android-<版本>-universal.apk
 ```
 
 ---
@@ -168,7 +185,7 @@ dist/LIZI-Android-<版本>-x86_64-debug.apk
 | `build.publish.owner / repo 还是占位符` | 改 `package.json` 里的 owner / repo（现在是 `woshi32s` / `liziair`） |
 | `gh 未登录或不可用` | `gh auth login` |
 | `tag 和版本不一致` | 稳定版 tag 必须是 `v` + `package.json` 的 version |
-| `Android versionName 和 package.json 不一致` | 改 `app/build.gradle` 的 `versionName` |
-| `versionCode ... 对不上` | 按上面的表改 `versionCode` |
-| 打包产物缺失 | 确认 `npm run dist` 成功，`dist/` 里有 `LIZI Setup <版本>.exe` |
+| `Android versionName 和 package.json 不一致` | `app/build.gradle` 应使用 `versionName desktopVersion`，或把字符串改成和 `package.json` 一致 |
+| `versionCode ... 对不上` | `versionCode vCode` 会自动算；写死时按上面的表改 |
+| 打包产物缺失 | 确认 `npm run dist` 成功，`dist/` 里有 `LIZI-Setup-<版本>.exe` |
 | 客户端收不到更新 | 确认 Release 不是 prerelease、资产里有 `latest.yml`、`app-update.yml` 的 owner/repo 正确 |

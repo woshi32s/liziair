@@ -273,7 +273,10 @@ void main() {
       softness: 1,
       silk: 0.35,
       grainAmount: 0.08,
-      grainSize: 1.2,
+      /* 竖屏手机（≤560）用 1.0：1.0 时粗颗粒层权重被 clamp 成 0，只剩 1 物理
+         像素的细噪点。竖屏铺色面板只有 322 CSS 宽，1.2 那层粗颗粒在这个尺寸
+         上会被看成一块块大斑；横屏和桌面保持 1.2，质感不变。 */
+      grainSize: (typeof matchMedia === 'function' && matchMedia('(max-width: 560px)').matches) ? 1 : 1.2,
       grainAnimated: true,
       contrast: 1,
       saturation: 1,
@@ -294,8 +297,8 @@ void main() {
     });
     if (!gl) return null;
 
-    const field = link(gl, FIELD);
-    const composite = link(gl, COMPOSITE);
+    let field = link(gl, FIELD);
+    let composite = link(gl, COMPOSITE);
     if (!field || !composite) {
       gl.getExtension('WEBGL_lose_context')?.loseContext();
       return null;
@@ -304,17 +307,73 @@ void main() {
     container.classList.add('has-grain');
     container.appendChild(canvas);
 
-    const fu = field.uniforms;
-    const cu = composite.uniforms;
-    const vao = gl.createVertexArray();
-    const target = gl.createTexture();
+    let fu = field.uniforms;
+    let cu = composite.uniforms;
+    let vao = gl.createVertexArray();
+    let target = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, target);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    const buffer = gl.createFramebuffer();
+    let buffer = gl.createFramebuffer();
     const fieldSize = { width: 0, height: 0 };
+
+    /* 上下文丢失自愈（2026-11-14）。
+       GPU 把这块上下文收走时，Chromium 会在 canvas 左上角画一个「苦瓜脸」占位
+       图标 —— 手机铺色栏左上角那个小方框就是它。以前这里既没 preventDefault
+       也没监听 restored，掉了就再也回不来，只能换预设重建或整页重载。
+       现在：同意恢复 → 重建程序 / VAO / 纹理 / 帧缓冲 → 按当前尺寸重新分配。 */
+    let contextLost = false;
+    let lostTimer = 0;
+    const buildTarget = () => {
+      target = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, target);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      buffer = gl.createFramebuffer();
+      vao = gl.createVertexArray();
+      fieldSize.width = 0;
+      fieldSize.height = 0;
+    };
+    const onContextLost = (event) => {
+      /* 不 preventDefault 浏览器就不会尝试恢复，占位图标会一直留在那儿 */
+      event.preventDefault();
+      contextLost = true;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      last = 0;
+      /* 兜底：3 秒还没等到 restored 就先把画布藏掉。宁可只剩底下那层 CSS 渐变，
+         也别让占位图标在铺色栏左上角挂着 —— 用户看到的就是它。 */
+      clearTimeout(lostTimer);
+      lostTimer = setTimeout(() => {
+        if (contextLost) canvas.style.display = 'none';
+      }, 3000);
+    };
+    const onContextRestored = () => {
+      clearTimeout(lostTimer);
+      contextLost = false;
+      field = link(gl, FIELD);
+      composite = link(gl, COMPOSITE);
+      if (!field || !composite) {
+        /* 还是建不起来：藏掉 canvas，让容器露出底下的 CSS 渐变，别再显示占位图标。
+           保持 contextLost，draw/wake 都不会再跑，避免拿 null 的程序去画。 */
+        canvas.style.display = 'none';
+        contextLost = true;
+        return;
+      }
+      canvas.style.display = '';
+      fu = field.uniforms;
+      cu = composite.uniforms;
+      buildTarget();
+      paletteKey = '';
+      last = 0;
+      resize();
+      wake();
+    };
+    canvas.addEventListener('webglcontextlost', onContextLost, false);
+    canvas.addEventListener('webglcontextrestored', onContextRestored, false);
 
     const palette = (Array.isArray(opts.colors) && opts.colors.length ? opts.colors : DEFAULT_COLORS).slice(0, MAX_COLORS);
     const settings = {
@@ -398,6 +457,7 @@ void main() {
     };
 
     const draw = () => {
+      if (contextLost) return;         // 上下文丢了：画不出东西，等 restored 重建
       const aspect = view.width / view.height;
       syncPalette();
       gl.bindVertexArray(vao);
@@ -442,7 +502,18 @@ void main() {
     const resize = () => {
       view.width = Math.max(1, container.clientWidth);
       view.height = Math.max(1, container.clientHeight);
-      view.ratio = Math.min(settings.dpr || window.devicePixelRatio || 1, 2);
+      /* 上下文丢了就没法 texImage2D：尺寸先记着，restored 之后统一按新尺寸分配 */
+      if (contextLost) return;
+      /* 背板按「物理像素」画：DPR × 页面缩放（2026-11-14）。
+         /m 横屏把 width=1280 的布局整体缩到 ~0.62，DPR 3.5 实际只有 ~2.17 个
+         设备像素 / CSS 像素；竖屏是 1:1 的 3.5。以前一律夹在 2，横屏刚好够，
+         竖屏就等于 2 个背板像素被拉成 3.5 个物理像素 —— 最细那层 1 像素颗粒
+         变成 1.75 像素的软方块。按真实物理比例画两种方向都 1:1；grainSize 也
+         随 ratio 乘，粗颗粒的物理尺度不变，所以只变清楚、不变粗。上限 3.5 防
+         高 DPR 桌面的显存/填充率抖动。 */
+      const vvScale = window.visualViewport && window.visualViewport.scale ? window.visualViewport.scale : 1;
+      const want = (window.devicePixelRatio || 1) * vvScale;
+      view.ratio = Math.min(settings.dpr || want, 3.5);
       canvas.width = Math.max(1, Math.round(view.width * view.ratio));
       canvas.height = Math.max(1, Math.round(view.height * view.ratio));
       const width = Math.max(1, Math.round(canvas.width / 2));
@@ -508,7 +579,7 @@ void main() {
 
     const frame = (now) => {
       raf = 0;
-      if (!alive || !visible || paused || document.hidden) return;
+      if (!alive || !visible || paused || contextLost || document.hidden) return;
       const dt = last ? clamp((now - last) / 1000, 0.001, 0.05) : 1 / 60;
       last = now;
       if (!reduce) time += dt * settings.speed * 0.16;
@@ -527,7 +598,9 @@ void main() {
     };
 
     function wake() {
-      if (!raf && alive && visible && !paused && !document.hidden) raf = requestAnimationFrame(frame);
+      if (!raf && alive && visible && !paused && !contextLost && !document.hidden) {
+        raf = requestAnimationFrame(frame);
+      }
     }
 
     const locate = (event) => {
@@ -565,6 +638,11 @@ void main() {
 
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
+    /* 页面缩放（横竖屏切换时 visualViewport.scale 会从 1 变 0.62 再变回）
+       不一定改变容器 CSS 尺寸，ResizeObserver 可能不触发，单独补一条。 */
+    const vv = window.visualViewport;
+    const onViewportResize = () => resize();
+    if (vv) vv.addEventListener('resize', onViewportResize);
     const intersection = new IntersectionObserver((entries) => {
       visible = entries.some((entry) => entry.isIntersecting);
       if (visible) { last = 0; wake(); }
@@ -600,15 +678,19 @@ void main() {
         cancelAnimationFrame(raf);
         resizeObserver.disconnect();
         intersection.disconnect();
+        if (vv) vv.removeEventListener('resize', onViewportResize);
         window.removeEventListener('pointermove', onPointerMove);
         window.removeEventListener('pointerdown', onPointerDown);
         document.documentElement.removeEventListener('pointerleave', onPointerLeave);
         document.removeEventListener('visibilitychange', onVisibility);
         gl.deleteTexture(target);
         gl.deleteFramebuffer(buffer);
+        canvas.removeEventListener('webglcontextlost', onContextLost);
+        canvas.removeEventListener('webglcontextrestored', onContextRestored);
+        clearTimeout(lostTimer);
         gl.deleteVertexArray(vao);
-        gl.deleteProgram(field.program);
-        gl.deleteProgram(composite.program);
+        if (field) gl.deleteProgram(field.program);
+        if (composite) gl.deleteProgram(composite.program);
         gl.getExtension('WEBGL_lose_context')?.loseContext();
         canvas.remove();
         container.classList.remove('has-grain');

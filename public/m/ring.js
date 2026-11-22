@@ -1,7 +1,7 @@
 /**
- * LIZI · 手机大厅 · 平面跑马带 + 按住展开大环
+ * LIZI · 手机大厅 · 平面跑马带 + 按住展开螺旋环
  * --------------------------------------------------------------------------
- * 运动手感照电脑版 hall/circular-carousel.js（ReactBits CircularCarousel，
+ * 圆柱运动手感照电脑版 hall/circular-carousel.js（ReactBits CircularCarousel，
  * cylinder 预设），数学原样搬过来：
  *   step        = min(360/n, 2·asin(pitch/(2R)))
  *   pitch       = cardW × 1.14
@@ -10,13 +10,25 @@
  *   P(透视)     = 3.2R
  *   camera      = translateZ(-R) rotateX(-5°) scale(...)
  *   ring        = rotateY(angle)
- *   slot        = rotateY(i*step) translateZ(R)
+ *   slot        = rotateY(i*step) translate3d(0, lift, R) scale(depth)
  *   拖动        = 每像素 180/(πR) × 1.45 度
  *   角速度      = 最近 110ms 采样，松手限幅 ±1400°/s
  *   惯性        = τ = 1.08s，target = 离 (angle + v·τ·0.55) 最近的槽位居中角
  *   弹簧        = 118，阻尼 2√118，1/240s 步长
  *   只露正面    = facing ≤.06 藏掉，.06–.30 用 smoothstep 淡出
  *   松手保持    = 1s 后再收
+ *
+ * 螺旋（2026-11-13）：把圆柱绕 Y 的每个槽位再叠一个按角度走的垂直位移。
+ *   world  = wrap(base + angle)
+ *   layerY = cardH / 3            —— 相邻槽位抬 1/3 卡高，正好三层错开
+ *   lift   = layerY · world/step  —— world>0 的一侧在下，拖右→左时它升到正面
+ *   depth  = 1 − .05 · min(2, |world|/step)
+ * 高度只由 world 角决定，所以卡片绕过背面时高度跟着绕回；背面 slot 已
+ * visibility:hidden，接缝看不见。正面半圈永远是一条斜楼梯；拖右→左时
+ * 后面的卡持续从右下升到正面再升向左上，反向拖动则沿同一条楼梯下行。
+ * 层距、抬升量全部由 cardW/cardH/vh 推导，没有写死像素。
+ * shade 仍用每张卡自带的 .mring__shade：前层 0，中层 ~.12，后层 ~.36，
+ * 不引入 filter / backdrop-filter。
  *
  * 手机这边的交互：跑马带本身可以正常横拖着看，展开环形是一个明确的上滑动作：
  *   平面跑马带：自动向左走 · 点卡片播放
@@ -364,6 +376,10 @@
       const vh = Math.max(1, window.innerHeight);
       const cardW = clamp(vw * 0.24, 84, 112);
       const cardH = cardW + 28;
+      /* 螺旋层距：相邻槽位 1/3 卡高。两层（±2 槽）就是可见后层的最高点，
+         中心高度要给它让位，保证整条楼梯落在顶栏和底部提示之间。 */
+      const layerY = cardH / 3;
+      const spiralAmp = layerY * 2;
       const pitch = cardW * 1.14;
       const edgePad = 14;
       const Rview = (vw / 2 - edgePad - cardW / 2) / 0.762;
@@ -383,9 +399,11 @@
       const tiltDrop = R * Math.sin(5 * TO_RAD);
       let cx = clamp(rect.left + rect.width / 2, 0, vw);
       let cy = rect.top + rect.height / 2;
-      cy = Math.max(cy, topEdge + cardH * 0.55 + 12);
-      cy = Math.min(cy, vh - cardH * 0.55 - 52 - tiltDrop);
-      if (cy < topEdge + cardH * 0.5) cy = topEdge + cardH * 0.5;
+      const minCy = topEdge + cardH * 0.55 + 12 + spiralAmp;
+      const maxCy = vh - cardH * 0.55 - 52 - tiltDrop - spiralAmp;
+      cy = Math.max(cy, minCy);
+      cy = Math.min(cy, maxCy);
+      if (cy < minCy) cy = minCy;
 
       const overlay = document.createElement('div');
       overlay.className = 'mring';
@@ -431,7 +449,7 @@
       const rm = reduced();
       ring = {
         overlay, view, camera, ringEl, slots,
-        n, len, R, P, step, cardW, cardH, perPixel,
+        n, len, R, P, step, cardW, cardH, layerY, perPixel,
         angle: 0,
         velocity: 0,
         target: null,
@@ -480,7 +498,11 @@
         s.overlay.style.opacity = String(1 - easeInCubic(closeT));
       }
 
-      const R = s.R * (0.42 + 0.58 * entry) * (1 - 0.66 * easeInCubic(closeT));
+      const ringGrow = 0.42 + 0.58 * entry;
+      const closeShrink = 1 - 0.66 * easeInCubic(closeT);
+      const R = s.R * ringGrow * closeShrink;
+      const lift = s.layerY * ringGrow * closeShrink;
+      const stepDeg = s.step || (360 / Math.max(1, s.n));
       const camScale = (0.74 + 0.26 * entry) * (1 - 0.55 * easeInCubic(closeT));
       const angle = s.angle;
 
@@ -503,12 +525,22 @@
 
       for (let i = 0; i < s.slots.length; i++) {
         const slot = s.slots[i];
-        const tf = 'rotateY(' + slot.base.toFixed(3) + 'deg) translateZ(' + R.toFixed(2) + 'px)';
+        const world = wrap(slot.base + angle);
+        /* 螺旋：高度由 world 角决定（不是槽位固定高度）。world 为正的一侧在
+           下方，拖左时它转到 0（正面）再转到负值（上方），就是“从后面升起”。
+           背面（|world|>90°）高度继续线性走，但那时 slot 已 visibility:hidden，
+           所以接缝看不见。translate3d 的 y 与 rotateY 同轴，叠加顺序安全。 */
+        const absLayer = Math.abs(world) / stepDeg;
+        const y = lift * (world / stepDeg);
+        const depthScale = 1 - 0.05 * Math.min(2, absLayer);
+        const tf =
+          'rotateY(' + slot.base.toFixed(3) + 'deg) ' +
+          'translate3d(0,' + y.toFixed(2) + 'px,' + R.toFixed(2) + 'px) ' +
+          'scale(' + depthScale.toFixed(3) + ')';
         if (tf !== slot.tf) {
           slot.el.style.transform = tf;
           slot.tf = tf;
         }
-        const world = wrap(slot.base + angle);
         const facing = Math.cos(world * TO_RAD);
         const hidden = facing <= 0.06;
         const vis = hidden ? 'hidden' : '';
@@ -532,7 +564,10 @@
           slot.op = op;
         }
         if (!hidden) {
-          const shadeOp = (0.55 * Math.pow((1 - facing) / 2, 1.25)).toFixed(3);
+          /* 按“层”压暗：正面 0、相邻槽 ~.12、再后一层 ~.36（封顶 .55）。
+             只用 shade 的 opacity，不做 filter；三层深浅一眼能分。 */
+          const t = Math.min(2.4, absLayer);
+          const shadeOp = Math.min(0.55, 0.06 * t + 0.06 * t * t).toFixed(3);
           if (shadeOp !== slot.shadeOp) {
             if (slot.shadeEl) slot.shadeEl.style.opacity = shadeOp;
             slot.shadeOp = shadeOp;

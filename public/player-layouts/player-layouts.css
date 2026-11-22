@@ -348,7 +348,10 @@ body.is-now.now-layout-06 #view-now .now__transport {
 body.is-now.now-layout-06 #view-now .ntr-side { flex: 0 0 auto; gap: 8px; }
 body.is-now.now-layout-06 #view-now .now__lyrics {
   position: absolute;
-  inset: max(24vh, 150px) 18vw 16vh;
+  top: max(24vh, 150px);
+  right: 150px;
+  bottom: 18vw;
+  left: 16vh;
   height: auto;
   display: flex;
   flex-direction: column;
@@ -414,7 +417,7 @@ body.is-now.now-layout-06 #view-now .ly__main { transform-origin: center; }
   }
   body.is-now[class*="now-layout-"] #view-now .disc {
     position: static !important;
-    inset: auto !important;
+    top: auto;    right: !important;    bottom: auto;    left: !important;
     margin: 0 !important;
     width: calc(68px * var(--diy-cover, 1)) !important;
     height: calc(68px * var(--diy-cover, 1)) !important;
@@ -433,7 +436,7 @@ body.is-now.now-layout-06 #view-now .ly__main { transform-origin: center; }
   body.is-now[class*="now-layout-"] #view-now .disc::after { display: none !important; }
   body.is-now[class*="now-layout-"] #view-now .now__meta {
     position: static !important;
-    inset: auto !important;
+    top: auto;    right: !important;    bottom: auto;    left: !important;
     transform: none !important;
     text-align: left !important;
     width: auto !important;
@@ -454,7 +457,7 @@ body.is-now.now-layout-06 #view-now .ly__main { transform-origin: center; }
   body.is-now[class*="now-layout-"] #view-now .now__sub { font-size: 12px !important; }
   body.is-now[class*="now-layout-"] #view-now .now__transport {
     position: static !important;
-    inset: auto !important;
+    top: auto;    right: !important;    bottom: auto;    left: !important;
     transform: none !important;
     width: auto !important;
     max-width: none !important;
@@ -482,7 +485,7 @@ body.is-now.now-layout-06 #view-now .ly__main { transform-origin: center; }
 
   body.is-now[class*="now-layout-"] #view-now .now__lyrics {
     position: static !important;
-    inset: auto !important;
+    top: auto;    right: !important;    bottom: auto;    left: !important;
     width: auto !important;
     height: auto !important;
     flex: 1 1 auto !important;

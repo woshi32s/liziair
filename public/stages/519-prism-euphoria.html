@@ -184,6 +184,33 @@
     transition: opacity 1.4s ease;
   }
   body.live #boot { opacity: 0; }
+  /* 2026-11-16 自定义背景 / 只保留字：
+     所有新规则都挂在 body 的动态类上，默认这些类都不存在，
+     所以原形态的层级、动画、默认背景观感与改动前完全一致。
+     自定义图片走独立 DOM 图层而不是塞进 WebGL：
+     图片不必经过纹理生命周期，也不会和 /api/wallpaper 的纹理状态互相覆盖，
+     同时可以整块停掉 GL 渲染。
+     2026-11-16 起支持视频和四角取景：媒体元素由 JS 动态创建（img/video），
+     尺寸/偏移完全由 Crop 公式写入 inline style，所以这里不能再写
+     width/height 100% 或 object-fit（会和裁切公式打架）。 */
+  #customBg {
+    position: fixed; inset: 0; z-index: 0; overflow: hidden;
+    display: none; background: #04060d; pointer-events: none;
+  }
+  #customBg .bg-media {
+    position: absolute; display: block;
+  }
+  body.bg-custom #customBg { display: block; }
+  /* 自定义图片是纯 DOM 背景：极光、棱镜、泛光所在的 #cv3d 整块不需要 */
+  body.bg-custom #cv3d { display: none !important; }
+  /* 「只保留字」：非歌词元素一律不显示。
+     本机壁纸模式要保留 #cv3d 输出壁纸，只把压暗层、光尘、歌名、
+     启动字和空态提示隐掉；棱镜/泛光在 renderGL 里单独跳过。 */
+  body.lyrics-only #scrim,
+  body.lyrics-only #fx,
+  body.lyrics-only #meta,
+  body.lyrics-only #boot,
+  body.lyrics-only #empty { display: none !important; }
   @media (max-aspect-ratio: 3/4) {
     #lyricInner { width: 88vw; margin-top: 6vh; }
     .line { font-size: clamp(22px, 6.4vw, 44px); letter-spacing: 0.03em; }
@@ -197,6 +224,9 @@
 </style>
 </head>
 <body>
+<!-- 2026-11-16 自定义背景图层：默认 display:none，只有 body.bg-custom 时才显示。
+     图片/视频元素由 JS 按 bgImageKind 动态创建，同一个容器换媒体类型时先销毁旧的 -->
+<div id="customBg" aria-hidden="true"></div>
 <canvas id="cv3d"></canvas>
 <div id="scrim"></div>
 <canvas id="fx"></canvas>
@@ -283,7 +313,20 @@ var LZ = {
      dummy 常驻 1x1 兜底，保证 uWallOn=0 时采样器也有合法绑定；
      failed 用来区分「没试过」和「试过但失败」，失败后下次开关才允许重试，不做轮询；
      timer 保存本轮 8s 超时句柄，关闭/重建时能及时清掉 */
-  wall: { on: true, tex: null, dummy: null, video: null, loading: false, failed: false, token: 0, aspect: 1, timer: 0 }
+  wall: { on: true, tex: null, dummy: null, video: null, loading: false, failed: false, token: 0, aspect: 1, timer: 0 },
+  /* 2026-11-16 背景来源 / 只保留字：
+     source 是面板三选一（default/wallpaper/custom），默认 default；
+     image 是宿主上传的图片/视频 URL；only 表示当前是否进入「只保留字」；
+     noGl 表示 #cv3d 已被整块隐藏（自定义媒体模式），主循环据此停掉 GL；
+     wallForced 记录本机壁纸档是否由本功能临时打开了壁纸开关，
+     退出该档时把 wallBkg 恢复成用户原来的选择。
+     kind 缺省按 image 处理，crop 缺省整幅（{0,0,1,1} = 视觉上铺满舞台）；
+     media 是当前挂载的 img/video 元素，切换类型或清空 URL 时销毁。 */
+  bg: {
+    source: "default", image: "", kind: "image",
+    crop: { x: 0, y: 0, w: 1, h: 1 }, media: null,
+    only: false, noGl: false, wallForced: false, wallPrevOn: true
+  }
 };
 
 window.__stage = function () {
@@ -310,13 +353,35 @@ window.__stagePanel = {
     /* 默认开：没装 WE（Android/iOS）时接口 501/失败，加载会静默跳过、不改观感；
        有壁纸时整块背景直接换成当前壁纸（视频/图片），中间的棱镜/文字层保持不动。 */
     { key: "wallBkg", label: "本机壁纸背景", type: "switch", def: true },
+    /* 2026-11-16 背景来源三选一。def 必须是 default：
+       默认档 = 完全维持原有形态（壁纸开关 wallBkg 继续按原逻辑生效），
+       只有用户主动选「本机壁纸」或「自定义图片」才进入「只保留字」模式。 */
+    { key: "bgSource", label: "背景来源", type: "select", def: "default",
+      options: [
+        { v: "default", t: "默认" },
+        { v: "wallpaper", t: "本机壁纸（只留字）" },
+        { v: "custom", t: "自定义媒体（只留字）" }
+      ] },
+    /* 2026-11-16 上传项：协议照抄 669-imessage-glass.html 的 wallImg。
+       这里只负责接收宿主压好的 URL，是否启用由图上的「背景来源」决定。
+       默认空字符串 = 未上传，因此该功能默认关闭。
+       type:'media' 表示宿主还会推送 bgImageKind（image/video）和
+       bgImageCrop（归一化取景框）两个伴随键。 */
+    { key: "bgImage", label: "自定义背景图片", type: "media", def: "" },
     { key: "coverPalette", label: "封面取色背景", type: "switch", def: false }
   ]
 };
 
-/* Android 没有 Wallpaper Engine：面板不出现壁纸项，运行时不请求 /api/wallpaper */
+/* Android 没有 Wallpaper Engine：面板不出现壁纸项，运行时不请求 /api/wallpaper。
+   2026-11-16：只移除「本机壁纸」档，保留「默认」和「自定义图片」——
+   自定义背景是手机也要能用的能力，不能被 __liziAndroid 过滤掉。 */
 if (window.__liziAndroid) {
   window.__stagePanel.items = window.__stagePanel.items.filter(function (it) { return it.key !== "wallBkg"; });
+  window.__stagePanel.items.forEach(function (it) {
+    if (it.key === "bgSource" && Array.isArray(it.options)) {
+      it.options = it.options.filter(function (o) { return o.v !== "wallpaper"; });
+    }
+  });
 }
 
 /* ---- 统一「震动」开关：宿主在 ready 后同步读取 ---- */
@@ -795,8 +860,218 @@ function loadWallpaper(force) {
     .catch(function () { finish(null); });
 }
 
+/* 2026-11-16 背景来源落地：
+   default 档什么都不改（原形态，包括 wallBkg 的原有行为）；
+   wallpaper 档复用 /api/wallpaper 的 uWallTex/uWallOn 管线，并进入「只保留字」；
+   custom 档用 #customBg 的 DOM 图层显示上传的图片，同样「只保留字」。
+   只有 source=custom 且确实有媒体时才进入自定义模式——没传图时保持原形态。 */
+
+/* 2026-11-16 取景框归一化：宿主传 {x,y,w,h}，全部限制在 0..1，
+   w/h 不允许为 0（否则 width/height 会算成 Infinity）。
+   缺省/非法值一律退回 {0,0,1,1}，保证与旧版「铺满舞台」一致。 */
+function normCrop(v) {
+  if (!v || typeof v !== "object") return { x: 0, y: 0, w: 1, h: 1 };
+  var x = Number(v.x), y = Number(v.y), w = Number(v.w), h = Number(v.h);
+  if (!isFinite(x) || !isFinite(y) || !isFinite(w) || !isFinite(h)) {
+    return { x: 0, y: 0, w: 1, h: 1 };
+  }
+  return {
+    x: clamp01(x), y: clamp01(y),
+    w: clamp(w, 0.001, 1), h: clamp(h, 0.001, 1)
+  };
+}
+
+/* 2026-11-16 裁切落点（cover 语义，与 629/631 的 UV 采样一致）：
+   取景区先等比缩放到刚好盖住舞台，多出来的部分居中裁掉，绝不拉伸变形。
+   取景框宽高比 == 舞台宽高比时，数学上等于 width=W/w、left=-x*W/w 的旧公式，
+   这里走同一分支保证像素级一致；Crop 默认 {0,0,1,1} 时就是原图 cover 铺满。
+   源尺寸未知（还没 loadedmetadata）时先退回铺满公式，媒体就绪后会再算一次。 */
+function applyBgCrop() {
+  var B = LZ.bg, m = B && B.media;
+  if (!m) return;
+  var c = B.crop || { x: 0, y: 0, w: 1, h: 1 };
+  var w = (c.w > 0) ? c.w : 1;
+  var h = (c.h > 0) ? c.h : 1;
+  var W = (LZ.W > 0) ? LZ.W : (window.innerWidth || 1);
+  var H = (LZ.H > 0) ? LZ.H : (window.innerHeight || 1);
+  var SW = 0, SH = 0;
+  if (m.tagName === "VIDEO") {
+    SW = m.videoWidth || 0; SH = m.videoHeight || 0;
+  } else {
+    SW = m.naturalWidth || 0; SH = m.naturalHeight || 0;
+  }
+  var cw = w * SW, ch = h * SH;
+  m.style.position = "absolute";
+  if (SW > 0 && SH > 0 && cw > 0 && ch > 0 &&
+      Math.abs(cw / ch - W / H) > 1e-9) {
+    /* 取景框与舞台比例不一致：cover 缩放 + 取景区中心对齐舞台中心 */
+    var s = Math.max(W / cw, H / ch);
+    m.style.width = (SW * s) + "px";
+    m.style.height = (SH * s) + "px";
+    m.style.left = (W / 2 - (c.x + w / 2) * SW * s) + "px";
+    m.style.top = (H / 2 - (c.y + h / 2) * SH * s) + "px";
+  } else {
+    /* 比例一致（正常情况，宿主锁了取景框比例）：与旧公式逐像素相同 */
+    m.style.width = (W / w) + "px";
+    m.style.height = (H / h) + "px";
+    m.style.left = (-c.x * W / w) + "px";
+    m.style.top = (-c.y * H / h) + "px";
+  }
+}
+
+/* 2026-11-16 销毁媒体层：视频必须 pause + 清 src + load() 三步，
+   否则 WebView / Chromium 的 blob 解码器会一直挂着不释放。 */
+function disposeBgMedia() {
+  var B = LZ.bg, m = B && B.media;
+  if (!m) return;
+  try {
+    if (m.tagName === "VIDEO") {
+      try { m.pause(); } catch (e) {}
+      m.removeAttribute("src");
+      try { m.load(); } catch (e) {}
+    } else {
+      m.removeAttribute("src");
+    }
+  } catch (e) {}
+  if (m.parentNode) m.parentNode.removeChild(m);
+  B.media = null;
+}
+
+/* 2026-11-16 按 kind 建元素。同一个 URL + 同一个 kind 不重建、不重播；
+   只有 URL 或媒体类型变化才换节点，避免宿主重复推送时视频反复从头播。 */
+function ensureBgMedia() {
+  var B = LZ.bg;
+  var box = document.getElementById("customBg");
+  if (!box || !B.image) return null;
+  var kind = (B.kind === "video") ? "video" : "image";
+  var m = B.media;
+  if (m && (m.__kind !== kind || m.__url !== B.image)) {
+    disposeBgMedia();
+    m = null;
+  }
+  if (!m) {
+    if (kind === "video") {
+      m = document.createElement("video");
+      m.className = "bg-media";
+      m.loop = true;
+      m.muted = true;
+      m.autoplay = true;
+      m.playsInline = true;
+      m.setAttribute("playsinline", "");
+      m.setAttribute("webkit-playsinline", "");
+      m.preload = "auto";
+      m.__kind = "video";
+      m.__url = B.image;
+      /* 元数据到了才知道真实分辨率，cover 裁切必须重算一次 */
+      m.addEventListener("loadedmetadata", applyBgCrop);
+      box.appendChild(m);
+      m.src = B.image;
+      /* 自动播放可能被 WebView 策略拒绝：必须吃掉 promise，不能留未捕获错误 */
+      try {
+        var pr = m.play();
+        if (pr && pr.catch) pr.catch(function () {});
+      } catch (e) {}
+    } else {
+      m = document.createElement("img");
+      m.className = "bg-media";
+      m.alt = "";
+      m.__kind = "image";
+      m.__url = B.image;
+      /* 加载完成才知道 naturalWidth/Height，cover 裁切必须重算一次 */
+      m.addEventListener("load", applyBgCrop);
+      box.appendChild(m);
+      m.src = B.image;
+    }
+    B.media = m;
+  }
+  /* 同一个 URL 的重复推送到这里只会重算裁切，绝不重新 play() */
+  applyBgCrop();
+  return m;
+}
+
+function applyBgMode() {
+  var B = LZ.bg;
+  if (!B) return;
+  var src = B.source || "default";
+  /* Android 没有 Wallpaper Engine：即使旧存储里残留 wallpaper 档，也按默认处理 */
+  if (window.__liziAndroid && src === "wallpaper") src = "default";
+  var customOn = (src === "custom" && !!B.image);
+  var wallOn = (src === "wallpaper");
+  var only = customOn || wallOn;
+
+  B.only = only;
+  B.noGl = customOn;
+  document.body.classList.toggle("lyrics-only", only);
+  document.body.classList.toggle("bg-custom", customOn);
+
+  /* 2026-11-16 自定义媒体（图片或视频）和 wallpaper 档互斥：
+     只有 custom 档挂载，切到 default/wallpaper 立刻销毁，
+     停止解码并释放 blob。 */
+  if (customOn) {
+    ensureBgMedia();
+  } else {
+    disposeBgMedia();
+  }
+
+  /* 本机壁纸档：临时打开已有的壁纸开关；记下用户原来的开关，退出时恢复。
+     纹理通常已经由原逻辑加载好，这里只在缺失/失败时补一次重读。 */
+  if (wallOn) {
+    if (!B.wallForced) {
+      B.wallPrevOn = !!LZ.wall.on;
+      B.wallForced = true;
+    }
+    if (!LZ.wall.on) {
+      LZ.wall.on = true;
+      applyWallUniforms();
+      loadWallpaper(true);
+    } else if (!LZ.wall.tex && !LZ.wall.loading) {
+      loadWallpaper(true);
+    }
+  } else if (B.wallForced) {
+    B.wallForced = false;
+    var prev = B.wallPrevOn !== false;
+    if (LZ.wall.on !== prev) {
+      LZ.wall.on = prev;
+      if (!prev) {
+        cancelWallLoad();
+        releaseWallMedia();
+      } else {
+        applyWallUniforms();
+        if (!LZ.wall.tex) loadWallpaper(true);
+      }
+    }
+  }
+}
+
 /* 宿主只发 key/value，持久化在宿主那边；这里只把值落到运行状态 */
 function applySetting(key, value) {
+  if (key === "bgSource") {
+    var src = (typeof value === "string" && value) ? value : "default";
+    if (LZ.bg.source === src) { applyBgMode(); return; }
+    LZ.bg.source = src;
+    applyBgMode();
+    return;
+  }
+  if (key === "bgImage") {
+    LZ.bg.image = (typeof value === "string") ? value : "";
+    applyBgMode();
+    return;
+  }
+  /* 2026-11-16 伴随键：kind 缺省按 image，crop 缺省整幅。
+     重复推送同一个值时 ensureBgMedia 不会重建节点。 */
+  if (key === "bgImageKind") {
+    var bk = (value === "video") ? "video" : "image";
+    if (LZ.bg.kind !== bk) {
+      LZ.bg.kind = bk;
+      applyBgMode();
+    }
+    return;
+  }
+  if (key === "bgImageCrop") {
+    LZ.bg.crop = normCrop(value);
+    applyBgCrop();
+    return;
+  }
   if (key === "coverPalette") {
     var cp = !!value;
     if (LZ.coverPalette === cp) return;
@@ -853,6 +1128,8 @@ function resize() {
   fx2d.setTransform(LZ.DPR, 0, 0, LZ.DPR, 0, 0);
 
   if (LZ.glReady) resizeGL();
+  /* 2026-11-16 舞台尺寸变了要按新 W/H 重算媒体裁切，不能只在 init 算一次 */
+  applyBgCrop();
   seedMotes();
 }
 window.addEventListener("resize", resize);
@@ -1830,6 +2107,16 @@ function renderGL(dt, time) {
   LZ.finalUniforms.uBeat.value = beatU;
 
   updateCamera(dt, time);
+
+  /* 2026-11-16 「只保留字」+ 本机壁纸：用户原话是「只保留字的，不用保留其他元素」，
+     所以棱镜、泛光、拷贝/最终合成全部跳过，只把壁纸 shader 直接输出到屏幕。
+     自定义图片档 #cv3d 已隐藏，主循环不会进 renderGL，不冲突。
+     如果以后想保留棱镜，删掉这个分支即可（body.lyrics-only 仍会隐藏界面元素）。 */
+  if (LZ.bg && LZ.bg.only) {
+    quadPass(LZ.bgMat, null);
+    return;
+  }
+
   updatePrisms(dt, time);
 
   quadPass(LZ.bgMat, LZ.rtBg);
@@ -1867,7 +2154,10 @@ function applyLyricTilt(time) {
   var inner = LZ.innerEl;
   if (!inner) return;
   var yaw, pitch;
-  if (LZ.glReady) {
+  /* 2026-11-16 自定义图片档 #cv3d 已隐藏：此时相机不再逐帧更新，
+     继续读 LZ.camTheta 会得到冻结的倾角。改走非 GL 分支，
+     既不会报错也不会抖动，歌词仍有轻微的独立倾斜。 */
+  if (LZ.glReady && !(LZ.bg && LZ.bg.noGl)) {
     yaw = Math.sin(LZ.camTheta) * (RM ? 1.5 : 5.5);
     pitch = Math.sin(time * 0.23) * 1.0;
   } else {
@@ -1914,7 +2204,9 @@ function frame(now) {
     drawFx(dt, time);
     applyLyricTilt(time);
 
-    if (LZ.glReady) renderGL(dt, time);
+    /* 2026-11-16 自定义图片档整块隐藏了 #cv3d，没必要再跑 GL；
+       默认档 noGl=false，走的仍是原来的路径。 */
+    if (LZ.glReady && !(LZ.bg && LZ.bg.noGl)) renderGL(dt, time);
   } catch (e) {
     reportErr(e);
   }
@@ -1934,5 +2226,6 @@ setTimeout(function () {
   if (!LZ.glReady && !LZ.glFailed) initGL();
 }, 1400);
 </script>
+<script src="assets/we-bg-pick.js"></script>
 </body>
 </html>

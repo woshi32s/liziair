@@ -1,0 +1,108 @@
+/* ==========================================================================
+   五平台红心：播放页底部传输排 + 形态页迷你播放器
+   只作用于 like.js 插入的两个按钮（.like-btn），不覆盖其它 .ntr / .snow__key
+   ========================================================================== */
+
+.like-btn {
+  --like-color: #f43f5e;
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* 作者样式里的 .ntr { display:grid } / .snow__key { display:grid } 会压过 UA 的
+   [hidden]，所以必须自己把隐藏态写回来。 */
+.like-btn[hidden] { display: none !important; }
+
+.like-btn .like-ico { display: block; }
+
+/* 已赞：实心 + 主题红；未赞沿用按钮自己的 currentColor 描边 */
+.like-btn.is-liked { color: var(--like-color); }
+.like-btn.is-liked .like-ico { fill: currentColor; }
+
+/* 请求中：视觉上压暗一点，点击由 JS 的 busy 标记挡掉 */
+.like-btn.is-busy { opacity: .55; cursor: progress; }
+
+.like-btn:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* 传输排的图标尺寸沿用 app.css 的 .ntr .ico（桌面 19px / 手机 24px）。
+   迷你播放器：原按钮 26px、图标 13px；红心用 18px，仍能完整放进圆里 */
+.snow__key--like .like-ico { width: 18px; height: 18px; }
+
+/* 亮色形态条上 app.css 的 #stage-hud.is-on-light .snow__key 特异度更高，
+   会把已赞颜色压回深色；这里点名恢复主题红。 */
+#stage-hud.is-on-light .like-btn.is-liked { color: var(--like-color); }
+
+/* /m 播放页的右簇多一个 #ntr-queue：窄屏放不下三颗 56px 圆钮
+   （494px 以下右侧半栏不足 188px）。红心在窄屏浮到右簇上方
+   （DOM 仍是最后的 .ntr--like），下一首 / 队列保持原尺寸和位置，
+   也避免 flex 把它们一起压小。 */
+@media (max-width: 500px) {
+  body.like-has-queue #view-now .ntr-side--r { position: relative; }
+  body.like-has-queue #view-now .ntr--like {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* 手机触控区 ≥44×44：只放大命中盒，视觉仍是 26px 的圆。
+   · margin: -9px 让 44px 的盒子在 flex 里仍只占 26px，原三个键的位置不动；
+   · top: 9px 把盒子挪进 .snow__body 的可点区域（上方不会再被 overflow 裁掉），
+     图标再 translateY(-9px) 回到和邻居同一条水平线；
+   · 代价是命中盒向左与「下一首」重叠 9px（26px 槽位放 44px 目标的必然结果）。 */
+@media (hover: none), (pointer: coarse) {
+  .snow__key--like {
+    width: 44px;
+    height: 44px;
+    margin: -9px;
+    top: 9px;
+  }
+  .snow__key--like .like-ico { transform: translateY(-9px); }
+}
+
+/* 操作结果小提示：固定底部居中，深底白字，2.4s 后由 like.js 摘掉 .is-on。
+   动画只碰 opacity / transform；不用 backdrop-filter。 */
+.like-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--player-h, 92px) + 16px);
+  z-index: 2000;
+  max-width: min(86vw, 460px);
+  padding: 9px 15px;
+  border-radius: 999px;
+  background: oklch(18% 0.012 270 / 0.94);
+  color: oklch(99% 0 0);
+  font-size: 12.5px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  transition: opacity 180ms var(--ease-out, ease), transform 180ms var(--ease-out, ease);
+  will-change: opacity, transform;
+}
+.like-toast.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* 播放页：让过底部 dock（和 updtoast 同一套避让） */
+body.is-now .like-toast {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--dock-h, 76px) + 16px);
+}
+/* 形态页：底部没有常驻控件，贴近底边即可 */
+body.is-stage .like-toast {
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .like-toast { transition: none; }
+}

@@ -44,10 +44,22 @@
 
   const STATUS_TIMEOUT = 8000;              // 边车冷启动可能 1~3s（最坏 25s 就绪超时），8s 足够
 
-  /** 统一取 JSON：带 AbortSignal 超时，非 2xx 抛错（由各 check 自己 catch） */
+  /* AbortSignal.timeout 要 Chromium ≥ 103。老 WebView 里直接调会抛 TypeError，
+     原来没有兜底 → 所有 check 都变成「未登录」，设置页却用 api.js 的安全版超时，
+     于是出现「设置认登录、大厅不认」。拿不到就退回无超时，外层 app.js 还有 8s 竞速。 */
+  const timeoutSignal = (ms) => {
+    try {
+      if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+        return AbortSignal.timeout(ms);
+      }
+    } catch { /* 老内核 */ }
+    return undefined;
+  };
+
+  /** 统一取 JSON：带超时，非 2xx 抛错（由各 check 自己 catch 并标 error） */
   async function getJson(path) {
     const res = await fetch(path, {
-      signal: AbortSignal.timeout(STATUS_TIMEOUT),
+      signal: timeoutSignal(STATUS_TIMEOUT),
       cache: 'no-store',
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -118,13 +130,25 @@
       last = s;
       return s;
     };
+    /* 酷狗一个账号有普通版 / 概念版两个 appid、两份登录态，/status 会同时给
+       normal / lite，并用 activeProfile 指出当前实际使用哪一版。
+       大厅徽标只看**当前使用的那一版**的 vip，不能用「任一侧有 VIP」冒充：
+       当前版没 VIP、另一版有 VIP 时，正在放歌的确实是没 VIP 的那一版。 */
+    const vipOf = (s, n) => {
+      if (cfg.id !== 'kugou') return n.vip;
+      const active = (s && (s.activeProfile || s.platform)) === 'lite' ? 'lite' : 'normal';
+      const cur = s && s[active];
+      return cur ? !!cur.vip : !!n.vip;
+    };
     return {
       id: cfg.id,
       name: cfg.name,
       accent: cfg.accent,
       async check() {
         let s;
-        try { s = await load(); } catch { return { loggedIn: false }; }
+        /* error:true = 「没查到」而不是「没登录」。app.js 据此当 unknown，
+           不把它写进缓存、也不据此下「还没有登录任何平台」的结论。 */
+        try { s = await load(); } catch { return { loggedIn: false, error: true }; }
         if (!s || !s.loggedIn) return { loggedIn: false };
         /* Spotify 没配 client_id / 读 /me 失败时带 error：视为「未配置」，不进轮播 */
         if (cfg.rejectError && s.error) return { loggedIn: false };
@@ -134,7 +158,7 @@
           key: String(n.uid || n.nickname || cfg.id),
           nickname: n.nickname,
           avatar: n.avatar,
-          vip: n.vip,
+          vip: vipOf(s, n),
         };
       },
       async detail() {
@@ -152,7 +176,7 @@
           bannerKind: 'default',             // 没有背景 → 大厅画默认渐变
           bannerFallback: 'gradient',
           level: 0,
-          vip: n.vip,
+          vip: vipOf(s, n),
           stats: [],                         // 没统计数字：不编
           sign: '',
           meta: [
@@ -172,7 +196,7 @@
       accent: '#c20c0c',
       async check() {
         let s;
-        try { s = await getJson('/api/session'); } catch { return { loggedIn: false }; }
+        try { s = await getJson('/api/session'); } catch { return { loggedIn: false, error: true }; }
         if (!s || !s.loggedIn || !s.profile) return { loggedIn: false };
         const p = s.profile;
         return {

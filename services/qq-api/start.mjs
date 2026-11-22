@@ -149,7 +149,10 @@ function sessionToken(req) {
   return header;
 }
 
-async function cachedProfile(req) {
+/* 从 `.auth-session.json` 里只读地取一次这个 token 对应的公开身份。
+   每次现建 repository：登录可能发生在边车启动之后，文件里才是最新一份会话。
+   不返回 token / musickey，也不碰上游。 */
+async function storedSessionIdentity(req) {
   if (!sessionStoreMod || !storedResolverMod || !process.env.QQ_SESSION_SECRET) return null;
   const token = sessionToken(req);
   if (!token) return null;
@@ -217,10 +220,18 @@ async function publicAvatarByUin(uid) {
 const qqApp = pkg && pkg.default;
 if (qqApp && Array.isArray(qqApp.middleware)) {
   qqApp.middleware.unshift(async (ctx, next) => {
-    if (ctx.path !== '/lizi/cached-profile') return next();
+    if (ctx.path !== '/lizi/cached-profile' && ctx.path !== '/lizi/session-info') return next();
     let out = null;
-    try { out = await cachedProfile(ctx.req); } catch (e) { log('读取失效会话失败：', (e && e.message) || e); }
+    try { out = await storedSessionIdentity(ctx.req); } catch (e) { log('读取失效会话失败：', (e && e.message) || e); }
     ctx.type = 'application/json';
+    /* 主服务 /api/qq/status 在上游超时时用它确认 token 仍在（只读本地文件）。
+       只回存不存在 + 昵称，不回 token，也不为了头像去碰上游。 */
+    if (ctx.path === '/lizi/session-info') {
+      ctx.body = out
+        ? { code: 200, ok: true, hasSession: true, uid: out.uid, nickname: out.nickname }
+        : { code: 200, ok: true, hasSession: false };
+      return;
+    }
     if (!out) { ctx.body = { code: 200, empty: true }; return; }
     if (!out.avatar) {
       try { out.avatar = await publicAvatarByUin(out.uid); } catch { /* 允许为空 */ }

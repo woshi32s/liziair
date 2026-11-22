@@ -60,7 +60,7 @@
 /* 图标粒子画布：盖在真 SVG 上，不接管鼠标 */
 .hall-tools__i .tool-card__ico > .cr-icon {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 2;
   display: block;
   width: 100%;
@@ -72,7 +72,7 @@
 /* ---------- 背景点阵层 ---------- */
 .hall-tools__i > .cr-layer {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 0;
   border-radius: inherit;
   overflow: hidden;
@@ -110,7 +110,7 @@
    浅纸面默认关闭（CONFIG.showGradient = false），保留样式以备切换。 */
 .hall-tools__i > .cr-layer > .cr-gradient {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   pointer-events: none;
   background: linear-gradient(to top, rgba(3, 7, 18, .9), rgba(3, 7, 18, 0) 84%);
 }

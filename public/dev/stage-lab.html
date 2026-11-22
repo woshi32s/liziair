@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>形态检测台 · LIZI</title>
+<link rel="stylesheet" href="/dev/stage-lab.css">
+</head>
+<body class="lab" data-view="desktop">
+
+<header class="lab__head">
+  <div class="lab__titles">
+    <h1>形态检测台</h1>
+    <p>开发用 · 和宿主同一套沙箱（LIZI_STUDIO.srcdoc）· 不加入口</p>
+  </div>
+  <div class="lab__headacts">
+    <span class="lab__badge" id="badge" hidden></span>
+    <a class="lab__btn lab__btn--ghost" href="/">返回播放器</a>
+  </div>
+</header>
+
+<main class="lab__grid">
+  <!-- 左栏：代码 -->
+  <section class="lab__left" aria-label="代码编辑器">
+    <div class="lab__toolbar">
+      <button class="lab__btn" type="button" data-act="sample">载入示例</button>
+      <button class="lab__btn" type="button" data-act="prompt">使用工坊提示词</button>
+      <button class="lab__btn" type="button" data-act="check">校验</button>
+      <button class="lab__btn lab__btn--primary" type="button" data-act="run">运行 / 重跑</button>
+      <button class="lab__btn lab__btn--ghost" type="button" data-act="batch">批量检测</button>
+      <button class="lab__btn lab__btn--ghost" type="button" data-act="open">打开 .html</button>
+      <input type="file" id="file-one" accept=".html,.htm,text/html" hidden>
+      <input type="file" id="file-many" accept=".html,.htm,text/html" multiple hidden>
+    </div>
+    <textarea id="code" class="lab__code" spellcheck="false" placeholder="粘贴 AI 输出的整段 HTML，或把 .html 拖进来"></textarea>
+    <div class="lab__linemsg" id="linemsg" aria-live="polite"></div>
+    <div class="lab__statsline" id="statsline">未运行</div>
+  </section>
+
+  <!-- 右栏：沙箱 + 控制 + 监测 -->
+  <section class="lab__right" aria-label="预览与监测">
+    <div class="lab__stagebar">
+      <div class="lab__views" role="group" aria-label="视口预设">
+        <button class="lab__mini is-on" type="button" data-view="desktop">桌面 16:9</button>
+        <button class="lab__mini" type="button" data-view="phone">手机竖屏 9:16</button>
+        <button class="lab__mini" type="button" data-view="square">方形</button>
+      </div>
+      <div class="lab__live" id="status">等待运行</div>
+    </div>
+
+    <div class="lab__stagewrap" id="stagewrap">
+      <div class="lab__viewport" id="viewport" data-view="desktop"></div>
+    </div>
+
+    <div class="lab__controls">
+      <div class="lab__crow">
+        <button class="lab__mini lab__mini--play" type="button" data-act="play" id="btn-play">暂停</button>
+        <input class="lab__range" type="range" id="seek" min="0" max="40" step="0.01" value="0" aria-label="播放进度">
+        <span class="lab__time" id="time">0.0 / 40.0</span>
+        <label class="lab__num">时长 <input type="number" id="duration" min="1" max="3600" step="1" value="40"></label>
+        <label class="lab__num">BPM <input type="number" id="bpm" min="30" max="300" step="1" value="120"></label>
+        <button class="lab__mini" type="button" data-act="beat">打一拍</button>
+        <button class="lab__mini" type="button" data-act="init">重发 init</button>
+      </div>
+      <div class="lab__crow lab__crow--live">
+        <label class="lab__chk"><input type="checkbox" id="auto-live" checked> live 自动正弦</label>
+        <label class="lab__slide">level <input type="range" id="lv-level" min="0" max="1" step="0.01" value="0.5"></label>
+        <label class="lab__slide">bass <input type="range" id="lv-bass" min="0" max="1" step="0.01" value="0.5"></label>
+        <label class="lab__slide">mid <input type="range" id="lv-mid" min="0" max="1" step="0.01" value="0.5"></label>
+        <label class="lab__slide">treble <input type="range" id="lv-treble" min="0" max="1" step="0.01" value="0.3"></label>
+      </div>
+      <div class="lab__crow lab__crow--lyric">
+        <label class="lab__field">歌名 <input type="text" id="songname" value="示例歌曲" spellcheck="false"></label>
+        <label class="lab__field lab__field--grow">歌词（每行 [mm:ss.xx]歌词，空行忽略）
+          <textarea id="lyrics" spellcheck="false"></textarea>
+        </label>
+      </div>
+    </div>
+
+    <div class="lab__monitor" id="monitor">
+      <div class="lab__mrow">
+        <span>FPS <b id="fps">—</b></span>
+        <span>收到 <b id="rx">0</b></span>
+        <span>发出 <b id="tx">0</b></span>
+        <button class="lab__mini" type="button" data-act="toggle-log" id="toggle-log">消息明细</button>
+        <button class="lab__mini" type="button" data-act="selfcheck">复制自检报告</button>
+        <button class="lab__mini" type="button" data-act="clear-err">清空错误</button>
+      </div>
+      <div class="lab__errs" id="errs" hidden>
+        <ul id="errlist"></ul>
+        <button class="lab__mini" type="button" data-act="copy-err">复制错误</button>
+      </div>
+      <div class="lab__log" id="log" hidden>
+        <ol id="loglist"></ol>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 批量检测：结果表 + 导出 -->
+<section class="lab__batch" id="batch" hidden aria-label="批量检测结果">
+  <header class="lab__batchhead">
+    <b>批量检测</b>
+    <span id="batch-summary">还没开始</span>
+    <div class="lab__batchacts">
+      <button class="lab__mini" type="button" data-act="batch-stop" id="batch-stop" hidden>停止</button>
+      <button class="lab__mini" type="button" data-act="export-md">导出报告 Markdown</button>
+      <button class="lab__mini" type="button" data-act="export-json">导出报告 JSON</button>
+      <button class="lab__mini" type="button" data-act="batch-close">收起</button>
+    </div>
+  </header>
+  <div class="lab__tablewrap">
+    <table class="lab__table">
+      <thead>
+        <tr>
+          <th>文件</th><th>大小</th><th>ready</th><th>ready 用时</th>
+          <th>错误（第一条）</th><th>CSP</th><th>FPS</th><th>结论</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="batch-body"></tbody>
+    </table>
+  </div>
+</section>
+
+<script src="/studio/studio.js"></script>
+<script src="/dev/stage-lab.js"></script>
+</body>
+</html>

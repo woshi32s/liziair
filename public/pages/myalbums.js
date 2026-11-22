@@ -137,8 +137,8 @@ const S = {
   sel: 0, pos: 0, target: 0, vel: 0,
   open: -1, openP: [],                                 // 特写：哪一张开着 + 每张的 0→1 开合进度
   drag: null, raf: 0, bound: false, noteTimer: 0,
-  /* 环境色：当前色相 + 补间 rAF */
-  ambH: NaN, ambRaf: 0,
+  /* 环境色：当前色相 + 补间 rAF + 运动期间挂起的目标色（见 queueAmbient） */
+  ambH: NaN, ambRaf: 0, ambTo: null, ambPending: null,
   /* 指针微动（3D 视差）：tx/ty = 目标角，x/y = 当前角，都是"叠加在 .ma-world 上"的 deg */
   tx: 0, ty: 0, x: 0, y: 0,
 };
@@ -410,19 +410,38 @@ function writeAmbient(h) {
 /** 色相补间（最短弧）；reduce 下直接落值 */
 function fadeAmbient(to) {
   cancelAnimationFrame(S.ambRaf);
-  if (!Number.isFinite(S.ambH) || REDUCE) { S.ambRaf = 0; writeAmbient(to); return; }
+  S.ambTo = to;
+  if (!Number.isFinite(S.ambH) || REDUCE) { S.ambRaf = 0; S.ambTo = null; writeAmbient(to); return; }
   const from = S.ambH;
   const d = ((to - from + 540) % 360) - 180;
-  if (Math.abs(d) < 0.4) { S.ambRaf = 0; writeAmbient(to); return; }
+  if (Math.abs(d) < 0.4) { S.ambRaf = 0; S.ambTo = null; writeAmbient(to); return; }
   const t0 = performance.now();
   const step = (now) => {
     const k = Math.min(1, (now - t0) / AMB.ms);
     const e = 1 - Math.pow(1 - k, 3);
     writeAmbient(from + d * e);
     if (k < 1) S.ambRaf = requestAnimationFrame(step);
-    else { S.ambRaf = 0; writeAmbient(to); }
+    else { S.ambRaf = 0; S.ambTo = null; writeAmbient(to); }
   };
   S.ambRaf = requestAnimationFrame(step);
+}
+
+/* 合成层很忙的时候别去动全屏渐变（2026-11-14 真机快滑闪白/闪黑修复）：
+ *   实测环境色渐变每帧重写 --ambient-color / --ambient-soft 会让整屏渐变反复栅格化，
+ *   和正在运动的 40 张 3D 卡抢合成器，快滑必现整屏闪黑；把色相固定（不写变量）后同样 5 轮快滑 0 帧异常。
+ *   所以拖拽 / 惯性期间只记下目标色相，等这一架停稳（tick 不再排帧）再一次性 420ms 补间。
+ *   静止时的观感不变，只是背景换色比原来晚到「架子停下的那一拍」。 */
+function queueAmbient(hue) {
+  if (S.drag || S.raf) { S.ambPending = hue; return; }
+  S.ambPending = null;
+  fadeAmbient(hue);
+}
+
+function flushAmbient() {
+  if (S.ambPending === null) return;
+  const h = S.ambPending;
+  S.ambPending = null;
+  if (Number.isFinite(h)) fadeAmbient(h);
 }
 
 /** 把当前选中专辑的封面色落到视图上（参考 L1336-1337 是挂在 documentElement 上的）。
@@ -433,7 +452,7 @@ function applyAmbient() {
   const it = S.items[S.sel];
   if (it) {
     const hue = Number(it.dataset.spHue);
-    if (Number.isFinite(hue)) fadeAmbient(hue);
+    if (Number.isFinite(hue)) queueAmbient(hue);
   }
   el.dataset.bg = bgMode;
   const b = el.querySelector('[data-bgbtn]');
@@ -658,6 +677,7 @@ function paint(el) {
 
   paintDrawer(el, shown);
   layout();
+  predecode();                 /* 先让封面位图就位，第一帧栅格化时不会只剩白底 */
   paintSel();
   kick();
 }
@@ -688,6 +708,32 @@ function layout() {
   if (form === 'spine') layoutSpine(); else layoutFlow();
 }
 
+/* 合成层预提升（2026-11-14 真机快滑闪白/闪黑修复）：
+ * 原来 will-change 只在 .ma-stage.is-dragging 时挂上（pages.css）。手指一快滑，
+ * 40 张卡会在指针按下的那一帧被集体提升并重新栅格化 —— 真机上表现为滑动的头
+ * 几帧里有几张卡只剩白底（封面内容没栅格出来）、甚至整块舞台没绘制。
+ * 现在改成「按距离常驻」：离当前位置 ±PROMOTE_R 格以内（远大于一屏可见范围）
+ * 的卡一直带着 will-change，进入视野前就已经是合成层，拖动开始不再改任何合成属性。
+ * 只在跨越阈值时写一次，不在每帧反复改。 */
+const PROMOTE_R = 6;
+function promote(it, ad) {
+  const near = ad <= PROMOTE_R;
+  if (it.__near !== near) {
+    it.__near = near;
+    it.style.willChange = near ? 'transform' : '';
+  }
+}
+
+/** 封面预解码：让第一帧栅格化时位图已经在内存里，而不是边滑边解码。
+ *  decode() 对已解码的图立即 resolve，重复调用代价可以忽略；
+ *  只在新 img（DOM 刚重建 / 换了大图）时调，见 paint() / applyForm()。 */
+function predecode() {
+  if (!S.world) return;
+  for (const im of S.world.querySelectorAll('img')) {
+    if (im.decode) im.decode().catch(() => { /* 解码失败交给 error 占位逻辑 */ });
+  }
+}
+
 /* ---- 3a. 正面 Cover Flow（原来那版，一字未改）----
  *    x = (i - pos) * gap
  *    z = z0 - |i - pos| * dz        中间那张 z0 > 0（离观众最近，且 ≠0）
@@ -700,6 +746,7 @@ function layoutFlow() {
     const d = i - S.pos;
     const ad = Math.abs(d);
     const it = S.items[i];
+    promote(it, ad);
     const ry = -Math.tanh(d * 0.85) * M.fan;
     it.style.transform =
       `translate3d(${(d * M.gap).toFixed(2)}px, 0px, ${(M.z0 - ad * M.dz).toFixed(2)}px) ` +
@@ -750,6 +797,7 @@ function layoutSpine() {
     const d = i - S.pos;
     const ad = Math.abs(d);
     const it = S.items[i];
+    promote(it, ad);
     const shelfRy = base + Math.tanh(d * REF.damp) * M.sfan;   /* 参考 shelfRotateY */
     const ry = shelfRy * (1 - open) + CLOSE.angle * open;      /* 参考 L1076（角度换成 -18°） */
     const rad = (shelfRy * Math.PI) / 180;                     /* 参考 L1081：rad 用的是架子角 */
@@ -870,6 +918,7 @@ function tick() {
   }
   layout();
   if (moving || S.drag) S.raf = requestAnimationFrame(tick);
+  else flushAmbient();                 /* 停稳了才让背景补间追上选中色 */
 }
 
 /* ---------------- 特写：展开 / 收回 ---------------- */
@@ -940,6 +989,9 @@ function bind(el) {
     if (!S.items.length) return;
     S.drag = { x: e.clientX, from: S.pos, moved: 0, px: e.clientX, t: performance.now() };
     S.vel = 0;
+    /* 正在补间的背景色立刻刹车，挂起到停稳后再补完：手指一落下就不再整屏刷渐变 */
+    if (S.ambRaf) { cancelAnimationFrame(S.ambRaf); S.ambRaf = 0; }
+    if (S.ambTo != null) S.ambPending = S.ambTo;
     S.tx = 0; S.ty = 0;                       /* 拖拽期间暂停微动，避免两套手势打架 */
     stage.classList.add('is-dragging');       /* will-change 只在拖拽期间挂上 */
     try { stage.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
@@ -1488,6 +1540,7 @@ function applyForm(el) {
   S.tx = 0; S.ty = 0; S.x = 0; S.y = 0;
   applyTilt();
   upgradeArt();
+  predecode();                 /* 换形态 / 换尺寸可能刚换过更大的图 */
   applyAmbient();
 }
 
@@ -1598,6 +1651,7 @@ export function boot() {
       S.el.style.setProperty('--ma-size', sizePx() + 'px');
       if (S.stage) S.stage.style.setProperty('--ma-persp', (form === 'spine' ? M.spersp : M.persp) + 'px');
       upgradeArt();
+      predecode();
       if (S.items.length) layout();
     }, 80);
   });

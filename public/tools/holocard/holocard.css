@@ -11,7 +11,7 @@
 
 .hc {
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 280;
   display: grid;
   place-items: center;
@@ -246,7 +246,7 @@
 
 .hc-rotor {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
   transition: transform 170ms var(--ease-out, ease);
   will-change: auto;
@@ -255,7 +255,7 @@
 
 .hc-face {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   overflow: hidden;                 /* 圆角裁剪靠它；shader 的 canvas 也靠它裁 */
   border-radius: 14px;
   background: oklch(23% 0.024 274);
@@ -275,7 +275,7 @@
 .hc-face.is-empty::before {
   content: attr(data-initial);
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: grid;
   place-items: center;
   font-size: 34px;
@@ -286,7 +286,7 @@
 
 .hc-art {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   display: block;
@@ -297,7 +297,7 @@
 /* 占位材质 1：彩虹膜。shader 接上后专注视图里由 canvas 接管 */
 .hc-foil {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 1;
   pointer-events: none;
   opacity: 0.62;
@@ -325,7 +325,7 @@
 /* 占位材质 2：跟随指针的径向高光 */
 .hc-glare {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 2;
   pointer-events: none;
   opacity: 0;
@@ -482,7 +482,7 @@
 /* ---------- 专注视图 ---------- */
 .hc__focus {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 2;
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;

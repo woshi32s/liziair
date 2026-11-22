@@ -1,0 +1,152 @@
+/* 构成主义 · Constructivism（1920）
+ * 米白纸、墨黑规线、一瞥正红：平涂、直角、无阴影，窄体大写压住版面。
+ * 依据：public/app.css 顶栏 161–179、按钮 1537–1568、设置分区标题 331–342、
+ *       播放键 4728–4737、登录引导按钮 4878–4890、抽屉标题 2002–2007；
+ *       歌手/专辑分区标题 pages/pages.css:62–68；方向见 docs/主题UI-方向.md。
+ */
+
+html[data-ui-theme="constructivism"] {
+  /* 字体 */
+  --tm-font-display: "Impact", "Haettenschweiler", "Arial Narrow", "Microsoft YaHei", sans-serif;
+  --tm-font-body: "Arial", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --tm-font-mono: "Courier New", "Courier", ui-monospace, monospace;
+  --tm-display-weight: 700;
+  --tm-display-tracking: -0.02em;
+  --tm-display-transform: uppercase;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 颜色：只用米白 / 墨黑 / 正红，灰只做正文层级 */
+  --tm-bg: #f2ead8;
+  --tm-bg-pattern: none;
+  --tm-surface: #f6efdf;
+  --tm-surface-2: #e9dfc8;
+  --tm-surface-3: #ded2b8;
+  --tm-ink: #141210;
+  --tm-ink-2: #3a352e;
+  --tm-ink-3: #5c554a;
+  --tm-accent: #c8102e;
+  --tm-accent-2: #141210;
+  --tm-accent-ink: #ffffff;
+  --tm-line: #141210;
+  --tm-line-strong: #141210;
+  --tm-focus: #c8102e;
+
+  /* 形状：零圆角、零阴影，层次靠 3px 黑规线切出来 */
+  --tm-border-w: 3px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 0px;
+  --tm-radius-pill: 0px;
+  --tm-radius-input: 0px;
+  --tm-shadow: none;
+  --tm-shadow-sm: none;
+  --tm-shadow-inset: none;
+
+  /* 其他 */
+  --tm-card-bg: var(--tm-surface);
+  --tm-overlay-bg: #f2ead8;
+  --tm-scrim: rgba(20, 18, 16, 0.45);
+  --tm-filter: none;
+}
+
+/* 签名 1 · 顶栏一条 4px 红规线；原来的玻璃柔光下沿收掉 */
+html[data-ui-theme="constructivism"] body:not(.is-stage) .topbar,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .topbar.is-stuck {
+  border-bottom: 4px solid var(--tm-accent);
+  box-shadow: none;
+}
+html[data-ui-theme="constructivism"] body:not(.is-stage) .topbar::after {
+  display: none;   /* 纯装饰伪元素：玻璃下沿的渐变，不属于这套语言 */
+}
+
+/* 签名 2 · 分区标题前一条 8×3 短红规线（背景绘制，不用定位/伪元素） */
+html[data-ui-theme="constructivism"] body:not(.is-stage) .setpage__h,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .pg-sec__h b,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-public__head,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .drawer__title {
+  padding-left: 14px;
+  color: var(--tm-ink);
+  background-image: linear-gradient(var(--tm-accent), var(--tm-accent));
+  background-repeat: no-repeat;
+  background-position: left center;
+  background-size: 8px 3px;
+}
+
+/* 签名 3 · 按钮：矩形 2px 黑边；悬停红底白字；按下位移 1px */
+html[data-ui-theme="constructivism"] body:not(.is-stage) .btn,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .tbtn,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-hero__play,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-hero__ghost,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-cta__btn {
+  border: 2px solid var(--tm-line);
+  border-radius: 0;
+  background: var(--tm-surface);
+  color: var(--tm-ink);
+  box-shadow: none;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+html[data-ui-theme="constructivism"] body:not(.is-stage) .btn:hover,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .tbtn:hover,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-hero__play:hover,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-hero__ghost:hover,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-cta__btn:hover {
+  background: var(--tm-accent);
+  color: var(--tm-accent-ink);
+  border-color: var(--tm-line);
+  filter: none;
+  transform: none;
+}
+html[data-ui-theme="constructivism"] body:not(.is-stage) .btn:active,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .tbtn:active,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-hero__play:active,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-hero__ghost:active,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-cta__btn:active {
+  transform: translate(1px, 1px);
+}
+
+/* app.css:1563 的主按钮渐变带 !important，背景同样用 !important 压回平涂红；
+   文字色原样式没有 !important，正常覆盖即可。 */
+html[data-ui-theme="constructivism"] body:not(.is-stage) .btn--primary,
+html[data-ui-theme="constructivism"] body:not(.is-stage) #view-settings .btn--primary {
+  background: var(--tm-accent) !important;
+  color: var(--tm-accent-ink);
+}
+
+/* 直角补丁 · base 用 --r-* 令牌能压平大部分胶囊，这里补仍写死半径的控件 */
+html[data-ui-theme="constructivism"] body:not(.is-stage) .search,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .field,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .badge,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .setpage__checkupd,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .setpage__seg button,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .setpage__switch,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .setpage__switch-knob,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .sw,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .sw i,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .icbtn,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .drawer__x,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .drawer__ico,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .drawer__val,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .drawer__sw,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .drawer__sw > i,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .me__act,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .me__lv,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .me__vip,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .me__demo-tag,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .me__pl,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-cta,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-tools__i,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .tool-card__ico,
+html[data-ui-theme="constructivism"] body:not(.is-stage) .marq__tag {
+  border-radius: 0;
+}
+
+/* 手机：标题前的短规线收一档，给窄屏标题留字宽 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="constructivism"] body:not(.is-stage) .setpage__h,
+  html[data-ui-theme="constructivism"] body:not(.is-stage) .pg-sec__h b,
+  html[data-ui-theme="constructivism"] body:not(.is-stage) .hall-public__head,
+  html[data-ui-theme="constructivism"] body:not(.is-stage) .drawer__title {
+    padding-left: 12px;
+    background-size: 6px 3px;
+  }
+}

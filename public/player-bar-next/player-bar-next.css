@@ -1,6 +1,8 @@
 /* ==========================================================================
    player-bar-next —— 「光河」播放状态栏
    --------------------------------------------------------------------------
+   2026-11-16：当前 index.html 未加载本文件，底栏和这里的队列下拉都不可见；
+   实际在用的队列下拉样式在 public/snow-queue.css（挂在形态页右上角 .snow 上）。
    这一层完全接管底部播放条：旧 footer.player 由 body.pbn-on 隐藏，但 DOM 和
    app.js 里的事件一个都没删。样式全部以 #pbn 为根，不碰全局标签选择器。
 
@@ -100,7 +102,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 /* ---------- 画布层 -------------------------------------------------------- */
 .pbn__aurora {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   display: block;
@@ -110,7 +112,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 
 .pbn__veil {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 1;
   pointer-events: none;
   background:
@@ -122,7 +124,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
    让后面的渐变进度带和文字有稳定的暗底。 */
 .pbn__mask {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 2;
   pointer-events: none;
   background: linear-gradient(180deg, rgb(7 9 14 / 0.40) 0%, rgb(7 9 14 / 0.58) 100%);
@@ -133,7 +135,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
    --bar-a / --bar-b 由 app.js 挂在 :root，直接继承；缺省时用同样的紫作回退。 */
 .pbn__paint {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 2;
   pointer-events: none;
   /* 暂时关掉整条进度带，先看没有它的样子；代码和拖拽 seek 逻辑全部保留，
@@ -152,7 +154,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 .pbn__paint::after {
   content: "";
   position: absolute;
-  inset: 0 0 auto;
+  top: 0;  right: 0;  bottom: auto;  left: 0;
   height: 1px;
   background: rgb(255 255 255 / 0.45);
 }
@@ -161,7 +163,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 #pbn.pbn--no-webgl::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 0;
   pointer-events: none;
   background:
@@ -213,7 +215,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 .pbn__art:hover { transform: scale(1.05) !important; }
 .pbn__art-img {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   border-radius: inherit;
@@ -233,7 +235,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 .pbn__art-img:not([hidden]) ~ .pbn__art-ph { display: none; }
 .pbn__art-disc {
   position: absolute;
-  inset: 5px;
+  top: 5px;  right: 5px;  bottom: 5px;  left: 5px;
   border-radius: 50%;
   background:
     repeating-radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.06) 0 1px, transparent 1px 5px),
@@ -242,7 +244,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 }
 .pbn__art-ring {
   position: absolute;
-  inset: -2px;
+  top: -2px;  right: -2px;  bottom: -2px;  left: -2px;
   border-radius: 16px;
   pointer-events: none;
   z-index: 2;
@@ -403,7 +405,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 .pbn__vol:hover .pbn__arc,
 .pbn__vol:focus-within .pbn__arc,
 .pbn__vol.is-open .pbn__arc { opacity: 1; visibility: visible; transform: none; }
-.pbn__arc svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.pbn__arc svg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; overflow: visible; }
 .pbn__arc-track,
 .pbn__arc-fill {
   fill: none;
@@ -656,7 +658,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 .pbn__card::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   border-radius: inherit;
   pointer-events: none;
   opacity: .16;
@@ -672,7 +674,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 }
 .pbn__spot {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 1;
   border-radius: inherit;
   pointer-events: none;
@@ -720,7 +722,7 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 .pbn__card-art:hover { transform: translateY(-2px) scale(1.015); }
 .pbn__card-art img {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%; height: 100%;
   border-radius: inherit;
   object-fit: cover;
@@ -952,13 +954,428 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 /* 点击火花：固定铺满视口，永不接事件 */
 .pbn__sparks {
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100vw;
   height: 100vh;
   z-index: 9;
   pointer-events: none;
   display: block;
 }
+
+/* ---------- 右端队列下拉（2026-11-16） ------------------------------------
+   入口贴在播放条右端（总时长之后的位置）。#pbn 固定在视口底部，
+   真正「向下」展开会掉到屏幕外，所以浮层从按钮上方弹出、锚点仍是按钮
+   右下角（transform-origin: 100% 100%）：交互形态是下拉浮层，不是居中弹窗。
+   颜色 / 圆角 / 描边全部沿用本文件已有的 --pbn-* 变量和播放条语言。
+   ------------------------------------------------------------------------ */
+#pbn .pbn__queue {
+  position: absolute;
+  right: 22px;
+  /* .pbn__inner 底部留了 20px（进度条 / 安全区），内容中心比几何中心高 10px，
+     按钮跟标题组对齐，不贴着进度条那一条。 */
+  top: calc(50% - 10px);
+  transform: translateY(-50%);
+  z-index: 12;
+}
+
+#pbn .pbn__queue-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--pbn-faint);
+  background: rgb(255 255 255 / 0.035);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.075);
+}
+#pbn .pbn__queue-btn:hover {
+  color: var(--pbn-ink);
+  background: rgb(255 255 255 / 0.075);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14),
+              0 0 18px color-mix(in srgb, var(--pbn-c1) 18%, transparent);
+}
+#pbn .pbn__queue-chev {
+  width: 14px;
+  height: 14px;
+  transform: rotate(90deg);          /* #i-chevron 原生朝右，转 90° 变成倒三角 */
+  transition: transform .24s var(--pbn-ease);
+  pointer-events: none;
+}
+#pbn .pbn__queue-btn[aria-expanded="true"] .pbn__queue-chev { transform: rotate(-90deg); }
+
+#pbn .pbn__queue-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(392px, calc(100vw - 24px));
+  max-height: min(64vh, 540px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  color: var(--pbn-ink);
+  background:
+    linear-gradient(154deg, rgb(27 30 42 / 0.97) 0%, rgb(12 14 21 / 0.985) 58%, rgb(9 11 17 / 0.99) 100%);
+  border: 1px solid rgb(255 255 255 / 0.11);
+  box-shadow:
+    0 34px 90px rgb(0 0 0 / 0.55),
+    0 6px 18px rgb(0 0 0 / 0.34),
+    inset 0 1px 0 rgb(255 255 255 / 0.08);
+  opacity: 0;
+  transform: translateY(8px) scale(.98);
+  transform-origin: 100% 100%;
+  transition: opacity .18s var(--pbn-ease), transform .24s var(--pbn-ease);
+  touch-action: pan-y;
+  font-size: 12px;
+}
+#pbn .pbn__queue-pop[hidden] { display: none !important; }
+#pbn .pbn__queue-pop.is-open { opacity: 1; transform: none; }
+
+#pbn .pbnq__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.07);
+}
+#pbn .pbnq__tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+}
+#pbn .pbnq__tab {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--pbn-muted);
+  white-space: nowrap;
+}
+#pbn .pbnq__tab:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.055); }
+#pbn .pbnq__tab.is-on {
+  color: var(--pbn-ink);
+  background: rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.10);
+}
+#pbn .pbnq__count { color: var(--pbn-faint); font-size: 10px; }
+#pbn .pbnq__x {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--pbn-faint);
+  background: rgb(255 255 255 / 0.04);
+}
+#pbn .pbnq__x:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.10); }
+#pbn .pbnq__x .ico { width: 13px; height: 13px; }
+
+#pbn .pbnq__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  max-height: min(58vh, 488px);
+}
+#pbn .pbnq__pane {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+#pbn .pbnq__pane[hidden] { display: none !important; }
+
+#pbn .pbnq__now {
+  flex: none;
+  margin: 0;
+  padding: 9px 12px 2px;
+  font-size: 10.5px;
+  color: var(--pbn-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#pbn .pbnq__hint {
+  flex: none;
+  margin: 0;
+  padding: 10px 12px 4px;
+  font-size: 10.5px;
+  color: var(--pbn-faint);
+}
+
+#pbn .pbnq__list {
+  flex: 1;
+  min-height: 0;
+  max-height: min(54vh, 430px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 6px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+}
+#pbn .pbnq__list::-webkit-scrollbar { width: 6px; }
+#pbn .pbnq__list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.18);
+}
+#pbn .pbnq__list::-webkit-scrollbar-track { background: transparent; }
+
+#pbn .pbnq__row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  color: var(--pbn-muted);
+  cursor: pointer;
+  user-select: none;
+  /* 硬约束：动画只碰 transform / opacity，行高亮直接切。 */
+  transition: opacity .16s;
+}
+#pbn .pbnq__row + .pbnq__row { margin-top: 1px; }
+#pbn .pbnq__row:hover {
+  color: var(--pbn-ink);
+  background: rgb(255 255 255 / 0.055);
+}
+#pbn .pbnq__row.is-on {
+  color: var(--pbn-ink);
+  background: color-mix(in srgb, var(--pbn-c1) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pbn-c1) 28%, transparent);
+}
+#pbn .pbnq__row.is-dragging { opacity: .4; }
+#pbn .pbnq__row.is-drop {
+  background: color-mix(in srgb, var(--pbn-c1) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pbn-c1) 55%, transparent);
+}
+#pbn .pbnq__row.is-loading { opacity: .55; cursor: default; }
+
+#pbn .pbnq__idx {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--pbn-faint);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+#pbn .pbnq__row.is-on .pbnq__idx {
+  color: color-mix(in srgb, var(--pbn-c1) 72%, white);
+  font-family: inherit;
+  font-size: 11px;
+}
+#pbn .pbnq__meta {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+#pbn .pbnq__name {
+  font-size: 12px;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#pbn .pbnq__sub {
+  font-size: 10px;
+  color: var(--pbn-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#pbn .pbnq__dur {
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--pbn-faint);
+  font-variant-numeric: tabular-nums;
+}
+#pbn .pbnq__op {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 9.5px;
+  line-height: 22px;
+  color: var(--pbn-faint);
+  background: rgb(255 255 255 / 0.04);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  white-space: nowrap;
+}
+#pbn .pbnq__op:hover {
+  color: var(--pbn-ink);
+  background: rgb(255 255 255 / 0.09);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.13);
+}
+#pbn .pbnq__op--now {
+  color: color-mix(in srgb, var(--pbn-c1) 72%, white);
+  background: color-mix(in srgb, var(--pbn-c1) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pbn-c1) 30%, transparent);
+}
+
+#pbn .pbnq__cover {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--pbn-faint);
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+}
+#pbn .pbnq__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+#pbn .pbnq__cover .ico { width: 14px; height: 14px; }
+#pbn .pbnq__row--res {
+  grid-template-columns: 30px minmax(0, 1fr) auto auto;
+  cursor: default;
+}
+#pbn .pbnq__res-ops { display: flex; gap: 4px; }
+#pbn .pbnq__mini {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: var(--pbn-muted);
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+#pbn .pbnq__mini:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.11); }
+#pbn .pbnq__mini .ico { width: 12px; height: 12px; }
+
+#pbn .pbnq__row--list {
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  width: 100%;
+  text-align: left;
+}
+#pbn .pbnq__list-go {
+  font-size: 10px;
+  color: var(--pbn-faint);
+  white-space: nowrap;
+}
+#pbn .pbnq__row--list:hover .pbnq__list-go {
+  color: color-mix(in srgb, var(--pbn-c1) 72%, white);
+}
+#pbn .pbnq__row--note {
+  grid-template-columns: minmax(0, 1fr);
+  cursor: default;
+  color: var(--pbn-faint);
+}
+#pbn .pbnq__row--note:hover { color: var(--pbn-faint); background: transparent; }
+
+#pbn .pbnq__searchbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 10px 0;
+}
+#pbn .pbnq__search-ico { width: 14px; height: 14px; flex: none; color: var(--pbn-faint); }
+#pbn .pbnq__input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid rgb(255 255 255 / 0.10);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 0.22);
+  color: var(--pbn-ink);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+#pbn .pbnq__input::placeholder { color: var(--pbn-faint); }
+#pbn .pbnq__input:focus {
+  border-color: color-mix(in srgb, var(--pbn-c1) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--pbn-c1) 12%, transparent);
+}
+#pbn .pbnq__go {
+  flex: none;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  color: var(--pbn-muted);
+  background: rgb(255 255 255 / 0.05);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+#pbn .pbnq__go:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.09); }
+#pbn .pbnq__srcs {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px 4px;
+}
+#pbn .pbnq__src {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--pbn-faint);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.07);
+}
+#pbn .pbnq__src:hover { color: var(--pbn-muted); background: rgb(255 255 255 / 0.045); }
+#pbn .pbnq__src.is-on {
+  color: var(--pbn-ink);
+  background: rgb(255 255 255 / 0.08);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+}
+
+#pbn .pbnq__foot {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+}
+#pbn .pbnq__foot[hidden] { display: none !important; }
+#pbn .pbnq__foot-btn {
+  flex: 1;
+  height: 30px;
+  border-radius: 9px;
+  font-size: 10.5px;
+  color: var(--pbn-muted);
+  background: rgb(255 255 255 / 0.045);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+#pbn .pbnq__foot-btn:hover { color: var(--pbn-ink); background: rgb(255 255 255 / 0.09); }
+#pbn .pbnq__foot-btn--main {
+  color: var(--pbn-ink);
+  background: color-mix(in srgb, var(--pbn-c1) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pbn-c1) 36%, transparent);
+}
+#pbn .pbnq__foot-btn--main:hover {
+  background: color-mix(in srgb, var(--pbn-c1) 24%, transparent);
+}
+
+#pbn .pbnq__empty {
+  margin: 0;
+  padding: 18px 12px;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--pbn-faint);
+}
+#pbn .pbnq__status {
+  flex: none;
+  margin: 0;
+  padding: 7px 12px;
+  font-size: 10.5px;
+  color: color-mix(in srgb, var(--pbn-c1) 72%, white);
+  background: rgb(0 0 0 / 0.18);
+  border-top: 1px solid rgb(255 255 255 / 0.07);
+  opacity: 0;
+  transition: opacity .18s var(--pbn-ease);
+}
+#pbn .pbnq__status.is-on { opacity: 1; }
+#pbn .pbnq__status[hidden] { display: none !important; }
 
 /* ---------- 窄屏 ---------------------------------------------------------- */
 @media (max-width: 900px) {
@@ -1000,6 +1417,14 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
   .pbn__lyric-cur { font-size: 12.5px; }
   .pbn__arc { right: -30px; }
   .pbn__coach { bottom: calc(100% + 10px); font-size: 10px; gap: 4px 10px; padding: 8px 11px; }
+  /* 窄屏是两行布局：右端倒三角落在第一行（原来 tail 的位置），
+     不再垂直居中，免得压到第二行的光河。 */
+  #pbn .pbn__queue { right: 13px; top: 26px; transform: none; }
+  #pbn .pbn__queue-pop {
+    width: min(380px, calc(100vw - 20px));
+    max-height: min(58vh, 460px);
+  }
+  #pbn .pbnq__body { max-height: min(52vh, 400px); }
 }
 
 @media (max-width: 560px) {
@@ -1020,6 +1445,9 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
   .pbn__card-open { display: none; }
   .pbn__card-copy { padding-right: 14px; }
   .pbn__lyric-tr { display: none; }
+  /* 小屏把浮层铺到接近整宽；右端留 9px，不贴死屏幕边。 */
+  #pbn .pbn__queue-pop { right: -4px; width: calc(100vw - 20px); }
+  #pbn .pbnq__count { display: none; }
 }
 
 /* 触屏没有 hover：栏高同样固定，展开唱片卡也不再改变栏高。 */
@@ -1032,6 +1460,9 @@ body.pbn-on[data-view="settings"] #pbn { display: none !important; }
 @media (max-height: 560px) {
   .pbn__card-wrap { max-height: calc(100vh - var(--pbn-h) - 28px); overflow-y: auto; }
   .pbn__card-wrap::-webkit-scrollbar { width: 0; }
+  /* 横屏矮窗口：队列浮层不能顶穿屏幕，高度跟着视口收。 */
+  #pbn .pbn__queue-pop { max-height: calc(100vh - var(--pbn-h) - 24px); }
+  #pbn .pbnq__body { max-height: calc(100vh - var(--pbn-h) - 96px); }
 }
 
 /* ---------- prefers-reduced-motion --------------------------------------- */

@@ -1,0 +1,9 @@
+# LIZI VST host dependencies (2026-11-17)
+# Keep this file ASCII-only: pip reads requirements with the system locale codec on
+# Chinese Windows (cp936), and UTF-8 Chinese comments make it fail with
+# UnicodeDecodeError. Chinese notes live in README.md instead.
+#
+# pedalboard bundles JUCE + the VST3 SDK; pinned so a future pip upgrade cannot
+# silently change plugin compatibility. GPLv3: check distribution compliance
+# before shipping it with the app.
+pedalboard==0.9.26

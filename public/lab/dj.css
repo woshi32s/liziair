@@ -79,12 +79,12 @@
   background: var(--dj-bg); cursor: grab; touch-action: none; user-select: none;
 }
 .djx-platter:active { cursor: grabbing; }
-.djx-platter__g { position: absolute; inset: 0; width: 100%; height: 100%; }
+.djx-platter__g { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; }
 .djx-platter__g circle { fill: none; stroke: var(--dj-rule2); stroke-width: .8; }
 .djx-platter__g circle:nth-child(3) { stroke: var(--dj-ink); stroke-width: .8; }
 /* 中央的专辑封面：圆形裁切、跟着转盘一起转（inset 14% = 正好落在 r=36 的那圈里） */
 .djx-platter__cover {
-  position: absolute; inset: 14%; width: 72%; height: 72%;
+  position: absolute; top: 14%; right: 14%; bottom: 14%; left: 14%; width: 72%; height: 72%;
   border-radius: 50%; object-fit: cover; object-position: center;
   transform: rotate(var(--rot, 0deg)); transform-origin: 50% 50%;
   pointer-events: none; background: var(--dj-bg2);
@@ -98,7 +98,7 @@
 }
 /* 没封面时的回落：浅渐变的 label 盘 + 字母（不是深色块，还是这台白机器） */
 .djx-platter__lbl {
-  position: absolute; inset: 14%; display: grid; place-items: center;
+  position: absolute; top: 14%; right: 14%; bottom: 14%; left: 14%; display: grid; place-items: center;
   border-radius: 50%; opacity: 0; pointer-events: none;
   font: 500 16px/1 var(--dj-mono); color: var(--dj-ink2); letter-spacing: .12em;
   background: linear-gradient(150deg, #f6f3ee, #e6e2da);
@@ -220,7 +220,7 @@
   border: 1px solid var(--dj-rule2); background: var(--dj-bg);
   cursor: ns-resize; touch-action: none;
 }
-.djx-knob__ticks { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.djx-knob__ticks { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; overflow: visible; }
 .djx-knob__ticks line { stroke: var(--dj-ink3); stroke-width: .9; }
 .djx-knob__ticks line.mid { stroke: var(--dj-ink); stroke-width: 1.4; }
 .djx-knob::after {

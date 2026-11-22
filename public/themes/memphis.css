@@ -1,0 +1,132 @@
+/* 孟菲斯 Memphis · 1981
+ * 糖果色 + 2px 黑边 + 彩色偏移投影；波浪分隔线只出现在分区标题下面。
+ * 依据：public/app.css 分区标题 335/4891/5103、设置卡 8893、按钮 1537–1568、
+ *       `.track__flag` 1779、`.marq__tag` 7430。
+ */
+
+html[data-ui-theme="memphis"] {
+  /* 波浪分隔线：28×6 的低对比手绘感曲线 */
+  --tmm-wave: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='6' viewBox='0 0 28 6'%3E%3Cpath d='M0 3 Q7 0 14 3 T28 3' fill='none' stroke='%23111111' stroke-opacity='.24' stroke-width='1.4'/%3E%3C/svg%3E");
+
+  /* 字体 */
+  --tm-font-display: Futura, "Century Gothic", "Avenir Next",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --tm-font-body: "Century Gothic", Futura, "Avenir Next",
+    "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --tm-font-mono: "Courier New", ui-monospace, monospace;
+  --tm-display-weight: 800;
+  --tm-display-tracking: .01em;
+  --tm-display-transform: none;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 颜色 */
+  --tm-bg: #fdf8ef;
+  --tm-bg-pattern: none;
+  --tm-surface: #ffffff;
+  --tm-surface-2: #fff0f5;
+  --tm-surface-3: #e6faf2;
+  --tm-ink: #111111;
+  --tm-ink-2: #2c2833;
+  --tm-ink-3: #5b5563;
+  --tm-accent: #ff8fb1;
+  --tm-accent-2: #6b4bd6;
+  --tm-accent-ink: #111111;
+  --tm-line: #111111;
+  --tm-line-strong: #111111;
+  --tm-focus: #6b4bd6;
+
+  /* 形状 */
+  --tm-border-w: 2px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 14px;
+  --tm-radius-pill: 999px;
+  --tm-radius-input: 12px;
+  --tm-shadow: 5px 5px 0 #b8a1ff;
+  --tm-shadow-sm: 3px 3px 0 #9be7c4;
+  --tm-shadow-inset: none;
+
+  /* 其他 */
+  --tm-card-bg: var(--tm-surface);
+  --tm-overlay-bg: rgba(253, 248, 239, .93);
+  --tm-scrim: rgba(17, 17, 17, .4);
+  --tm-filter: none;
+}
+
+/* 签名：分区标题下的波浪分隔线，纯背景、低对比、不挡点击 */
+html[data-ui-theme="memphis"] body:not(.is-stage) .hall-cell__h,
+html[data-ui-theme="memphis"] body:not(.is-stage) .hall-feed__h {
+  background: var(--tmm-wave) repeat-x left bottom / 28px 6px;
+  border-bottom-color: transparent;
+}
+/* 设置卡标题所在行是 position:relative（app.css:8926），用伪元素把波浪放进
+   标题与首行之间的 12px 间距里，不占布局、不压文字 */
+html[data-ui-theme="memphis"] body:not(.is-stage) .setcard > .setpage__h::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -11px;
+  height: 6px;
+  background: var(--tmm-wave) repeat-x left center / 28px 6px;
+  pointer-events: none;
+}
+
+/* 按钮：糖果黄底 + 2px 黑边 + 薰衣草偏移投影；悬停换薄荷，按下位移 */
+html[data-ui-theme="memphis"] body:not(.is-stage) .btn,
+html[data-ui-theme="memphis"] body:not(.is-stage) .hall-cta__btn {
+  border: 2px solid #111111;
+  border-radius: 14px;
+  background: #ffd166;
+  color: #111111;
+  box-shadow: 3px 3px 0 #b8a1ff;
+  font-weight: 700;
+}
+html[data-ui-theme="memphis"] body:not(.is-stage) .btn:hover,
+html[data-ui-theme="memphis"] body:not(.is-stage) .hall-cta__btn:hover {
+  background: #9be7c4;
+  color: #111111;
+}
+html[data-ui-theme="memphis"] body:not(.is-stage) .btn:active,
+html[data-ui-theme="memphis"] body:not(.is-stage) .hall-cta__btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 #b8a1ff;
+}
+/* app.css:1563–1567 的主按钮渐变带 !important，只能同样用 !important 压过 */
+html[data-ui-theme="memphis"] body:not(.is-stage) .btn--primary {
+  background: #ff8fb1 !important;
+  color: #111111;
+}
+html[data-ui-theme="memphis"] body:not(.is-stage) .btn--primary:hover {
+  background: #ff8fb1 !important;
+}
+
+/* 局部硬编码色 + 小标签歪斜：app.css:1779 / 7430，只转现有文字元素 */
+html[data-ui-theme="memphis"] body:not(.is-stage) .track__flag {
+  border: 2px solid #111111;
+  border-radius: 999px;
+  background: #9be7c4;
+  color: #111111;
+  font-weight: 700;
+  transform: rotate(-2deg);
+}
+html[data-ui-theme="memphis"] body:not(.is-stage) .marq__tag {
+  border: 2px solid #111111;
+  border-radius: 999px;
+  background: #ffd166;
+  color: #111111;
+  font-weight: 700;
+  transform: rotate(3deg);
+  box-shadow: 2px 2px 0 rgba(17, 17, 17, .4);
+}
+
+/* 手机：波浪线收短，避免窄标题下显得密 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="memphis"] body:not(.is-stage) .hall-cell__h,
+  html[data-ui-theme="memphis"] body:not(.is-stage) .hall-feed__h {
+    background-size: 22px 5px;
+  }
+  html[data-ui-theme="memphis"] body:not(.is-stage) .setcard > .setpage__h::after {
+    height: 5px;
+    background-size: 22px 5px;
+  }
+}

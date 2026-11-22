@@ -1,0 +1,227 @@
+/* ==========================================================================
+   手机大厅 · 来源下拉（Glide Select）
+   --------------------------------------------------------------------------
+   照 ReactBits「Glide Select」的结构做（micro/glide-select）：
+     · 一个触发 chip（显示当前来源）
+     · 点开后菜单从 chip 的角落向下弹出（scale .95 → 1 + 淡入，180ms）
+     · 菜单是竖排的若干行，高亮 pill 用 transform 在行与行之间滑过去（200ms）
+     · 点某一行即切来源并收起；屏幕底部放不下时翻到 chip 上方（同参考实现）
+
+   只由 /m/index.html 加载；>560px（横屏 / 桌面式布局）完全不显示，
+   那里继续用 app.js 原来的来源滚轮。
+   数据流不新造：
+     · 选项读 #hall-src-menu 里 app.js 用 SRC_ITEMS 生成的 .ow__item
+     · 点行 = 点一次对应 .ow__item → option-wheel onChange → srcPick(i)
+       → railGoSource / railReset（app.js:10560 / 11457 / 11146）
+
+   WebView 约束：
+     · 无 backdrop-filter、无每帧 filter
+     · 状态只改 class；过渡只动 transform / opacity，最长 200ms
+     · chip 命中高度 44px，菜单每行 44px（视觉紧凑，热区不缩）
+     · 高亮 / 菜单的过渡在冻结环境下有定时落位兜底（见 JS）
+   ========================================================================== */
+
+#glide-select,
+#glide-select-menu { display: none; }
+
+#glide-select[hidden] { display: none !important; }
+
+@media (max-width: 560px) {
+  /* ---------- 触发 chip：绝对定位在歌曲面里、盖住原来的面包屑位置 ----------
+     不放进 #hall-plat-bar：app.js 的 paintPlatBar 每次都会重写 bar.innerHTML，
+     我们的节点会被一起清掉。放在面里、bar 旁边，翻面时也能跟着 3D 转走。 */
+  #glide-select {
+    position: absolute;
+    left: 0;
+    top: 0;
+    z-index: 4;
+    display: block;
+    height: 44px;
+    min-width: 38px;
+    margin: 0;
+    padding: 0;
+    color: inherit;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #glide-select .gs-trigger {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    height: 44px;
+    min-width: 38px;
+    max-width: var(--gs-safe-w, 200px);
+    margin: 0;
+    padding: 0 4px;
+    border: 0;
+    border-radius: 9px;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 18%, transparent);
+    color: inherit;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.1;
+    letter-spacing: .01em;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 120ms ease, box-shadow 120ms ease;
+  }
+  #glide-select.is-open .gs-trigger {
+    background: color-mix(in srgb, currentColor 20%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 26%, transparent);
+  }
+  #glide-select .gs-trigger:active { background: color-mix(in srgb, currentColor 24%, transparent); }
+  #glide-select .gs-trigger:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 1px;
+  }
+
+  #glide-select .gs-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* 纯 CSS 的 ▾：两条边转 45°，展开时翻成 ▴（200ms，和参考一致） */
+  #glide-select .gs-chev {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin-top: -3px;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    opacity: .68;
+    transform: rotate(45deg);
+    transition: transform 200ms cubic-bezier(.23, 1, .32, 1), margin-top 200ms cubic-bezier(.23, 1, .32, 1);
+  }
+  #glide-select.is-open .gs-chev {
+    margin-top: 3px;
+    transform: rotate(-135deg);
+  }
+
+  /* ---------- 菜单：挂在 body 上（position:fixed），逃出 #hall-plat 的 overflow:hidden ----------
+     位置由 JS 按触发 chip 的 rect 写 left / top，所以这里只留尺寸与观感。 */
+  #glide-select-menu {
+    box-sizing: border-box;
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 9999;
+    display: block;
+    width: 176px;
+    margin: 0;
+    padding: 4px;
+    border-radius: 12px;
+    /* 旧内核兜底：color-mix 失效时仍是深色底 */
+    background-color: #1b1b1f;
+    background: color-mix(in srgb, var(--gs-surface, #17171a) 62%, #17171a);
+    color: #fff;
+    box-shadow: 0 16px 36px -14px rgba(0, 0, 0, .72),
+                inset 0 0 0 1px color-mix(in srgb, currentColor 14%, transparent);
+    transform-origin: var(--gs-origin, top left);
+    opacity: 0;
+    transform: scale(.95);
+    visibility: hidden;
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity 120ms ease,
+                transform 120ms cubic-bezier(.23, 1, .32, 1),
+                visibility 0s linear 120ms;
+  }
+  #glide-select-menu.is-open {
+    opacity: 1;
+    transform: none;
+    visibility: visible;
+    pointer-events: auto;
+    transition: opacity 180ms ease,
+                transform 180ms cubic-bezier(.23, 1, .32, 1),
+                visibility 0s linear 0s;
+  }
+  #glide-select-menu[data-side="top"] { --gs-origin: bottom left; }
+
+  #glide-select-menu .gs-list {
+    position: relative;
+    display: grid;
+    gap: 1px;
+    touch-action: none;
+  }
+
+  /* 高亮块：高度 = 一行，translateY 跨行滑动（200ms）。按压拖动时直接跟手。 */
+  #glide-select-menu .gs-pill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 44px;
+    border-radius: 8px;
+    background: color-mix(in srgb, currentColor 16%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 9%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(0, 0, 0);
+    transition: transform 200ms cubic-bezier(.23, 1, .32, 1), opacity 150ms ease;
+    will-change: transform;
+  }
+
+  #glide-select-menu .gs-row {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    margin: 0;
+    padding: 0 10px;
+    border-radius: 8px;
+    color: currentColor;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: .01em;
+    cursor: pointer;
+  }
+
+  #glide-select-menu .gs-row__name {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* 当前来源的勾：两条边转 -45° */
+  #glide-select-menu .gs-check {
+    flex: none;
+    width: 9px;
+    height: 5px;
+    margin: -2px 1px 0 0;
+    border-left: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    visibility: hidden;
+    transform: rotate(-45deg);
+  }
+  #glide-select-menu .gs-row.is-cur .gs-check { visibility: visible; }
+
+  /* 原来的面包屑 / 来源标签让位。用 visibility 而不是 display:none：
+     平台图标那列继续按 1fr auto 1fr 居中（display:none 会让 dock 左移、和 chip 相交） */
+  #hall-plat-bar.gs-has-trigger .pstrip__crumb,
+  #hall-plat-bar.gs-has-trigger .pstrip__src {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #glide-select .gs-trigger,
+  #glide-select .gs-chev,
+  #glide-select-menu,
+  #glide-select-menu .gs-pill { transition-duration: 1ms; }
+}

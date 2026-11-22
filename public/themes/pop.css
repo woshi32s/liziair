@@ -1,0 +1,137 @@
+/* 波普 Pop · 1962
+ * 高饱和撞色 + 3px 黑描边 + 6px 硬投影；半调网点只铺在顶栏和分区标题，不碰正文。
+ * 依据：public/app.css 顶栏 161–270、设置标题 335、大厅分区标题 4891/5103、
+ *       按钮 1537–1568、`.track__flag` 1779、`.marq__tag` 7430。
+ */
+
+html[data-ui-theme="pop"] {
+  /* 字体 */
+  --tm-font-display: Impact, "Arial Black", Haettenschweiler, "Franklin Gothic Heavy",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --tm-font-body: Arial, "Helvetica Neue", "PingFang SC", "Microsoft YaHei",
+    system-ui, sans-serif;
+  --tm-font-mono: "Courier New", ui-monospace, monospace;
+  --tm-display-weight: 900;
+  --tm-display-tracking: -0.02em;
+  --tm-display-transform: uppercase;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 颜色 */
+  --tm-bg: #fffdf6;
+  --tm-bg-pattern: none;
+  --tm-surface: #ffffff;
+  --tm-surface-2: #ffe45c;
+  --tm-surface-3: #d5f7f9;
+  --tm-ink: #111111;
+  --tm-ink-2: #2b2b2b;
+  --tm-ink-3: #5a5a5a;
+  --tm-accent: #ff2e88;
+  --tm-accent-2: #007c8a;
+  --tm-accent-ink: #111111;
+  --tm-line: #111111;
+  --tm-line-strong: #111111;
+  --tm-focus: #007c8a;
+
+  /* 形状 */
+  --tm-border-w: 3px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 8px;
+  --tm-radius-pill: 8px;
+  --tm-radius-input: 6px;
+  --tm-shadow: 6px 6px 0 #111111;
+  --tm-shadow-sm: 3px 3px 0 #111111;
+  --tm-shadow-inset: none;
+
+  /* 其他 */
+  --tm-card-bg: var(--tm-surface);
+  --tm-overlay-bg: rgba(255, 253, 246, .93);
+  --tm-scrim: rgba(17, 17, 17, .45);
+  --tm-filter: none;
+}
+
+/* 正文加粗一档：波普的版面靠字重撑起来，不靠留白 */
+html[data-ui-theme="pop"] body:not(.is-stage) {
+  font-weight: 600;
+}
+
+/* 签名 1：顶栏铺低密度半调网点 + 3px 黑底边 */
+html[data-ui-theme="pop"] body:not(.is-stage) .topbar {
+  border: 0;
+  border-bottom: 3px solid #111111;
+  background-color: #ffffff;
+  background-image: radial-gradient(circle, rgba(17, 17, 17, .11) 1.1px, transparent 1.3px);
+  background-size: 9px 9px;
+  box-shadow: none;
+}
+
+/* 签名 2：分区标题同款网点，字重拉到展示级；只铺标题行，不铺正文 */
+html[data-ui-theme="pop"] body:not(.is-stage) .hall-cell__h,
+html[data-ui-theme="pop"] body:not(.is-stage) .hall-feed__h,
+html[data-ui-theme="pop"] body:not(.is-stage) .setcard > .setpage__h {
+  background-image: radial-gradient(circle, rgba(17, 17, 17, .1) 1px, transparent 1.2px);
+  background-size: 8px 8px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+}
+
+/* 签名 3：按钮是黄底黑字黑粗边的贴纸；悬停换洋红，按下投影缩短 */
+html[data-ui-theme="pop"] body:not(.is-stage) .btn,
+html[data-ui-theme="pop"] body:not(.is-stage) .hall-cta__btn {
+  border: 3px solid #111111;
+  border-radius: 8px;
+  background: #ffd400;
+  color: #111111;
+  box-shadow: 3px 3px 0 #111111;
+  font-weight: 800;
+}
+html[data-ui-theme="pop"] body:not(.is-stage) .btn:hover,
+html[data-ui-theme="pop"] body:not(.is-stage) .hall-cta__btn:hover {
+  background: #ff2e88;
+  color: #111111;
+}
+html[data-ui-theme="pop"] body:not(.is-stage) .btn:active,
+html[data-ui-theme="pop"] body:not(.is-stage) .hall-cta__btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 1px 1px 0 #111111;
+}
+/* app.css:1563–1567 的主按钮渐变带 !important，只能同样用 !important 压过 */
+html[data-ui-theme="pop"] body:not(.is-stage) .btn--primary {
+  background: #ffd400 !important;
+  color: #111111;
+}
+html[data-ui-theme="pop"] body:not(.is-stage) .btn--primary:hover {
+  background: #ff2e88 !important;
+}
+
+/* 局部硬编码色：app.css:1779 的琥珀标签、7430 的半透明角标，改回波普贴纸 */
+html[data-ui-theme="pop"] body:not(.is-stage) .track__flag {
+  border: 2px solid #111111;
+  border-radius: 6px;
+  background: #ffd400;
+  color: #111111;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+html[data-ui-theme="pop"] body:not(.is-stage) .marq__tag {
+  border: 2px solid #111111;
+  border-radius: 6px;
+  background: #ffd400;
+  color: #111111;
+  font-weight: 800;
+  box-shadow: 2px 2px 0 rgba(17, 17, 17, .55);
+}
+
+/* 手机：网点降密、顶栏边线收细，窄屏不发花 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="pop"] body:not(.is-stage) .topbar {
+    background-size: 8px 8px;
+    border-bottom-width: 2px;
+  }
+  html[data-ui-theme="pop"] body:not(.is-stage) .hall-cell__h,
+  html[data-ui-theme="pop"] body:not(.is-stage) .hall-feed__h,
+  html[data-ui-theme="pop"] body:not(.is-stage) .setcard > .setpage__h {
+    background-size: 7px 7px;
+  }
+}

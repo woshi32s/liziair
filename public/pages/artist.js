@@ -10,14 +10,33 @@
  * 入口：nav.js 负责访问栈和视图切换，这里只管把 #view-artist 画出来。
  */
 
-import { ensureCss, esc, fmtDur, fmtDate, fmtYear, imgSrc, api, playList, currentId } from './util.js';
+import { ensureCss, esc, fmtDur, fmtDate, fmtYear, imgSrc, api, playList, player, currentId } from './util.js';
 
 const ALBUM_PAGE = 12;
 const SONG_PAGE = 100;
 const HOT_N = 10;
+const AUTO_PAGE_GAP = 100;   // 自动翻页间隔（ms），别连打上游
+const AUTO_MAX_PAGES = 200;  // 自动翻页上限，防上游忽略 offset 时死循环
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** 当前这一页的状态（换歌手才重建；回退复用同一份，不重拉接口） */
 let S = null;
+
+/** 当前实际挂载的页面容器（桌面 #view-artist / 手机 .artistbody），换歌高亮用 */
+let mountedEl = null;
+let trackWatch = false;
+
+/** Player.on 没有 off：整个模块只订阅一次，别在每次 bind() 里叠监听。
+ *  晚绑定 / 热重载时 Player 还没就位的话，下一次 mount 会再试。 */
+function watchTrackChange() {
+  if (trackWatch) return;
+  const p = player();
+  if (!p || typeof p.on !== 'function') return;
+  trackWatch = true;
+  p.on('trackchange', () => {
+    if (mountedEl) paintCurrent(mountedEl);
+  });
+}
 
 const elOf = (v) => v || document.getElementById('view-artist');
 
@@ -78,8 +97,11 @@ function hotRow(t, i) {
 }
 
 function songRow(t, i) {
-  return `<li class="pg-row" data-i="${i}" data-id="${t.id}" title="${esc(t.name)}">
-    <span class="pg-row__i"><span class="pg-row__num">${num(i)}</span></span>
+  const cov = t.cover
+    ? `<img class="pg-row__cov" src="${imgSrc(t.cover, 120)}" alt="" loading="lazy" decoding="async">`
+    : '';
+  return `<li class="pg-row${cov ? ' pg-row--cov' : ''}" data-i="${i}" data-id="${t.id}" title="${esc(t.name)}">
+    <span class="pg-row__i"><span class="pg-row__num">${num(i)}</span>${cov}</span>
     <span class="pg-row__n">${esc(t.name)}</span>
     <span class="pg-row__d">${fmtDur(t.duration)}</span>
   </li>`;
@@ -143,15 +165,27 @@ function paintAlbums(el) {
   if (btn) { btn.hidden = !S.albumMore; btn.disabled = false; }
 }
 
+const songMatch = (t, f) =>
+  !f || [t.name, t.artists, t.album].some((x) => String(x || '').toLowerCase().includes(f));
+
+function filterSongs(list) {
+  const f = S.filter.trim().toLowerCase();
+  return f ? list.filter((t) => songMatch(t, f)) : list;
+}
+
 function paintSongs(el) {
   const box = el.querySelector('[data-songs]');
   if (!box) return;
-  const f = S.filter.trim().toLowerCase();
   // 「搜索他的歌」= 在**已加载**的集合里过滤，不再发请求（用户拍板）
-  S.shown = f
-    ? S.songs.filter((t) => [t.name, t.artists, t.album].some((x) => String(x || '').toLowerCase().includes(f)))
-    : S.songs;
+  S.shown = filterSongs(S.songs);
   box.innerHTML = S.shown.map(songRow).join('');
+  syncSongMeta(el);
+  paintCurrent(el);
+}
+
+/** 计数 / 空态 / 加载更多按钮：整表重绘和自动翻页的增量上屏共用一套文案 */
+function syncSongMeta(el) {
+  const f = S.filter.trim().toLowerCase();
   const cnt = el.querySelector('[data-song-count]');
   if (cnt) {
     cnt.textContent = f
@@ -160,12 +194,63 @@ function paintSongs(el) {
   }
   const hint = el.querySelector('[data-songs-hint]');
   if (hint) {
-    hint.hidden = S.shown.length > 0;
-    hint.textContent = f ? `已加载的 ${S.songs.length} 首里没有匹配「${S.filter}」` : '还没有歌';
+    if (S.songFailed) {
+      const left = S.songTotal ? Math.max(S.songTotal - S.songs.length, 0) : 0;
+      hint.hidden = false;
+      hint.textContent = left > 0
+        ? `还有 ${left} 首没加载，点「加载更多」重试`
+        : '加载中断，点「加载更多」重试';
+    } else {
+      hint.hidden = S.shown.length > 0;
+      hint.textContent = f ? `已加载的 ${S.songs.length} 首里没有匹配「${S.filter}」` : '还没有歌';
+    }
   }
   const btn = el.querySelector('[data-more-songs]');
-  if (btn) { btn.hidden = !S.songMore; btn.disabled = false; }
+  if (btn) { btn.hidden = S.auto || !S.songMore; btn.disabled = false; }
+}
+
+/** 收一页数据：reset 整表重绘；自动翻页只 append 新行，不重绘整表 */
+function applySongPage(el, d, reset) {
+  const list = d.songs || [];
+  if (d.total) S.songTotal = d.total;
+  else if (reset) S.songTotal = 0;
+  // total 可能比实际能给的多（版权/下架），也要看 more；total 缺失（0）时靠空页终止。
+  const afterLen = reset ? list.length : S.songs.length + list.length;
+  S.songMore = list.length > 0 && (
+    !!d.more || (S.songTotal > 0 ? afterLen < S.songTotal : true)
+  );
+  if (reset) {
+    S.songs = list;
+    S.shown = filterSongs(S.songs);
+    paintSongs(el);
+    return;
+  }
+  const before = S.shown.length;
+  S.songs = S.songs.concat(list);
+  S.shown = filterSongs(S.songs);
+  const fresh = S.shown.slice(before);
+  const box = el.querySelector('[data-songs]');
+  if (box && fresh.length) {
+    // 新匹配项一定追加在末尾（顺序稳定），data-i 就是它在 S.shown 里的下标
+    box.insertAdjacentHTML('beforeend', fresh.map((t, j) => songRow(t, before + j)).join(''));
+  }
+  syncSongMeta(el);
   paintCurrent(el);
+}
+
+/** 热门 Top 10 + 「全部歌曲」里剩下的歌（按 id 去重，保持 S.songs 的原顺序）。
+ *  这样热门第 10 首放完会接着播第 11 首，而不是停在队列尾部 / 绕回第 1 首；
+ *  S.songs 还没回来时退回纯热门队列（点击当下有多少就先排多少）。 */
+function hotQueue() {
+  const hot = (S && S.hot) || [];
+  const seen = new Set(hot.map((t) => t.id));
+  const tail = [];
+  for (const t of (S && S.songs) || []) {
+    if (seen.has(t.id)) continue;
+    seen.add(t.id);
+    tail.push(t);
+  }
+  return tail.length ? hot.concat(tail) : hot;
 }
 
 /** 给正在播的那行标红（只认 Player 的状态，不另存一份） */
@@ -210,25 +295,75 @@ async function loadAlbums(el, reset) {
 }
 
 async function loadSongs(el, reset) {
-  if (!S || S.songBusy) return;
-  S.songBusy = true;
+  if (!S) return;
+  // 排序 / 重载优先：即使上一页还在飞，也立刻换代作废它（songBusy 只挡并发的「加载更多」）
+  if (S.songBusy && !reset) return;
+  const state = S;
+  const gen = ++S.gen;
+  const id = S.id;
+  const order = S.order;
   const offset = reset ? 0 : S.songs.length;
-  if (reset) { S.songs = []; S.shown = []; }
+  S.songBusy = true;
+  S.auto = false;
+  S.songFailed = false;
+  const btn = el.querySelector('[data-more-songs]');
+  if (btn) btn.hidden = true;
   try {
-    const d = await api.artistSongs(S.id, { limit: SONG_PAGE, offset, order: S.order });
-    if (!S) return;
-    const list = d.songs || [];
-    S.songs = reset ? list : S.songs.concat(list);
-    if (d.total) S.songTotal = d.total;
-    else if (reset) S.songTotal = S.songs.length;
-    // total 会比实际能给的少（版权/下架），两边都要看，不然「加载更多」永远不消失
-    S.songMore = list.length > 0 && S.songs.length < S.songTotal;
-    paintSongs(el);
-  } catch (e) {
-    const hint = el.querySelector('[data-songs-hint]');
-    if (hint) { hint.hidden = false; hint.textContent = `歌曲载入失败：${e.message}`; }
-  } finally {
+    const d = await api.artistSongs(id, { limit: SONG_PAGE, offset, order });
+    if (S !== state || S.gen !== gen) return;
+    applySongPage(el, d, reset);
     S.songBusy = false;
+    // 首页先上屏，剩下的在后台串行补完（不让用户等整页）
+    if (S.songMore) autoLoadSongs(el, gen);
+  } catch (e) {
+    if (S !== state || S.gen !== gen) return;
+    if (reset) { S.songs = []; S.shown = []; S.songTotal = 0; }
+    S.songMore = true;
+    S.songFailed = true;
+    if (reset) paintSongs(el);
+    else syncSongMeta(el);
+  } finally {
+    if (S === state && S.gen === gen) S.songBusy = false;
+  }
+}
+
+/** 后台自动翻页：串行、页间留间隔；代际 token 不符（换歌/排序/卸载）就立即作废 */
+async function autoLoadSongs(el, gen) {
+  const state = S;
+  if (!state || state.gen !== gen || !state.songMore) return;
+  const id = state.id;
+  const order = state.order;
+  const watchView = el.classList.contains('is-active');
+  state.auto = true;
+  syncSongMeta(el);
+  let pages = 0;
+  try {
+    while (state.songMore) {
+      if (S !== state || state.gen !== gen) return;
+      if (watchView && !el.classList.contains('is-active')) return;
+      if (pages >= AUTO_MAX_PAGES) return;   // 到上限就停，按钮可手动续
+      await wait(AUTO_PAGE_GAP);
+      if (S !== state || state.gen !== gen) return;
+      if (watchView && !el.classList.contains('is-active')) return;
+      let d;
+      try {
+        d = await api.artistSongs(id, { limit: SONG_PAGE, offset: state.songs.length, order });
+      } catch (e) {
+        if (S !== state || state.gen !== gen) return;
+        state.songMore = true;
+        state.songFailed = true;
+        return;
+      }
+      if (S !== state || state.gen !== gen) return;
+      if (watchView && !el.classList.contains('is-active')) return;
+      applySongPage(el, d, false);
+      pages += 1;
+    }
+  } finally {
+    if (S === state && state.gen === gen) {
+      state.auto = false;
+      syncSongMeta(el);
+    }
   }
 }
 
@@ -251,7 +386,7 @@ function bind(el) {
       return;
     }
     const hot = e.target.closest('[data-hots] .pg-row');
-    if (hot) { playList(S.hot, +hot.dataset.i); paintCurrent(el); return; }
+    if (hot) { playList(hotQueue(), +hot.dataset.i); paintCurrent(el); return; }
     const song = e.target.closest('[data-songs] .pg-row');
     if (song) { playList(S.shown, +song.dataset.i); paintCurrent(el); }
   };
@@ -262,12 +397,24 @@ function bind(el) {
     paintSongs(el);
   };
 
-  /* 滚到底继续拉专辑（12 张一批）。第一次渲染不自动触发，
-     免得一进页面就把 45 张全拉完 —— 用户要的是「滚到底或点按钮」。 */
+  /* 滚到专辑墙末尾继续拉（12 张一批）。第一次渲染不自动触发，
+     免得一进页面就把 45 张全拉完 —— 用户要的是「滚到底或点按钮」。
+     ⚠️ 别拿「整页底部」当判据：这个视图下面还有「全部歌曲」，后台会自动
+     把几百首补全，整页 scrollHeight 是专辑区的十几倍；用户停在专辑区时
+     永远够不到「页底 - 320」，计数就卡在 12 / 30。这里改看「加载更多」
+     页脚是否接近可视区底部；页底判断保留，只作快速滚到底时的兜底。 */
+  const albumFoot = el.querySelector('.pg-foot');
   el.onscroll = () => {
     if (!S || S.albumBusy || !S.albumMore) return;
-    const nearBottom = el.scrollTop + el.clientHeight > el.scrollHeight - 320;
-    if (nearBottom) loadAlbums(el, false);
+    let nearAlbumEnd = false;
+    if (albumFoot) {
+      const view = el.getBoundingClientRect();
+      const foot = albumFoot.getBoundingClientRect();
+      nearAlbumEnd = foot.bottom > view.top
+        && foot.top < view.top + el.clientHeight + 320;
+    }
+    const nearPageEnd = el.scrollTop + el.clientHeight > el.scrollHeight - 320;
+    if (nearAlbumEnd || nearPageEnd) loadAlbums(el, false);
   };
 }
 
@@ -280,10 +427,19 @@ export async function mount(viewEl, params = {}) {
   const id = Number(params.id);
   if (!el || !id) return;
 
+  /* 换歌高亮只认「当前挂载的这份 DOM」：桌面是 #view-artist，手机是 .artistbody */
+  mountedEl = el;
+  watchTrackChange();
+
   /* 同一歌手再次进来（从专辑页按返回）：复用已有 DOM，滚动位置也不丢 */
   if (S && S.id === id) {
     bind(el);
     paintCurrent(el);
+    // 上次停在半截（切去专辑页会作废在途循环）：回来时接着拉，失败照旧停下露按钮
+    if (S.songMore && !S.songBusy && !S.auto) {
+      S.songFailed = false;
+      autoLoadSongs(el, S.gen);
+    }
     return;
   }
 
@@ -291,6 +447,7 @@ export async function mount(viewEl, params = {}) {
     id, artist: null, hot: [],
     albums: [], albumMore: true, albumBusy: false,
     songs: [], shown: [], songTotal: 0, songMore: true, songBusy: false,
+    gen: 0, auto: false, songFailed: false,
     order: 'hot', filter: '',
   };
   el.innerHTML = shell();

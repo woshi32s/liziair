@@ -17,15 +17,106 @@
 <link rel="stylesheet" href="tokens.css">
     <link rel="stylesheet" href="win-controls.css">
 <link rel="stylesheet" href="app.css">
-<!-- 开场引导：景深 + 粒子指路的独立一层，样式全在 onboard.css，不往 app.css 里加东西 -->
+<link rel="stylesheet" href="local/local.css" data-local-css="1">
+<!-- 开场引导 + 首次登录引导：独立两层，样式全在 onboard.css，不往 app.css 里加东西 -->
 <link rel="stylesheet" href="onboard.css">
+<!-- 形态页鼓点波形条：F3 开关，浮层自己在 stage-viz.js 里建 -->
+<link rel="stylesheet" href="stage-viz.css">
 <!-- 歌单搬运：工具箱里那一项，浮层自己注入，样式独立 -->
 <link rel="stylesheet" href="migrate.css">
+<!-- AI 自定义工坊：工具箱里的形态工坊（用户拿网页 AI 写的形态粘回来） -->
+<link rel="stylesheet" href="studio/studio.css">
 </head>
 <!-- pbn-off 永久写在 body 上：主页面播放条整体撤掉（皮肤 / 新版底栏脚本都不再加载），
      第一帧就把新旧两条底栏都藏住，--player-h 归零让视图铺到底。
      目前没有任何脚本会摘掉这个类；以后要加新底栏，再用这套机制接管。 -->
 <body class="pbn-off">
+<!-- 2026-11-14：主界面诊断条（临时报障构建用）。
+     vivo Y 那批机器上设置页点不开，诊断只能直接摆在主界面上。
+     纯 ES5、不依赖 app.js / 任何样式表、pointer-events:none 不挡点击：
+     即使 oklch / color-mix 这类新语法整条失效，这一条也照样能画出来。
+     定位看清楚之后删掉这一段即可。 -->
+<script>
+(function () {
+  /* 2026-11-14 晚：默认关掉，只有 URL 带 ?diag=1 才画。
+     留这一段是为了下次真机上还能一键拉出来；不再默认挂在主界面上。 */
+  if (!/[?&]diag=1/.test(location.search)) return;
+  var bar = null;
+  var lastErr = '';
+  function safe(fn, dflt) { try { return fn(); } catch (e) { return dflt; } }
+  function ensure() {
+    if (bar) return bar;
+    bar = document.createElement('pre');
+    bar.id = 'lizi-diag-overlay';
+    bar.setAttribute('aria-hidden', 'true');
+    var s = bar.style;
+    s.position = 'fixed'; s.left = '0'; s.right = '0'; s.top = '0';
+    s.zIndex = '2147483000'; s.margin = '0'; s.padding = '8px 12px';
+    s.background = 'rgba(0,0,0,.82)'; s.color = '#fff';
+    s.font = '13px/1.45 ui-monospace,Consolas,monospace';
+    s.whiteSpace = 'pre-wrap'; s.wordBreak = 'break-all';
+    s.pointerEvents = 'none'; s.maxHeight = '45%'; s.overflow = 'hidden';
+    (document.body || document.documentElement).appendChild(bar);
+    return bar;
+  }
+  function sup(p, v) {
+    return safe(function () {
+      return !!(window.CSS && CSS.supports && CSS.supports(p, v));
+    }, null);
+  }
+  function mark(b) { return b === null ? '?' : (b ? '有' : '无'); }
+  function paint() {
+    var el = ensure();
+    var ua = safe(function () { return navigator.userAgent || ''; }, '');
+    var m = /(?:Chrome|Chromium)\/(\d+)/.exec(ua);
+    var hall = document.getElementById('view-hall');
+    var plat = document.getElementById('hall-plat');
+    var rail = safe(function () { return document.querySelector('#view-hall .hall-rail'); }, null);
+    var me = safe(function () { return document.querySelector('#view-hall .hall-cell--me'); }, null);
+    var view = '?';
+    var views = document.querySelectorAll('.view');
+    for (var i = 0; i < views.length; i++) {
+      if (String(views[i].className).indexOf('is-active') >= 0) view = views[i].id || '?';
+    }
+    var platMode = !!(plat && hall && String(hall.className).indexOf('is-plat-mode') >= 0);
+    var pid = plat ? (plat.getAttribute('data-plat') || '开') : '开';
+    var platCells = rail ? rail.children.length : '?';
+    var meLen = me && me.textContent ? me.textContent.replace(/\s+/g, '').length : 0;
+    var lines = [
+      'LIZI 诊断 · 内核 ' + (m ? m[1] : '?')
+        + ' · oklch' + mark(sup('color', 'oklch(50% 0.1 12)'))
+        + ' · color-mix' + mark(sup('color', 'color-mix(in oklab,#fff 74%,transparent)'))
+        + ' · aspect' + mark(sup('aspect-ratio', '1'))
+        + ' · inset' + mark(sup('inset', '0')),
+      '窗口 ' + Math.round(window.innerWidth || 0) + '×' + Math.round(window.innerHeight || 0)
+        + ' dpr' + (window.devicePixelRatio || 1)
+        + ' · 视图 ' + view
+        + ' · 铺色 ' + (platMode
+          ? pid + ' ' + (plat ? Math.round(plat.offsetWidth) : 0) + '×' + (plat ? Math.round(plat.offsetHeight) : 0)
+          : '关'),
+      'rail is-plat=' + (rail && String(rail.className).indexOf('is-plat') >= 0 ? '是' : '否')
+        + ' · cell ' + platCells
+        + ' · 我的 ' + meLen + ' 字'
+        + ' · app.js ' + (window.LIZI_DIAG ? 'ok' : '未跑完')
+    ];
+    if (lastErr) lines.push('err: ' + lastErr);
+    el.textContent = lines.join('\n');
+  }
+  window.addEventListener('error', function (e) {
+    lastErr = (e.message || 'error') + ' @' + String(e.filename || '').split('/').pop() + ':' + e.lineno;
+    paint();
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason;
+    lastErr = 'Promise: ' + ((r && (r.message || r)) || '');
+    paint();
+  });
+  window.addEventListener('resize', paint);
+  window.LIZI_PAINT_DIAG = paint;
+  paint();
+  setInterval(paint, 1000);
+})();
+</script>
 <script src="splash.js"></script>
 
 <!-- 背景：封面取色的光斑 + 可选的封面大图。都是背景层，不参与交互 -->
@@ -58,6 +149,7 @@
     <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="3.8"/><path d="M4.5 20a7.5 7.5 0 0115 0"/></symbol>
     <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2.5L5 13.5h6l-1 8 8-11h-6z"/></symbol>
     <symbol id="i-expand" viewBox="0 0 24 24"><path d="M9 4H4v5M15 20h5v-5M20 9V4h-5M4 15v5h5"/></symbol>
+    <symbol id="i-gyro" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/><circle cx="12" cy="12" r="1.8"/></symbol>
     <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.6" y="3.6" width="7" height="7" rx="2.2"/><rect x="13.4" y="3.6" width="7" height="7" rx="2.2"/><rect x="3.6" y="13.4" width="7" height="7" rx="2.2"/><rect x="13.4" y="13.4" width="7" height="7" rx="2.2"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><path d="M20 3V17C20 19.2091 18.2091 21 16 21C13.7909 21 12 19.2091 12 17C12 14.7909 13.7909 13 16 13C16.7286 13 17.4117 13.1948 18 13.5351V5H9V17C9 19.2091 7.20914 21 5 21C2.79086 21 1 19.2091 1 17C1 14.7909 2.79086 13 5 13C5.72857 13 6.41165 13.1948 7 13.5351V3H20ZM5 19C6.10457 19 7 18.1046 7 17C7 15.8954 6.10457 15 5 15C3.89543 15 3 15.8954 3 17C3 18.1046 3.89543 19 5 19ZM16 19C17.1046 19 18 18.1046 18 17C18 15.8954 17.1046 15 16 15C14.8954 15 14 15.8954 14 17C14 18.1046 14.8954 19 16 19Z"/></symbol>
     <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M2 12h4l2.5-6 3.5 13 3-9 2 2h5"/></symbol>
@@ -229,6 +321,18 @@
         <div class="hall-cell__body" id="hall-me"></div>
       </section>
 
+      <!-- 公开推荐：普通（非铺色）大厅也有一条能拖能点的跑马带。
+           #hall-marq 是同一个 DOM 节点：普通态由 app.js 从 #hall-plat 挪进这里，
+           进铺色态再挪回去，拖动 / 点击 / 播放走同一套处理；
+           数据走匿名 personalized（不登录也能听，登录后自然换成平台那份）。 -->
+      <section class="hall-public" id="hall-public" hidden>
+        <div class="hall-public__head">
+          <b>公开推荐</b>
+          <span>不登录也能听 · 按住往左右拖</span>
+        </div>
+        <div class="hall-public__slot" id="hall-public-slot"></div>
+      </section>
+
       <!-- 铺色态：点已登录平台方块后显示（app.js 的 applyHallTheme 切换 hidden）。
            结构两段：顶部平台图标长条 → 每日推荐跑马带。
            颜色由 --plat-bg / --plat-ink 写入，和「我的」方块同一套 PLAT_BG。
@@ -256,7 +360,8 @@
      搓碟 / 自动过渡 / 插件。三个都来自 10-26 那轮调研：
        · 搓碟 = decodeAudioData + 颗粒合成（ES 的 playbackRate 不支持负速率，只能这么做）
        · 自动过渡 = 已验证的等功率曲线 cos²+sin²≡1，这里用真音频跑一遍
-       · 插件 = 研究结论：AudioWorklet 调不了原生模块，只能外部宿主，这一页只做说明
+       · 插件 = 浏览器加载不了 VST3，所以走 services/vst-host 的 Python 宿主离线处理
+         （2026-11-17 接上 /api/vst/*；面板骨架在下面，逻辑在 app.js 的 VstLab）
      和 browse/hall 一样 top:0 + 自己留出顶栏高度，内容滚动会从玻璃顶栏下经过。 -->
 <main class="view view--lab" id="view-lab">
   <div class="lab">
@@ -266,7 +371,6 @@
     </header>
     <nav class="lab__tabs" id="lab-tabs">
       <button data-tab="dj" class="is-on">DJ 台</button>
-      <button data-tab="xfade">自动过渡</button>
       <button data-tab="vst">插件</button>
     </nav>
 
@@ -577,47 +681,45 @@
     </section>
 
 
-    <!-- 自动过渡 -->
-    <section class="lab-pane" id="lab-pane-xfade">
-      <div class="lab-split">
-        <div>
-          <div class="lab-pair">
-            <div class="lab-pair__item"><span>出场 A</span><b id="xfade-a">—</b></div>
-            <div class="lab-pair__item"><span>进场 B</span><b id="xfade-b">—</b></div>
-          </div>
-          <canvas class="lab-curve" id="xfade-curve" width="640" height="180"></canvas>
-          <p class="lab-hint">等功率：cos²+sin²≡1。曲线已验过（误差 &lt;1e-6），这里用真音频听一遍。</p>
-        </div>
-        <div class="lab-side">
-          <div class="lab-meta"><span class="lab-meta__k">过渡时长</span><span class="lab-meta__v mono" id="xfade-len">6.0s</span></div>
-          <input class="lab-range" id="xfade-len-range" type="range" min="2" max="16" step="0.5" value="6">
-          <div class="lab-meta"><span class="lab-meta__k">平台（混音感）</span><span class="lab-meta__v mono" id="xfade-held">0.55</span></div>
-          <input class="lab-range" id="xfade-held-range" type="range" min="0" max="0.8" step="0.05" value="0.55">
-          <div class="lab-btns">
-            <button class="lab-btn" id="xfade-run">跑一遍</button>
-            <button class="lab-btn lab-btn--ghost" id="xfade-stop">停</button>
-          </div>
-          <p class="lab-hint">实验室演示。接进正式播放要先把播放器改成双 deck（单 Audio 单例做不到）。</p>
-        </div>
-      </div>
-    </section>
-
-    <!-- 插件 -->
+    <!-- 插件：宿主是 services/vst-host 的 Python sidecar（server.mjs 按需拉起，
+         第一次访问 /api/vst/* 才启动，可能要十几秒）。这里只放骨架，
+         状态机 / 列表 / 搜索 / 提交处理 / 播放结果全部在 app.js 的 VstLab 里。
+         参数调音台第一版没做：后端已经收 params/preset，UI 后面再接。 -->
     <section class="lab-pane" id="lab-pane-vst">
-      <div class="lab-vst">
-        <h2>VST3 插件</h2>
-        <p class="lab-vst__lede">结论先说：<b>在应用内直接加载 VST3 做不到</b>，不是没实现，是浏览器沙箱不允许。</p>
-        <ul class="lab-vst__list">
-          <li><b>AudioWorklet 调不了原生模块</b> —— 它的全局作用域里没有 require / module / window，加载不了 <code>.node</code></li>
-          <li><b>npm 上没有可用的 Node VST3 宿主</b> —— node-vst3-host / vst3-host / vst3-js 全是 404，node-vst 停在 0.0.1</li>
-          <li><b>VST3 SDK 是 GPLv3 或 Steinberg 专有双许可</b>，闭源宿主得签协议</li>
-          <li><b>GUI 才是死结</b> —— 本机实测 Saturn 2 有 956 个参数、Timeless 3 有 1012 个，没有插件自己的界面就是不能用</li>
-        </ul>
-        <p class="lab-vst__ok">能跑的只有<b>外部宿主</b>：独立进程加载 VST3，音频走虚拟声卡。</p>
-        <pre class="lab-code" id="vst-cmd">pip install pedalboard
-python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\Common Files\VST3\FabFilter\FabFilter Pro-Q 4.vst3'); print(p.name)"</pre>
-        <p class="lab-vst__note">本机实测：107 个商业插件里 101 个能加载并处理音频（94%），性能中位 32 倍实时。</p>
-        <p class="lab-vst__todo">这个入口先留白。<b>要真接，下一步是写一个常驻的 VST 宿主进程 + 音频环回</b>，跟应用内播放分开。</p>
+      <div class="lab-vst" id="vst-lab">
+        <header class="lab-vst__head">
+          <h2>VST3 插件</h2>
+          <span class="lab-vst__state" id="vst-state" data-state="idle" role="status" aria-live="polite">待启动</span>
+        </header>
+        <p class="lab-vst__lede">插件跑在独立的 Python 宿主里，音频是<b>离线处理</b>：整首抓下来过一次插件、生成 WAV 再回到这里播放，不经过浏览器沙箱。宿主用 pedalboard 加载 VST3，SDK 走 GPLv3，所以这一整套也按 GPLv3 分发。参数调音台后续接。</p>
+
+        <div class="lab-vst__grid">
+          <section class="lab-vst__pick" aria-label="插件列表">
+            <input class="lab-vst__search" id="vst-search" type="search" placeholder="搜索插件 / 厂商" autocomplete="off" spellcheck="false">
+            <p class="lab-vst__count" id="vst-count">正在读取插件列表…</p>
+            <ul class="lab-vst__plugins" id="vst-plugins" role="listbox" aria-label="VST3 插件"></ul>
+          </section>
+
+          <section class="lab-vst__run" aria-label="离线处理">
+            <p class="lab-vst__k">当前歌曲</p>
+            <p class="lab-vst__song" id="vst-song">读取播放器状态…</p>
+            <p class="lab-vst__k">选中插件</p>
+            <p class="lab-vst__picked" id="vst-picked">还没有选插件</p>
+            <p class="lab-vst__hint" id="vst-hint" hidden></p>
+            <button class="lab-vst__probe" id="vst-probe" type="button" hidden>读取厂商 / 版本</button>
+            <button class="lab-btn lab-vst__go" id="vst-run" type="button" disabled>用这个插件处理</button>
+            <p class="lab-vst__why" id="vst-why"></p>
+            <div class="lab-vst__prog" id="vst-prog" hidden>
+              <span class="lab-vst__prog-bar" aria-hidden="true"><i></i></span>
+              <span class="lab-vst__prog-t" id="vst-prog-t">正在处理…</span>
+            </div>
+            <p class="lab-vst__err" id="vst-err" hidden></p>
+            <div class="lab-vst__out" id="vst-out" hidden>
+              <audio id="vst-audio" controls preload="metadata"></audio>
+              <p class="lab-vst__meta" id="vst-meta"></p>
+            </div>
+          </section>
+        </div>
       </div>
     </section>
   </div>
@@ -654,6 +756,11 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
      视图约定同歌手页/专辑页：top:0 + 自己留出顶栏高度，已接 bindTopbarScroll()。 -->
 <main class="view view--myalbums" id="view-myalbums"></main>
 
+<!-- ============================ 本地音乐（自定义音源） ============================
+     静态空壳的理由同 #view-myalbums：大厅平台图标条 / 设置页入口按它是否存在
+     决定可点；内容由 public/pages/local.js 渲染，样式在 public/local/local.css。 -->
+<main class="view view--local" id="view-local"></main>
+
 <!-- ============================ 工具箱（整页） ============================
      以前是大厅入口行第四张卡片下面的白底下拉浮层 —— 用户要求改成独立整页。
      静态空壳的理由和 #view-myalbums 一样：入口按它是否存在决定可点/置灰。
@@ -666,7 +773,7 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
     <header class="toolpage__head">
       <span class="toolpage__eyebrow">TOOLS</span>
       <h1 class="toolpage__title">工具箱</h1>
-      <p class="toolpage__sub">跨平台搬运歌单，或者换一种听法。</p>
+      <p class="toolpage__sub">小工具都在这里。</p>
     </header>
     <div class="toolpage__grid" id="tools-grid"></div>
   </div>
@@ -731,6 +838,10 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
           <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20c.9-3.3 3.5-5 7-5s6.1 1.7 7 5"/></svg>
           <span class="setnav__label">平台账号</span>
         </button>
+        <button class="setnav__item" type="button" data-sec="set-sec-platform">
+          <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2.2"/><circle cx="15" cy="12" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg>
+          <span class="setnav__label">平台管理</span>
+        </button>
         <button class="setnav__item" type="button" data-sec="set-sec-audio">
           <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 12h4M12 12h8M4 17h7M15 17h5"/><circle cx="15" cy="7" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="13" cy="17" r="2"/></svg>
           <span class="setnav__label">音效</span>
@@ -739,9 +850,25 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
           <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M10 9.5V19.5"/></svg>
           <span class="setnav__label">播放页</span>
         </button>
+        <button class="setnav__item" type="button" data-sec="set-sec-picture">
+          <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="M8 15l2.6-3 2.1 2.3 1.7-1.8L18 15"/><circle cx="9" cy="9" r="1.1"/></svg>
+          <span class="setnav__label">画质</span>
+        </button>
+        <button class="setnav__item" type="button" data-sec="set-sec-stagelyric">
+          <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h7"/></svg>
+          <span class="setnav__label">翻译</span>
+        </button>
         <button class="setnav__item" type="button" data-sec="set-sec-look">
           <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/></svg>
           <span class="setnav__label">外观</span>
+        </button>
+        <button class="setnav__item" type="button" data-sec="set-sec-guide">
+          <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M10.3 8.7 15.4 12l-5.1 3.3z"/></svg>
+          <span class="setnav__label">引导</span>
+        </button>
+        <button class="setnav__item" type="button" data-sec="set-sec-help">
+          <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M9.4 9.2a2.7 2.7 0 1 1 3.4 2.6c-.6.2-.9.7-.9 1.3v.5"/><circle cx="12" cy="16.6" r=".8" fill="currentColor" stroke="none"/></svg>
+          <span class="setnav__label">帮助</span>
         </button>
         <button class="setnav__item" type="button" data-sec="set-sec-about">
           <svg class="setnav__ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 11v5"/><circle cx="12" cy="8" r=".7" fill="currentColor" stroke="none"/></svg>
@@ -785,11 +912,19 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
       <!-- 音源：网易云之外的六家。扫码区默认收起，点「登录」才出现二维码（168px 见方，能直接扫）。
            一家一行（状态 / 登录 / 退出），限制直接写在行里，不藏在说明文档：
            「登录」对酷狗/汽水/波点 = 出二维码；酷我 = 粘贴 Cookie；Spotify 是官方 OAuth 跳浏览器。
-           二维码面板是共用的（#src-qr），哪家点了登录就显示哪家的码。 -->
+           二维码面板是共用的（#src-qr），哪家点了登录就显示哪家的码。
+           2026-11-16：排版和网易云那行对齐 —— 色块后补一个 34px 图标位放平台 logo，
+           名称 / 说明被 .setpage__label-group 包成上下两行。说明保留 .src-limit 类，
+           手机设置页靠它把说明收掉（见 m/phone.css）。 -->
       <div class="setpage__row setpage__row--src" data-src-row="qq">
         <span class="setpage__src-chip" aria-hidden="true"></span>
-        <span class="setpage__label">QQ 音乐</span>
-        <span class="src-limit">播放需登录 · 第三方协议</span>
+        <span class="setpage__src-avatar" aria-hidden="true">
+          <img class="setpage__src-mark" src="assets/platforms/qq.svg" alt="">
+        </span>
+        <span class="setpage__label-group">
+          <span class="setpage__label">QQ 音乐</span>
+          <span class="src-limit setpage__hint">播放需登录 · 第三方协议</span>
+        </span>
         <span class="setpage__val" id="qq-state">未连接</span>
         <button class="setpage__act" id="qq-login" type="button">登录</button>
         <button class="setpage__act" id="qq-logout" type="button" hidden>退出</button>
@@ -807,24 +942,55 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
 
       <div class="setpage__row setpage__row--src" data-src-row="kugou">
         <span class="setpage__src-chip" aria-hidden="true"></span>
-        <span class="setpage__label">酷狗音乐</span>
-        <span class="src-limit">播放需登录</span>
+        <span class="setpage__src-avatar" aria-hidden="true">
+          <img class="setpage__src-mark" src="assets/platforms/kugou-mark.svg" alt="">
+        </span>
+        <span class="setpage__label-group">
+          <span class="setpage__label">酷狗音乐</span>
+          <span class="src-limit setpage__hint">普通版 / 概念版 · 登录时各扫一次</span>
+        </span>
         <span class="setpage__val" id="kugou-state">未连接</span>
         <button class="setpage__act" id="kugou-login" type="button">登录</button>
         <button class="setpage__act" id="kugou-logout" type="button" hidden>退出</button>
       </div>
+      <!-- 概念版不再单独占一行（2026-11-21 用户要求）：点上面的「登录」，
+           二维码面板里用「酷狗音乐 / 酷狗概念版」两个页签选版本。
+           这一行只留作逻辑占位（hidden），Rubik 的 /status 仍然按两侧分别算。 -->
+      <div class="setpage__row setpage__row--src" data-src-row="kugou-lite" hidden>
+        <span class="setpage__src-chip" aria-hidden="true"></span>
+        <span class="setpage__src-avatar" aria-hidden="true">
+          <img class="setpage__src-mark" src="assets/platforms/kugou-mark.svg" alt="">
+        </span>
+        <span class="setpage__label-group">
+          <span class="setpage__label">酷狗概念版</span>
+          <span class="src-limit setpage__hint">同一酷狗账号 · 单独扫码 · 按账号 VIP 选路</span>
+        </span>
+        <span class="setpage__val" id="kugou-lite-state">未连接</span>
+        <button class="setpage__act" id="kugou-lite-login" type="button">登录</button>
+        <button class="setpage__act" id="kugou-lite-logout" type="button" hidden>退出</button>
+      </div>
       <div class="setpage__row setpage__row--src" data-src-row="qishui">
         <span class="setpage__src-chip" aria-hidden="true"></span>
-        <span class="setpage__label">汽水音乐</span>
-        <span class="src-limit">未登录只有 30 秒试听 · 要 Node 24</span>
+        <span class="setpage__src-avatar" aria-hidden="true">
+          <img class="setpage__src-mark" src="assets/platforms/qishui.svg" alt="">
+        </span>
+        <span class="setpage__label-group">
+          <span class="setpage__label">汽水音乐</span>
+          <span class="src-limit setpage__hint">未登录只有 30 秒试听 · 要 Node 24</span>
+        </span>
         <span class="setpage__val" id="qishui-state">未连接</span>
         <button class="setpage__act" id="qishui-login" type="button">登录</button>
         <button class="setpage__act" id="qishui-logout" type="button" hidden>退出</button>
       </div>
       <div class="setpage__row setpage__row--src" data-src-row="bodian">
         <span class="setpage__src-chip" aria-hidden="true"></span>
-        <span class="setpage__label">波点音乐</span>
-        <span class="src-limit">未登录只有 30 秒试听 · 仅大陆网络</span>
+        <span class="setpage__src-avatar" aria-hidden="true">
+          <img class="setpage__src-mark" src="assets/platforms/bodian.svg" alt="">
+        </span>
+        <span class="setpage__label-group">
+          <span class="setpage__label">波点音乐</span>
+          <span class="src-limit setpage__hint">未登录只有 30 秒试听 · 仅大陆网络</span>
+        </span>
         <span class="setpage__val" id="bodian-state">未连接</span>
         <button class="setpage__act" id="bodian-login" type="button">登录</button>
         <button class="setpage__act" id="bodian-logout" type="button" hidden>退出</button>
@@ -833,15 +999,69 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
       <div class="qq-qr" id="src-qr" hidden>
         <div class="qq-qr__box" id="src-qr-box"></div>
         <p class="qq-qr__status" id="src-qr-status">用手机扫码</p>
+        <!-- 只有酷狗显示：普通版 / 概念版是两个 appid，同一个酷狗账号也要各扫一次 -->
+        <div class="qq-qr__ch" id="src-qr-ch" role="group" aria-label="酷狗版本" hidden>
+          <button data-kg="kugou" class="is-on" type="button">酷狗音乐</button>
+          <button data-kg="kugou-lite" type="button">酷狗概念版</button>
+        </div>
         <p class="qq-qr__note" id="src-qr-note">第三方协议，用你自己的账号登录，风险自担</p>
       </div>
-      <!-- 平台管理：复用开场那套多选方块，只改「我的」和顶部平台条显示；
-           不重播整段开场。接线在 onboard-intro/intro.js 的 capture 监听。 -->
-      <button class="setpage__row" id="row-platforms" type="button" aria-label="管理显示的平台">
-        <span class="setpage__label">平台管理</span>
-        <span class="setpage__val" id="set-platforms">全部 7 个</span>
-        <svg class="ico setpage__caret" aria-hidden="true"><use href="#i-chevron"/></svg>
-      </button>
+    </section>
+
+    <!-- ---------- 平台管理（显示 / 隐藏 + 自定义音源） ---------- -->
+    <section class="setpage__sec setcard setcard--wide" id="set-sec-platform" aria-labelledby="setpage-h-platform">
+      <h2 class="setpage__h" id="setpage-h-platform">平台管理</h2>
+      <p class="setpage__note">关掉的平台不会出现在大厅、手机导航和搜索音源里；「平台账号」里的登录行会保留，随时可以再打开。</p>
+      <div id="plat-manage-list"></div>
+
+      <!-- 自定义音源：本地导入，不上传服务器。开关只控制它在大厅/导航里出不出现，
+           导入区始终可用（先导入再打开开关也行）。
+           2026-11-16：和上面动态生成的五行一样带「色块 + 白色 logo」小图标；
+           底色用 PLAT_BG.local 的石墨色（#3A3A3E），和 local.svg 自带底色一致。 -->
+      <div class="setpage__row setpage__row--switch">
+        <span class="setpage__src-chip" style="--src-chip:#3A3A3E" aria-hidden="true">
+          <img src="assets/platforms/local.svg" alt="">
+        </span>
+        <span class="setpage__label-group">
+          <span class="setpage__label">自定义音源</span>
+          <span class="setpage__hint">导入本地音频与歌词；显示在大厅和手机导航里</span>
+        </span>
+        <button class="setpage__switch" type="button" role="switch"
+                aria-checked="false" aria-label="显示自定义音源"
+                data-plat-toggle="local">
+          <span class="setpage__switch-knob" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <div class="local-box" id="local-box">
+        <!-- 2026-11-16 导入区：文件夹造型的卡片 + 右侧三类文件状态。
+             点卡片任意位置选文件，或把音频 / 歌词 / 封面混着拖进来，按扩展名
+             分流；三行状态由 app.js 的 LocalUI.renderStatus() 从 list() 现算。 -->
+        <div class="local-import">
+          <div class="local-folder" id="local-drop" role="button" tabindex="0"
+               aria-label="导入本地文件：点击选择，或把音频、歌词、封面图片拖进来">
+            <span class="local-folder__tab" aria-hidden="true"></span>
+            <span class="local-folder__panel">
+              <span class="local-folder__ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.1l1.8 2.2h9.1A1.5 1.5 0 0 1 21 9.7v8.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z"/>
+                  <path d="M12 11.4v5M9.7 13.7 12 11.4l2.3 2.3"/>
+                </svg>
+              </span>
+              <span class="local-folder__txt">
+                <span class="local-folder__title">把文件拖到这里，或点击选择</span>
+                <span class="local-folder__sub">音频、歌词、封面图片可以一次混着导入，按扩展名自动分流</span>
+                <span class="local-folder__exts" aria-hidden="true">MP3 FLAC WAV M4A OGG AAC OPUS · LRC YRC TXT · JPG PNG WEBP</span>
+              </span>
+            </span>
+            <span class="local-folder__busy" id="local-drop-busy" hidden aria-hidden="true"><i></i></span>
+          </div>
+          <div class="local-status" id="local-status" aria-live="polite"></div>
+        </div>
+        <p class="setpage__note" id="local-state" hidden></p>
+        <div id="local-list"></div>
+        <p class="setpage__note">文件只存在本机（浏览器存储），不上传服务器；清应用数据或换设备后要重新导入。</p>
+      </div>
     </section>
 
     <!-- ---------- 音效 ---------- -->
@@ -862,11 +1082,191 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
       <!-- 4 套播放页版式（默认 + 3 套）；卡片、预览和选择逻辑都在 player-layouts/ -->
       <p class="setpage__note">选一种立刻生效，只改播放页；不喜欢就点「默认」。</p>
       <div id="now-layout-picker"></div>
+      <!-- 歌词模糊：默认开。开时只有正在唱的一句清晰，其余行（含唱过的）虚化；
+           关掉后所有行都清晰。播放页和首页 hero 的歌词一起生效（FLIP 平移的同一组）。
+           存 localStorage['lizi.lyric.blur']，见 app.js 的 setLyricBlur；
+           和播放页抽屉「调整参数」里的是同一个开关（data-lyric-blur 批量绑定）。 -->
+      <div class="setpage__row setpage__row--switch">
+        <span class="setpage__label-group">
+          <span class="setpage__label">歌词模糊</span>
+          <span class="setpage__hint" id="set-lyric-blur-hint">开：只有正在唱的一句清晰；关：所有歌词行都清晰</span>
+        </span>
+        <button class="setpage__switch" type="button" role="switch"
+                aria-checked="true" aria-label="歌词模糊"
+                aria-describedby="set-lyric-blur-hint" data-lyric-blur>
+          <span class="setpage__switch-knob" aria-hidden="true"></span>
+        </button>
+      </div>
+      <!-- VIP 提示（2026-11-22）：右下角「当前 XX 平台账号未开通 VIP」浮层。
+           默认开；关掉后 vip-notice.js 不再弹，已经显示的立即收起。
+           存 localStorage['lizi.playbackTip']，'0' 才是关。 -->
+      <div class="setpage__row setpage__row--switch">
+        <span class="setpage__label-group">
+          <span class="setpage__label">VIP 提示</span>
+          <span class="setpage__hint" id="set-vip-tip-hint">播放 VIP 歌曲时，右下角提示当前账号未开通 VIP；关闭后不再弹出</span>
+        </span>
+        <button class="setpage__switch" id="set-vip-tip" type="button"
+                role="switch" aria-checked="true" aria-label="VIP 提示"
+                aria-describedby="set-vip-tip-hint">
+          <span class="setpage__switch-knob" aria-hidden="true"></span>
+        </button>
+      </div>
     </section>
+
+    <!-- ---------- 画质 ---------- -->
+      <section class="setpage__sec setcard setcard--half" id="set-sec-picture" aria-labelledby="setpage-h-picture">
+        <h2 class="setpage__h" id="setpage-h-picture">画质</h2>
+      <!-- 全局画质（2026-11-21）：这里存全局默认，作用于形态画面。
+           某个形态在自己的设置面板里关掉「跟随全局画质」后单独存一份，
+           改形态不动全局，改全局也不碰改过的形态（app.js 的 StagePicture）。
+           键：lizi.picture.v1 = { scale, sat, bri, fps } -->
+      <p class="setpage__note">作用于形态画面；单个形态可在形态设置里单独覆盖，互不影响。</p>
+      <div class="setpage__row">
+        <span class="setpage__label-group">
+          <span class="setpage__label">渲染比例</span>
+          <span class="setpage__hint">按比例缩小形态再放大，越低越省电、越糊</span>
+        </span>
+        <div class="setpage__seg" id="set-pic-scale" role="radiogroup" aria-label="渲染比例">
+          <button type="button" data-v="0.5" role="radio" aria-checked="false">50%</button>
+          <button type="button" data-v="0.7" role="radio" aria-checked="false">70%</button>
+          <button type="button" data-v="0.85" role="radio" aria-checked="false">85%</button>
+          <button type="button" data-v="1" role="radio" aria-checked="true" class="is-on">100%</button>
+        </div>
+      </div>
+      <div class="setpage__row">
+        <span class="setpage__label-group">
+          <span class="setpage__label">饱和度</span>
+          <span class="setpage__hint">100% 为原色</span>
+        </span>
+        <input class="setpage__range" id="set-pic-sat" type="range" min="50" max="150" step="1" value="100" aria-label="饱和度">
+        <span class="setpage__val" id="set-pic-sat-val">100%</span>
+      </div>
+      <div class="setpage__row">
+        <span class="setpage__label-group">
+          <span class="setpage__label">亮度</span>
+          <span class="setpage__hint">100% 为原始亮度</span>
+        </span>
+        <input class="setpage__range" id="set-pic-bri" type="range" min="70" max="130" step="1" value="100" aria-label="亮度">
+        <span class="setpage__val" id="set-pic-bri-val">100%</span>
+      </div>
+      <div class="setpage__row">
+        <span class="setpage__label-group">
+          <span class="setpage__label">帧率上限</span>
+          <span class="setpage__hint">对同源形态限制重绘频率；用户自建形态不受影响</span>
+        </span>
+        <div class="setpage__seg" id="set-pic-fps" role="radiogroup" aria-label="帧率上限">
+          <button type="button" data-v="0" role="radio" aria-checked="true" class="is-on">不限</button>
+          <button type="button" data-v="60" role="radio" aria-checked="false">60</button>
+          <button type="button" data-v="30" role="radio" aria-checked="false">30</button>
+        </div>
+      </div>
+      <!-- 窗口圆角：只在桌面（pointer:fine）显示，手机版整行隐藏。
+           存 localStorage['lizi.win.round']，默认开；关掉给 html 加 .win-square -->
+      <div class="setpage__row setpage__row--switch setpage__row--desktop" id="set-win-round-row" hidden>
+        <span class="setpage__label-group">
+          <span class="setpage__label">窗口圆角</span>
+          <span class="setpage__hint" id="set-win-round-hint">桌面窗口四角圆角，默认开启；关闭后是直角窗口</span>
+        </span>
+        <button class="setpage__switch" id="set-win-round" type="button" role="switch" aria-checked="true" aria-label="窗口圆角" aria-describedby="set-win-round-hint">
+          <span class="setpage__switch-knob" aria-hidden="true"></span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ---------- 翻译 ---------- -->
+      <section class="setpage__sec setcard setcard--half" id="set-sec-stagelyric" aria-labelledby="setpage-h-stagelyric">
+        <h2 class="setpage__h" id="setpage-h-stagelyric">翻译</h2>
+        <p class="setpage__note">形态底部字幕：像电影字幕一样显示当前歌词；优先用平台提供的译文，没有译文就显示原文。只影响形态，播放页和桌面歌词不动。</p>
+        <div class="setpage__row setpage__row--switch">
+          <span class="setpage__label-group">
+            <span class="setpage__label">形态字幕</span>
+            <span class="setpage__hint" id="set-stage-subtitle-hint">开启后在形态底部显示当前歌词字幕</span>
+          </span>
+          <button class="setpage__switch" type="button" role="switch"
+                  aria-checked="false" aria-label="形态字幕"
+                  aria-describedby="set-stage-subtitle-hint" id="set-stage-subtitle">
+            <span class="setpage__switch-knob" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="setpage__row">
+          <span class="setpage__label-group">
+            <span class="setpage__label">字幕语言</span>
+            <span class="setpage__hint">单语只显示译文（没有译文时显示原文）· 双语原文在上、译文在下</span>
+          </span>
+          <div class="setpage__seg" id="set-stage-submode" role="radiogroup" aria-label="字幕语言">
+            <button type="button" data-submode="trans" role="radio" aria-checked="false">单语</button>
+            <button type="button" data-submode="both" role="radio" aria-checked="true" class="is-on">双语</button>
+          </div>
+        </div>
+        <div class="setpage__row">
+          <span class="setpage__label-group">
+            <span class="setpage__label">显示</span>
+            <span class="setpage__hint">只改形态内部收到的歌词文本</span>
+          </span>
+          <div class="setpage__seg" id="set-stage-lyric" role="radiogroup" aria-label="形态歌词显示">
+            <button type="button" data-mode="orig" role="radio" aria-checked="true" class="is-on">原文</button>
+            <button type="button" data-mode="both" role="radio" aria-checked="false">双文</button>
+            <button type="button" data-mode="trans" role="radio" aria-checked="false">译文</button>
+          </div>
+        </div>
+      </section>
 
     <!-- ---------- 外观 ---------- -->
       <section class="setpage__sec setcard setcard--wide" id="set-sec-look" aria-labelledby="setpage-h-look">
         <h2 class="setpage__h" id="setpage-h-look">外观</h2>
+      <!-- 形态页按钮大小（2026-11-17）：只缩放形态页顶栏那三个胶囊
+           （返回 / 设置 / 形态），不碰歌曲胶囊、队列和下拉条目。
+           倍数写到 #view-stage 的 --stage-btn-scale，由 app.css 按现有尺寸推算，
+           见 app.js 的 stageBtnSize / applyStageBtnSize。
+           存 localStorage['lizi.stage.btnsize']，值就是倍数本身，默认 '1'。 -->
+      <div class="setpage__row">
+        <span class="setpage__label-group">
+          <span class="setpage__label">形态页按钮大小</span>
+          <span class="setpage__hint">手机版常用 · 默认 1×</span>
+        </span>
+        <div class="setpage__seg" id="set-stage-btnsize" role="radiogroup" aria-label="形态页按钮大小">
+          <button type="button" data-scale="0.8" role="radio" aria-checked="false">0.8×</button>
+          <button type="button" data-scale="1" role="radio" aria-checked="true" class="is-on">1×</button>
+          <button type="button" data-scale="1.25" role="radio" aria-checked="false">1.25×</button>
+          <button type="button" data-scale="1.5" role="radio" aria-checked="false">1.5×</button>
+          <button type="button" data-scale="2" role="radio" aria-checked="false">2×</button>
+        </div>
+      </div>
+      <!-- 陀螺仪转视角（2026-11-17）：只在触屏窄屏显示（app.js 用
+           (max-width:1280px) and (pointer:coarse) 的 matchMedia 控制 hidden，随窗口变化）。
+           存 localStorage['lizi.stage.gyro']，'1' 开、缺省关；
+           iOS 的 requestPermission 必须在开关 click 的同一调用栈里发起，见 app.js 的 onSwitchClick。
+           下面一行是说明 +「以当前朝向为准」（重设 qRef）。 -->
+      <div class="setpage__row setpage__row--switch setpage__row--gyro" id="set-gyro-row" hidden>
+        <span class="setpage__label-group">
+          <span class="setpage__label">陀螺仪转视角</span>
+        </span>
+        <button class="setpage__switch" id="set-stage-gyro" type="button"
+                role="switch" aria-checked="false" aria-label="陀螺仪转视角"
+                aria-describedby="set-stage-gyro-note">
+          <span class="setpage__switch-knob" aria-hidden="true"></span>
+        </button>
+      </div>
+      <div class="setpage__row setpage__row--gyro" id="set-gyro-note-row" hidden>
+        <span class="setpage__label-group">
+          <span class="setpage__hint" id="set-stage-gyro-note">转动手机即可转动形态视角；仅部分形态支持</span>
+        </span>
+        <button class="setpage__mini" id="set-stage-gyro-reset" type="button">以当前朝向为准</button>
+      </div>
+      <!-- 播放页悬浮（2026-11-21）：手机主播放页的 3D 悬浮 + 陀螺仪视差，
+           默认关；存 localStorage['lizi.now.float']，'1' 开。
+           和上面「陀螺仪转视角」同一套触屏窄屏显隐（app.js 的 NowFloat）。 -->
+      <div class="setpage__row setpage__row--switch setpage__row--gyro" id="set-nowfloat-row" hidden>
+        <span class="setpage__label-group">
+          <span class="setpage__label">播放页悬浮</span>
+          <span class="setpage__hint" id="set-now-float-hint">竖屏主播放页随手机倾斜轻微浮动（默认关）</span>
+        </span>
+        <button class="setpage__switch" id="set-now-float" type="button"
+                role="switch" aria-checked="false" aria-label="播放页悬浮"
+                aria-describedby="set-now-float-hint">
+          <span class="setpage__switch-knob" aria-hidden="true"></span>
+        </button>
+      </div>
       <!-- 平台头像：默认关。关着时大厅的平台方块只显示平台色块 + 图标，
            登录后也不铺账号头像；存 localStorage['lizi.hall.platAvatar']，见 app.js 的 setPlatAvatar -->
       <div class="setpage__row setpage__row--switch">
@@ -952,7 +1352,21 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
         <span class="setpage__label">推荐跑马带速度</span>
         <input class="setpage__range" id="set-marq-speed" type="range" min="0" max="100" step="1"
                value="24" aria-label="大厅每日推荐跑马带速度">
-        <span class="setpage__val" id="set-marq-speed-val">慢</span>
+        <span class="setpage__val" id="set-marq-speed-val">慢 · 1.0×</span>
+      </div>
+      <!-- 铺色态来源选择器大小（2026-11-20）：16–40px，默认 28（约为原来的 2.2 倍）。
+           只改左上角来源标签 / 面包屑和来源滚轮的倍率，长条高度、图标、跑马带都不动。
+           存 localStorage['lizi.hall.srcSize']，拖动即时生效；下面那条浅色长条是
+           尺寸预览 —— 拖滑杆时按 1.214 倍显示（和长条上按住标题一致），松手回到设定值。
+           见 app.js 的 srcSizeStored / .srcsize 样式。 -->
+      <div class="setpage__row setpage__row--range">
+        <span class="setpage__label">来源选择器大小</span>
+        <input class="setpage__range" id="set-src-size" type="range" min="16" max="40" step="1"
+               value="28" aria-label="铺色态来源选择器大小">
+        <span class="setpage__val" id="set-src-size-val">28px</span>
+      </div>
+      <div class="srcsize" id="set-src-size-stage" aria-hidden="true">
+        <span class="srcsize__label">精选</span>
       </div>
       <!-- 大厅背景效果：铺色态海报背后那块动效，六个都是 ReactBits 的移植，
            统一由 hall/bgfx/bgfx.js 调度（各家吃颜色的参数名不一样，翻译在那层做）。
@@ -1002,21 +1416,105 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
         <button class="setpage__act" id="set-bgfx-plat" type="button">跟随平台</button>
         <span class="bgfx__state" id="set-bgfx-state">跟随平台配色</span>
       </div>
-      <div class="setpage__row">
-        <span class="setpage__label">字体选择</span>
-        <span class="setpage__hint">待开放</span>
-        <span class="setpage__val">Geist</span>
+      <!-- 字体来源：默认关。关时安卓壳强制用 LIZI 自带字体（本地 Geist + Noto Sans SC），
+           不跟随手机「主题商店」换过的系统字体；开时回到 tokens.css 的系统字体链。
+           存 localStorage['lizi.font.system']，见 app.js 的 setFontSystem。
+           只在宿主 UI 生效；形态页是独立 iframe，有自己的字体栈。 -->
+      <div class="setpage__row setpage__row--switch">
+        <span class="setpage__label-group">
+          <span class="setpage__label">跟随系统字体</span>
+          <span class="setpage__hint" id="set-font-system-hint">关闭时用 LIZI 自带字体；打开后中文回落到手机系统字体（主题商店换的字体会一并生效）</span>
+        </span>
+        <button class="setpage__switch" id="set-font-system" type="button"
+                role="switch" aria-checked="false" aria-label="跟随系统字体"
+                aria-describedby="set-font-system-hint">
+          <span class="setpage__switch-knob" aria-hidden="true"></span>
+        </button>
       </div>
-      <div class="setpage__row">
+      <button class="setpage__row" id="row-shortcuts" type="button" aria-label="查看键盘快捷键">
         <span class="setpage__label">快捷键</span>
-        <span class="setpage__hint">待开放</span>
-        <span class="setpage__val">默认</span>
-      </div>
-      <!-- 开场引导：第一版先隐藏入口，代码保留（接线在 onboard.js）。
-           用 hidden 属性隐藏；app.css 的 .setpage__row[hidden] 负责压住 display:flex。 -->
-      <button class="setpage__row" id="row-tour" type="button" aria-label="重看开场引导" hidden>
-        <span class="setpage__label">开场引导</span>
+        <span class="setpage__hint">按 ? 也能打开帮助</span>
+        <span class="setpage__val">查看</span>
+        <svg class="ico setpage__caret" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+    </section>
+
+    <!-- ---------- 引导 ---------- -->
+    <!-- 和开场引导同一套黑白语言：深底 / 白字 / 1px 描边 / 4px 圆角，不加毛玻璃、
+         不加渐变光斑。两行仍是 .setpage__row，可点可键盘操作；
+         id 和 #set-tour / #set-login-guide 由 onboard.js 直接接线，不能改名。
+         状态由 localStorage 的 lizi.tour.v5（{seen, step, flow:3}）/
+         lizi.loginGuide.v1 决定，读写都在 onboard.js。 -->
+    <section class="setpage__sec setcard setcard--wide" id="set-sec-guide" aria-labelledby="setpage-h-guide">
+      <h2 class="setpage__h" id="setpage-h-guide">引导</h2>
+      <button class="setpage__row setguide__row" id="row-tour" type="button" aria-label="重看上手引导">
+        <span class="setpage__label">上手引导</span>
+        <span class="setguide__visual">
+          <!-- 三张极简示意，不再贴深色截图：白底 + 浅灰线条，浮在白色设置卡上 -->
+          <span class="setguide__shots" aria-hidden="true">
+            <svg viewBox="0 0 72 45" role="presentation">
+              <rect width="72" height="45" fill="#fff"/>
+              <g fill="none" stroke="#c9c9c9" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 7v31"/>
+                <rect x="14" y="8" width="18" height="18" rx="2" fill="#f4f4f4"/>
+                <path d="M39 11h20M39 16h14M39 21h18"/>
+                <path d="M14 35h44"/>
+                <circle cx="60" cy="35" r="3"/>
+                <path d="M59 33.4l2 1.6-2 1.6z" fill="#c9c9c9" stroke="none"/>
+              </g>
+            </svg>
+            <svg viewBox="0 0 72 45" role="presentation">
+              <rect width="72" height="45" fill="#fff"/>
+              <g fill="none" stroke="#c9c9c9" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="8" width="34" height="29" rx="2"/>
+                <path d="M17 15h18M17 21h14M17 27h16"/>
+                <rect x="48" y="8" width="15" height="29" rx="2" fill="#f4f4f4"/>
+                <path d="M52 16h7M52 22h7M52 28h7"/>
+              </g>
+            </svg>
+            <svg viewBox="0 0 72 45" role="presentation">
+              <rect width="72" height="45" fill="#fff"/>
+              <g fill="none" stroke="#c9c9c9" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="8" y="12" width="14" height="22" rx="2" opacity=".78"/>
+                <rect x="27" y="8" width="18" height="29" rx="2" fill="#f4f4f4"/>
+                <rect x="50" y="12" width="14" height="22" rx="2" opacity=".78"/>
+                <path d="M11 18h8M30 13h12M53 18h8"/>
+                <path d="M33 31h6"/>
+              </g>
+            </svg>
+          </span>
+          <span class="setguide__note">欢迎二选一 → 选平台 → 登录 → 跑马带 / 海报 → 控制 / 形态 / 侧键</span>
+        </span>
         <span class="setpage__val" id="set-tour">还没看过</span>
+        <svg class="ico setpage__caret" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+      <button class="setpage__row setguide__row" id="row-login-guide" type="button" aria-label="重看登录引导">
+        <span class="setpage__label">登录引导</span>
+        <span class="setguide__visual">
+          <span class="setguide__scheme" aria-hidden="true">
+            <span class="sg-rows"><i></i><i class="sg-row--on"></i><i></i></span>
+            <span class="sg-arrow"></span>
+            <span class="sg-qr"></span>
+          </span>
+          <span class="setguide__note">选平台 → 切到设置 → 圈出那一行 → 扫码（可多家接力）</span>
+        </span>
+        <span class="setpage__val" id="set-login-guide">还没看过</span>
+        <svg class="ico setpage__caret" aria-hidden="true"><use href="#i-chevron"/></svg>
+      </button>
+    </section>
+
+    <!-- ---------- 使用帮助（入口） ---------- -->
+    <!-- 2026-11-22：文档原本整段铺在这一节里，太长太乱。现在只留一行入口，
+         全文放在 body 末尾的 #helpdoc-sheet 独立浮层里（内容仍写在本文件）。 -->
+    <section class="setpage__sec setcard setcard--wide" id="set-sec-help" aria-labelledby="setpage-h-help">
+      <h2 class="setpage__h" id="setpage-h-help">使用帮助</h2>
+      <p class="setpage__note">登录、大厅、播放页、形态和常见问题都写在里面。</p>
+      <button class="setpage__row" id="set-open-help" type="button" aria-haspopup="dialog">
+        <span class="setpage__label-group">
+          <span class="setpage__label">使用帮助</span>
+          <span class="setpage__hint">第一次用先看这里 · 按当前版本的实际行为写</span>
+        </span>
+        <span class="setpage__val">打开</span>
         <svg class="ico setpage__caret" aria-hidden="true"><use href="#i-chevron"/></svg>
       </button>
     </section>
@@ -1036,6 +1534,9 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
              window.__liziNative 存在时取消 hidden） -->
         <button class="setpage__checkupd" id="set-check-update" type="button" hidden>检查更新</button>
       </div>
+      <!-- 运行环境诊断（2026-11-14）：老系统 WebView（vivo Y 这批）缺 oklch /
+           color-mix，大厅铺色态会整块失效。这一行只为让用户截图报障，不参与任何判断。 -->
+      <p class="setpage__note setpage__note--diag" id="set-diag-note">运行环境：—</p>
       <!-- QQ 群：点整行走 app.js 的 openExternal（桌面交给系统浏览器，安卓走原生桥） -->
       <button class="setpage__row" id="set-qq-group" type="button"
               aria-label="加入 QQ 群：LIZI用户体验群，群号 1132061192">
@@ -1219,6 +1720,15 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
               <input class="sl" type="range" min="16" max="160" step="1" value="100" aria-label="歌词与封面间距">
             </div>
           </div>
+          <!-- 歌词模糊：和设置页「播放页排版」里的是同一个开关（同存 lizi.lyric.blur）。
+               用 data-lyric-blur 绑定，两处不共 id；深色玻璃配色见 app.css 的 .diy-toggle。 -->
+          <div class="diy-toggle">
+            <span class="diy-toggle__label">歌词模糊</span>
+            <button class="setpage__switch" type="button" role="switch"
+                    aria-checked="true" aria-label="歌词模糊" data-lyric-blur>
+              <span class="setpage__switch-knob" aria-hidden="true"></span>
+            </button>
+          </div>
         </div>
       </section>
     </div>
@@ -1279,6 +1789,9 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
      「形态」是下拉菜单（不再跳整屏画廊）；歌曲那一块收起时只有一个 1:1 封面，
      靠近就展开成迷你播放器（切歌 + 时间轴）。整条静止 2.6 秒淡出。 -->
 <div class="view view--stage" id="view-stage">
+  <!-- 进场海报：形态第一帧画出来之前先铺它的预览图，替代 #05060a 的黑板。
+       ready 后淡出（app.js 的 setStagePoster / clearStagePoster）。 -->
+  <div class="stage-poster" id="stage-poster" aria-hidden="true"></div>
   <iframe class="stage__frame" id="stage-frame" title="舞台" allow="autoplay"></iframe>
   <!-- 浮层隐藏时的透明点击层：手机上的点击会被 iframe 吞掉，
        这一层只负责把浮层叫出来（不传给形态）；弹出后 app.js 立刻撤掉它。 -->
@@ -1299,7 +1812,7 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
           <div class="snow__body">
             <div class="snow__info">
               <b id="stage-name">未播放</b>
-              <i id="stage-sub">—</i>
+              <i id="stage-song-sub">—</i>
             </div>
             <div class="snow__keys">
               <button class="snow__key" id="stage-prev" aria-label="上一首">
@@ -1319,10 +1832,26 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
                 <i id="stage-fill"></i>
               </div>
               <span class="time" id="stage-d">0:00</span>
+              <!-- 2026-11-16 队列下拉入口：插在总时长之后、.snow__prog 最右端。
+                   浮层由 snow-queue.js 创建，不在 .snow__body 里（避免 overflow:hidden 裁掉）。 -->
+              <button class="snowq__btn" id="stage-queue-btn" type="button"
+                      aria-label="播放队列" aria-haspopup="dialog" aria-expanded="false"
+                      aria-controls="stage-queue-pop" title="播放队列 · 换歌单">
+                <svg class="ico" aria-hidden="true"><use href="#i-chevron"/></svg>
+              </button>
             </div>
           </div>
         </div>
       </div>
+
+      <!-- 陀螺仪回正（2026-11-17）：只在陀螺仪开启 + 当前形态支持时显示（app.js 的
+           StageGyro.updateButton）。放在 .sbar-right 里并带 .btn，
+           所以现有的 --stage-btn-scale（形态页按钮大小）会自动生效。 -->
+      <button class="btn btn--ghost lg-surface lg-sheen" id="stage-gyro-btn"
+              aria-label="回正视角" title="以当前朝向为准"
+              data-liquid-glass='{"autoScale":true,"scaleRef":56}' hidden>
+        <svg class="ico" aria-hidden="true"><use href="#i-gyro"/></svg><span>回正</span>
+      </button>
 
       <button class="btn btn--ghost lg-surface lg-sheen" id="stage-settings-btn"
               aria-label="设置"
@@ -1520,27 +2049,157 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
 <!-- 圆形蒙版：一次点击 = 一个圆从卡片圆心长到盖满屏幕 -->
 <div class="iris" id="stage-iris" aria-hidden="true"></div>
 
-<!-- 开场引导（聚光灯巡游）：点开一次，5 步指认大厅里的真实控件。
-     三层：景深层（backdrop-filter 模糊 + SVG 遮罩挖出羽化窗口）/ 粒子层 / 说明层。
-     z-index 300 —— 比顶栏(60)和全站最高层(200)都高，才能把整页盖住。
-     逻辑和文案都在 onboard.js，这里只留壳子；首次自动弹一次由 localStorage 记。 -->
-<div class="tour" id="tour" hidden role="dialog" aria-modal="true" aria-labelledby="tour-title">
-  <div class="tour__intro" id="tour-intro" aria-hidden="true"></div>
-  <div class="tour__dof" id="tour-dof" aria-hidden="true"></div>
-  <canvas class="tour__fx" id="tour-fx" aria-hidden="true"></canvas>
-  <div class="tour__card">
-    <div class="tour__meta">
-      <span class="tour__idx"><b class="tour__now">01</b><i>/</i><span class="tour__total">05</span></span>
-      <span class="tour__rule" aria-hidden="true"></span>
-    </div>
-    <h2 class="tour__title" id="tour-title"></h2>
-    <p class="tour__desc"></p>
-    <div class="tour__acts">
-      <button class="tour__btn" id="tour-next" type="button">下一步</button>
-      <button class="tour__btn tour__btn--ghost" id="tour-skip" type="button">跳过</button>
-      <span class="tour__hint"></span>
+<!-- 开场引导（v7 实战版）：欢迎动画 + 一次二选一 → 平台多选 → 逐个登录
+     → 真实界面聚光灯。欢迎页只有两个出口：「我会用，直接进」写 seen 收尾，
+     「带我走一遍」进入强制引导——此后没有跳过 / Esc / 点遮罩退出，只能靠
+     点真实目标一步一步走完；目标确实拿不到时由 onboard.js 自动跳步。
+     选平台的多选行由 onboard.js 按 window.LIZI_ACCOUNTS 现画；登录走
+     下面的 #login-guide（「先不登录 / 我已完成」是登录分支，不是退出）。
+     聚光灯（#coach）全层 pointer-events:none，四块遮罩 / 白圈 / 标签 /
+     步骤卡都只是看的，真实界面能被直接拖、直接点。逻辑和文案在 onboard.js，
+     样式在 onboard.css；进度存 lizi.tour.v5（{seen, step, flow:3}）。
+     z-index 400：盖过顶栏 60 和登录层 320。 -->
+<div class="tour" id="tour" role="dialog" aria-modal="true" aria-label="LIZI 上手引导" hidden tabindex="-1">
+
+  <div class="tour__viewport">
+    <div class="tour__track" id="tour-track">
+
+      <!-- 欢迎：白点 → 细条 → 四段滑进 LI 标记 → LIZI 字标逐字出现。
+           变形照常播，但页面只停在这里等一次二选一：
+           「带我走一遍」进选平台并从此强制走完；「我会用，直接进」写 seen 收尾。 -->
+      <section class="tour__page tour__page--welcome" data-page="0" aria-hidden="true">
+        <div class="tour__anim" aria-hidden="true">
+          <div class="w-lock">
+            <span class="w-dot"></span>
+            <!-- 四段细条分别滑向 LI 标记四个 polygon 的重心（--tx / --ty） -->
+            <span class="w-seg" style="--sx:-69px; --tx:-34px; --ty:-6px"></span>
+            <span class="w-seg" style="--sx:-23px; --tx:-15px; --ty:41px"></span>
+            <span class="w-seg" style="--sx:23px; --tx:42px; --ty:-37px"></span>
+            <span class="w-seg" style="--sx:69px; --tx:23px; --ty:9px"></span>
+            <!-- 直接复用顶栏 #brand 的标记路径（index.html 上方） -->
+            <svg class="w-mark" viewBox="328 329 368 366" fill="currentColor">
+              <polygon points="328.94,329.76 396.71,329.76 396.71,569.57 458.02,519.41 458.02,545.48 328.94,649.91"/>
+              <polygon points="328.94,672.81 396.71,617.97 396.71,630.67 554.47,630.67 587.80,694.32 328.94,694.32"/>
+              <polygon points="627.86,329.76 695.15,329.76 695.15,372.74 627.86,428.80"/>
+              <polygon points="490.18,566.83 695.15,395.57 695.15,694.32 627.86,694.32 627.86,479.80 490.18,595.37"/>
+            </svg>
+          </div>
+          <!-- 字标拆成 L / I / Z / I 四段，逐字出现；路径同样来自 #brand -->
+          <span class="w-word">
+            <svg viewBox="0 0 66 100" fill="currentColor"><polygon points="0,0 19,0 19,81 47,81 66,100 0,100"/></svg>
+            <svg viewBox="84 0 19 100" fill="currentColor"><rect x="84" width="19" height="100"/></svg>
+            <svg viewBox="121 0 66 100" fill="currentColor">
+              <rect x="121" width="66" height="18"/>
+              <polygon points="169,18 187,18 139,82 121,82"/>
+              <rect x="121" y="82" width="66" height="18"/>
+            </svg>
+            <svg viewBox="205 0 19 100" fill="currentColor"><rect x="205" width="19" height="100"/></svg>
+          </span>
+        </div>
+        <h2 class="tour__title">欢迎来到 LIZI</h2>
+        <p class="tour__desc">接下来带你在真实界面里走一遍，点一点就会。</p>
+        <p class="tour__legal">本播放器只做播放与整理，<b>不提供任何绕过音乐平台会员（VIP）或付费限制的功能</b>。</p>
+        <p class="tour__legal">汽水音乐目前只能试听 30 秒（会员也一样）；各平台的完整曲目与音质以平台规则和你的账号权益为准。</p>
+        <!-- 设备配置推荐（2026-11-21）：只在手机 / 触屏上出现。onboard.js 读
+             核心数 / 内存 / DPR / 屏幕分辨率给一条建议，点了才写全局画质，
+             不点不影响任何设置（键 lizi.picture.v1，见 app.js 的 StagePicture）。 -->
+        <div class="tour__device" id="tour-device" hidden>
+          <p class="tour__device-line" id="tour-device-line"></p>
+          <button class="tour__device-apply" id="tour-device-apply" type="button">用推荐设置</button>
+        </div>
+        <div class="tour__choose">
+          <button class="tour__primary" id="tour-walk" type="button">带我走一遍</button>
+          <button class="tour__ghost" id="tour-direct" type="button">我会用，直接进</button>
+        </div>
+      </section>
+
+      <!-- 选平台：平台行从底部依次浮起，可以勾多家；「登录」勾了才可用。
+           清单来自 window.LIZI_ACCOUNTS（五家），行由 onboard.js 现画。 -->
+      <section class="tour__page tour__page--pick" data-page="1" aria-hidden="true" hidden>
+        <p class="tour__kick">第 2 / 10 步 · 挑平台</p>
+        <h2 class="tour__title tour__title--pick">想听哪几家？勾上就行，可以多选</h2>
+        <p class="tour__desc">勾好的会一家一家带你登录；已经登录的会标出来，直接跳过。不登录也能先逛逛。</p>
+        <div class="tour__plats" id="tour-plats" role="group" aria-label="选择要登录的平台"></div>
+        <div class="tour__pickacts">
+          <button class="tour__primary" id="tour-login" type="button" disabled>登录</button>
+          <button class="tour__ghost" id="tour-skip-plats" type="button">先不登录，继续</button>
+        </div>
+      </section>
+
     </div>
   </div>
+</div>
+
+<!-- 实战聚光灯：选平台/登录结束后，关掉全屏层，在这里指着真实界面走。
+     四块面板拼出镂空（纯色，不用模糊），高亮孔里是真实界面，直接点/拖。
+     整层 pointer-events:none，遮罩 / 白圈 / 标签 / 卡片都只是看的，
+     不提供下一步/跳过按钮，也没有点遮罩退出；只能点真实目标前进。
+     位置由 onboard.js 按真实 getBoundingClientRect() 事件驱动重算。 -->
+<div class="coach" id="coach" hidden>
+  <div class="coach__shade" aria-hidden="true"></div>
+  <div class="coach__shade" aria-hidden="true"></div>
+  <div class="coach__shade" aria-hidden="true"></div>
+  <div class="coach__shade" aria-hidden="true"></div>
+  <div class="coach__ring" id="coach-ring" aria-hidden="true"></div>
+  <div class="coach__tags" id="coach-tags" aria-hidden="true"></div>
+  <div class="coach__cursor" id="coach-cursor" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><path d="M4 2l16 10.2-8.1 1.7-3.2 7.6z"/></svg>
+  </div>
+  <section class="coach__card" id="coach-card" role="dialog" aria-modal="false" aria-labelledby="coach-title">
+    <p class="coach__k"><b id="coach-step">第 4 / 10 步 · 点这里</b></p>
+    <h3 class="coach__title" id="coach-title"></h3>
+    <p class="coach__desc" id="coach-desc"></p>
+  </section>
+</div>
+
+<!-- 完成页：第 10 步走完后由 onboard.js 单独显示（独立层，不能放进 #coach，
+     teardown 会把 #coach 整个藏掉）。纯黑/深灰，和聚光灯同一套语言。 -->
+<div class="tour-done" id="tour-done" role="dialog" aria-modal="true" aria-labelledby="tour-done-title" hidden>
+  <section class="tour-done__card">
+    <span class="tour-done__mark" aria-hidden="true">✓</span>
+    <p class="tour-done__kick">10 / 10 · 全部完成</p>
+    <h2 class="tour-done__title" id="tour-done-title">恭喜，你已经会用 LIZI 了</h2>
+    <p class="tour-done__desc">从挑歌到换形态，这一遍你都亲手走过了。</p>
+    <ul class="tour-done__list">
+      <li>挑歌：点卡片，或按住跑马带左右拖</li>
+      <li>换音源：铺色态左上角的平台名</li>
+      <li>播放：点海报进播放页</li>
+      <li>形态：抽屉里「进入形态」</li>
+      <li>侧键：我的喜欢 / 形态长廊 / 我的专辑 / 工具箱</li>
+    </ul>
+    <button class="tour-done__btn" id="tour-done-go" type="button">开始探索</button>
+    <p class="tour-done__note">想重看，可以在设置 → 引导里再走一遍。</p>
+  </section>
+</div>
+
+<!-- 首次登录引导：tour 结束（或第一次点任一平台「登录」）且五家都未登录时出现。
+     选择层 → 切设置页、圈出那一行 → 自动点「登录」叫出二维码 → 提示扫码。
+     只模拟点击现有按钮，不复制登录逻辑；样式和逻辑在 onboard.css / onboard.js。 -->
+<div class="lguide" id="login-guide" hidden>
+  <div class="lguide__veil" aria-hidden="true"></div>
+  <section class="lguide__panel" role="dialog" aria-modal="true" aria-labelledby="lguide-title">
+    <p class="lguide__kicker">首次登录 · 一步一步来</p>
+    <h2 class="lguide__title" id="lguide-title">先选一个平台</h2>
+    <p class="lguide__lead">选一家，接下来会带你切到「设置 → 平台账号」，圈出这一行，再由那行的「登录」叫出二维码。</p>
+    <div class="lguide__list" id="lguide-list"></div>
+    <footer class="lguide__foot">
+      <span class="lguide__hint">任一平台登录后，其余几家随时能在设置 →「平台账号」里再加。Esc 或「以后再说」关掉。</span>
+      <button class="tour__btn tour__btn--ghost" id="lguide-later" type="button">以后再说</button>
+    </footer>
+  </section>
+  <!-- 从开场引导的多选登录进来时，这里常驻一枚「我已完成」：
+       登录界面一出现就能点，不必等队列走完。 -->
+  <button class="lguide-all" id="lguide-all" type="button" hidden>我已完成</button>
+  <div class="lguide-ring" id="lguide-ring" hidden aria-hidden="true"></div>
+  <section class="lguide-tip" id="lguide-tip" role="dialog" aria-labelledby="lguide-tip-title" hidden>
+    <p class="lguide-tip__k">登录引导 <b id="lguide-step">01 / 03</b></p>
+    <h3 class="lguide-tip__title" id="lguide-tip-title"></h3>
+    <p class="lguide-tip__desc" id="lguide-tip-desc"></p>
+    <div class="lguide-tip__acts">
+      <button class="tour__btn" id="lguide-done" type="button">完成</button>
+      <button class="tour__btn tour__btn--ghost" id="lguide-skip" type="button">跳过</button>
+    </div>
+  </section>
 </div>
 
 <!-- 新版本提示条（桌面壳专用，小尺寸）：默认隐藏。
@@ -1582,6 +2241,69 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
   </section>
 </div>
 
+<!-- 使用帮助全文（2026-11-22）：设置页只留一行入口，点开这个独立浮层。
+     内容按当前版本的实际行为写；不接任何请求逻辑。开合由 app.js 末尾的
+     initHelpSheet() 管（ESC / 点遮罩 / 关闭按钮都能关，关掉后焦点回入口）。 -->
+<div class="helpdoc-sheet" id="helpdoc-sheet" hidden>
+  <section class="helpdoc-sheet__card" role="dialog" aria-modal="true" aria-labelledby="helpdoc-sheet-title">
+    <header class="helpdoc-sheet__head">
+      <h2 class="helpdoc-sheet__title" id="helpdoc-sheet-title">使用帮助</h2>
+      <button class="helpdoc-sheet__x" id="helpdoc-sheet-close" type="button" aria-label="关闭">×</button>
+    </header>
+    <div class="helpdoc-sheet__body">
+      <div class="helpdoc">
+        <h3>1. 先登录一个音源</h3>
+        <p>打开「设置 → 平台账号」，点某个平台那一行的「登录」，用手机扫码。不登录也能搜索和浏览；能不能播、能播多久由各平台限制，每行的小字里都写了。</p>
+        <ul>
+          <li><b>网易云</b>：扫码，或粘贴 MUSIC_U Cookie。</li>
+          <li><b>QQ 音乐</b>：扫码，可选 QQ 音乐 / 手机 QQ / 微信三种渠道；未登录不能播放。</li>
+          <li><b>酷狗</b>：点「登录」后在二维码面板里选「酷狗音乐」或「酷狗概念版」。两个版本是不同的 appid，同一个账号也要各扫一次。</li>
+          <li><b>汽水</b>：抖音扫码。目前只能试听 30 秒，会员也一样（接口限制）。</li>
+          <li><b>波点</b>：扫码；未登录只有 30 秒，播放只放行中国大陆网络。</li>
+        </ul>
+        <p class="helpdoc__tip">本播放器只做播放与整理，不提供任何绕过音乐平台会员（VIP）或付费限制的功能，也不会代你领取任何平台权益。</p>
+
+        <h3>2. 大厅怎么挑歌</h3>
+        <ol>
+          <li><b>铺色态</b>：登录后从大厅进入铺色首页。左上角的平台名就是来源选择器，点开滚轮可以换平台、换歌单、回到每日推荐。</li>
+          <li><b>跑马带</b>：按住左右拖，或直接点卡片播放。</li>
+          <li><b>海报</b>：点中间的大封面进入播放页。</li>
+          <li><b>左侧竖键</b>：我的喜欢 / 形态长廊 / 我的专辑 / 工具箱。</li>
+        </ol>
+
+        <h3>3. 播放页</h3>
+        <p>点海报进入。封面悬停会出现播放 / 暂停；右上角「控制」打开抽屉，里面有播放队列、音效、歌词设置和「进入形态」。最底下是播放条。</p>
+
+        <h3>4. 形态（舞台）</h3>
+        <p>抽屉里点「进入形态」展开形态列表，点任意一个就进舞台。形态是横屏作品，手机上会自动转横屏，退出后回到原来的方向。形态长廊里可以收藏常用的形态。</p>
+
+        <h3>5. 手机版</h3>
+        <p>顶栏右上角有转屏按钮，设置里也能选基准方向。形态里始终横屏。想在锁屏 / 通知中心控制播放，需要在系统里允许 LIZI 的通知。</p>
+
+        <h3>6. 设置里都有什么</h3>
+        <ul>
+          <li><b>平台账号</b>：登录 / 退出各平台。</li>
+          <li><b>平台管理</b>：控制平台在大厅和搜索里出不出现。</li>
+          <li><b>音效</b>：均衡器、空间音频等。</li>
+          <li><b>播放页</b>：版式、从封面取色等。</li>
+          <li><b>翻译</b>：形态歌词的译文 / 双语显示。</li>
+          <li><b>外观</b>：大厅背景、铺色面板、来源选择器大小。</li>
+          <li><b>引导</b>：重看上手引导。</li>
+        </ul>
+
+        <h3>7. 常见问题</h3>
+        <p><b>为什么汽水只能听 30 秒？</b> 目前接口只能取到 30 秒试听片段，登录会员也一样。</p>
+        <p><b>为什么酷狗概念版要单独扫码？</b> 两个版本 appid 不同，同一个酷狗账号也要各授权一次；登录后只按账号当前的 VIP 选路，不会代领任何 VIP。</p>
+        <p><b>本地背景图重启后没了？</b> 从本机选的图片 / 视频只活本次运行，重启后需要重新选。</p>
+        <p><b>形态里点不动？</b> 先确认设备已经横过来；手机上退出形态会自动转回。部分形态本身要拖动画面。</p>
+
+        <h3>8. 数据与隐私</h3>
+        <p>登录凭证和设置只存在本机，不上传。第三方协议登录有账号风险，请只用自己的账号。</p>
+      </div>
+    </div>
+  </section>
+</div>
+
 <script src="assets/liquid-glass.js"></script>
 <script src="hall/grainient.js"></script>
 <!-- 铺色块后景的另外五种效果（ReactBits 移植）：统一由 hall/bgfx/bgfx.js 调度 -->
@@ -1596,16 +2318,29 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
 <script src="hall/circular-carousel.js" defer></script>
 <link rel="stylesheet" href="hall/canvas-reveal.css">
 <script src="hall/canvas-reveal.js"></script>
+<!-- 形态分类页签的 Rubber Segment（2026-11-16）：原生 JS，不依赖 React/motion -->
+<link rel="stylesheet" href="hall/rubber-segment.css">
+<script src="hall/rubber-segment.js"></script>
 <script src="api.js"></script>
 <!-- 大厅「我的」卡的多平台账号注册表：加平台只改这个文件（接法见文件头注释） -->
 <script src="hall/accounts.js"></script>
+<!-- VIP 曲目 + 账号未开通 VIP 的右下角提示；查询失败/未知不弹（见 vip-notice.js） -->
+<script src="/vip-notice.js"></script>
 <script src="beat.js"></script>
+<!-- 专用底鼓检测：从 beat.js 的 busIn 并行分出一条低通支路，和主检测并存 -->
+<script src="kick.js"></script>
+<!-- 形态页 F3 鼓点波形条：只消费 beat.js 的 analyser 和 kick.js 的触发，不另建音频图 -->
+<script src="stage-viz.js"></script>
 <script src="audio/eq-engine.js"></script>
 <script src="audio/eq-ui.js"></script>
 <script src="audio/glide.js" defer></script>
+<script src="local/lib.js"></script>
 <script src="player.js"></script>
 <script src="hall/option-wheel.js"></script>
 <script src="app.js"></script>
+<!-- 形态页迷你播放器的队列下拉（2026-11-16）：只读 Player.state.queue / 复用 playQueue -->
+<link rel="stylesheet" href="snow-queue.css">
+<script src="snow-queue.js"></script>
 <script src="ar-pair.js" defer></script>
 <!-- F5 歌声延迟面板：全局一个偏移量，作用于所有舞台的 tick.time -->
 <script src="lyric-delay.js" defer></script>
@@ -1613,20 +2348,28 @@ python -c "from pedalboard import load_plugin; p=load_plugin(r'C:\Program Files\
 <script src="win-anim.js"></script>
 <!-- 歌单搬运：跨平台迁移浮层（入口在工具箱 TOOLBOX 里） -->
 <script src="migrate.js"></script>
+<!-- AI 自定义工坊：入口同样在工具箱 TOOLBOX（id: studio） -->
+<script src="studio/studio.js"></script>
 <script src="tools/spatial/spatial.js" defer></script>
+<!-- 歌单世界杯：随机抽签 + 一对一淘汰，入口在工具箱 TOOLBOX（id: worldcup） -->
+<script src="tools/worldcup/worldcup.js" defer></script>
 <!-- 小卡先隐藏（文件保留，恢复时取消注释；顺序必须 shader 先、外壳后） -->
 <!-- <script src="tools/holocard/holo-shader.js" defer></script> -->
 <!-- <script src="tools/holocard/holocard.js" defer></script> -->
 <link rel="stylesheet" href="player-layouts/player-layouts.css">
 <script src="player-layouts/player-layouts.js" defer></script>
-<!-- 开场引导：第一版整体隐藏，脚本不再加载（文件保留，onboard.js 会自己找 DOM 并绑
-     设置页那一行，且没有 intro.js 写 lizi.tour.v1 时会自动弹出旧引导）。 -->
-<!-- <script src="onboard.js"></script> -->
+<!-- 开场引导 + 首次登录引导：onboard.js 自己找 DOM、绑设置页的两行入口；
+     首次自动弹由 lizi.tour.v5 决定（欢迎 / 多选登录 / 真实界面聚光灯一条链），
+     登录引导由 lizi.loginGuide.v1 决定。 -->
+<script src="onboard.js"></script>
 <!-- 主页面播放条整体撤掉：player-skins.css / player-skins.js / player-bar-next.js
      三条引用已删（文件保留在磁盘上，以后要恢复就把这三行加回来）。 -->
 <!-- 我的专辑：模块自 boot（module 脚本天然在 app.js 之后跑）。
      有了这一行，大厅入口不管走 lizi:show 还是直接 show('myalbums')，陈列架都能被叫醒；
      pages/nav.js 里 import 的是同一个 URL，模块只有一份。 -->
 <script type="module" src="pages/myalbums.js"></script>
+<!-- 五平台红心：播放页传输排 + 形态页迷你播放器（独立模块，不改 app.js） -->
+<link rel="stylesheet" href="like.css">
+<script src="like.js" defer></script>
 </body>
 </html>

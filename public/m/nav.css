@@ -15,7 +15,7 @@
 
 .navrows {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -82,7 +82,7 @@
   color: var(--tile-ink, #fff);
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / .05);
 }
-.gnode--tile::before { inset: -7px; }
+.gnode--tile::before { top: -7px; right: -7px; bottom: -7px; left: -7px; }
 .gnode--tile:active { background: var(--tile-bg, #8a8a8a); filter: brightness(.94); }
 .gnode--tile.is-on {
   box-shadow:
@@ -156,7 +156,7 @@
 .tnode::before {
   content: '';
   position: absolute;
-  inset: -8px -6px;
+  top: -8px;  right: -6px;  bottom: -8px;  left: -6px;
 }
 .tnode:active { color: var(--ink); }
 

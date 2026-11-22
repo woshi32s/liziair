@@ -39,8 +39,16 @@ function(t,e){"object"==typeof exports&&"undefined"!=typeof module?e(exports):"f
 window.__liziShake = true;
 window.__stagePanel = {
   title: '星轨跟拍',
+  hint: '「自定义背景」默认关闭；打开开关并选一张图或一段视频后才隐藏星空、只保留歌词。',
   items: [
-    { key: 'shake', label: '震动', type: 'switch', def: true }
+    { key: 'shake', label: '震动', type: 'switch', def: true },
+    /* 2026-11-16 自定义背景：开关与媒体分开，两个都满足才进「只保留字」模式。
+       默认值必须是关闭 / 空媒体，保证没动过设置的人看到的仍是原来的星轨形态。
+       2026-11-16 起 type 改为 media：宿主可推图片或视频，并附带
+       bgImgKind / bgImgCrop 两条消息（key 名字不变）。 */
+    { key: 'bgOn', label: '自定义背景（只留歌词）', type: 'switch', def: false },
+    { key: 'bgImg', label: '背景图片', type: 'media', def: '' },
+    { key: 'bgDim', label: '背景压暗', type: 'range', min: 0, max: 0.7, step: 0.05, def: 0.35 }
   ]
 };
 addEventListener('message', function (e) {
@@ -279,9 +287,23 @@ addEventListener('message', function (e) {
   var blurStr = 0, blurSwirl = 0, blurOverride = -1;
   var prevCamPos = null, prevFov = FOV, prevRoll = 0, prevValid = false;
   var starLayers = [], starMats = [], dust = null, dustMat = null, dustSpd = null;
+  var milkyLayers = [];   // 银河两层 Points：自定义背景时要能一起隐藏，所以留住引用
   var farRot = null;
   var mode = "none";
   var starTime = 0;
+
+  /* ---- 自定义背景（可选功能，默认关）2026-11-16 ----
+     bgActive 是唯一的模式开关：它为 false 时，下面所有 if(bgActive) 分支都不执行，
+     不创建任何对象、不改任何可见性，原形态逐行照旧。
+     bgOn=用户开关，bgImgUrl=用户图片，两者都满足且图片解码成功才会置 bgActive。 */
+  var bgOn = false, bgImgUrl = "", bgDim = 0.35, bgActive = false;
+  /* bgImgEl 现在是「媒体元素」：图片或 <video> 都放这里。
+     bgAspect 是裁切之后的**有效**画幅比（源比例 × c.w/c.h），layoutBgPlane
+     用它决定平面尺寸；bgSrcAspect 保留源媒体比例，裁切变化时重新推导。
+     bgKind / bgCrop 来自宿主的两条附带设置（bgImgKind / bgImgCrop）。 */
+  var bgImgEl = null, bgTex = null, bgPlane = null, bgAspect = 1, bgSrcAspect = 1, bgToken = 0;
+  var bgKind = "image", bgCrop = { x: 0, y: 0, w: 1, h: 1 };
+  var bgLoadedUrl = "", bgLoadedKind = "", bgLoadingKey = "", bgVideoEl = null;
 
   var LIT_COLOR = null, DIM_COLOR = null, GLOW_COLOR = null;
   var AC = [150, 168, 255];
@@ -471,8 +493,9 @@ addEventListener('message', function (e) {
 
     farRot = new THREE.Group();
     // 银河的极淡尘埃带（两层大小不同的软点）
-    makeMilky(320, 7.0, 0.090, 0x93a9d6);
-    makeMilky(120, 15.0, 0.048, 0xcbbfae);
+    // 留住返回值只是为了自定义背景时能隐藏，默认路径的绘制完全不变
+    milkyLayers.push(makeMilky(320, 7.0, 0.090, 0x93a9d6));
+    milkyLayers.push(makeMilky(120, 15.0, 0.048, 0xcbbfae));
 
     var N = 1500;
     var pos = new Float32Array(N * 3), col = new Float32Array(N * 3);
@@ -507,6 +530,9 @@ addEventListener('message', function (e) {
   }
 
   function updateStars(dt, now) {
+    /* 自定义背景时整段跳过：不只是 visible=false，闪烁 uniform、层旋转、
+       1500 颗尘埃的逐点推进都停掉，避免白算一遍再被隐藏。2026-11-16 */
+    if (bgActive) return;
     starTime += dt * (RM ? 0.3 : 1);
     for (var i = 0; i < starMats.length; i++) starMats[i].uniforms.uTime.value = starTime;
     if (starLayers[0] && !RM) starLayers[0].rotation.y += dt * 0.0035;
@@ -563,6 +589,8 @@ addEventListener('message', function (e) {
         var t = o.tokens[i];
         try { t.mat.dispose(); } catch (_) {}
         try { t.gmat.dispose(); } catch (_) {}
+        // 自定义背景专用的黑色软影材质；默认路径下 t.smat 为 null
+        if (t.smat) { try { t.smat.dispose(); } catch (_) {} }
         try { t.tex.dispose(); } catch (_) {}
         try { t.gtex.dispose(); } catch (_) {}
       }
@@ -621,13 +649,29 @@ addEventListener('message', function (e) {
           glowMesh.renderOrder = 3;
           glowMesh.frustumCulled = false;
 
+          /* 自定义背景时的对比度方案之一：每个字带一层黑色软影。
+             直接复用发光贴图（白色字 + 模糊晕）染成黑色，不额外生成纹理；
+             只在 bgActive 时创建，所以默认形态一个对象都不多。2026-11-16 */
+          var shadowMesh = null, smat = null;
+          if (bgActive) {
+            smat = new THREE.MeshBasicMaterial({
+              map: gg.tex, transparent: true, depthWrite: false, depthTest: false,
+              opacity: 0, color: 0x000000, side: THREE.DoubleSide
+            });
+            shadowMesh = new THREE.Mesh(UNIT_GEO, smat);
+            shadowMesh.scale.set(pw * 1.24, phh * 1.24, 1);
+            shadowMesh.renderOrder = 2;
+            shadowMesh.frustumCulled = false;
+          }
+
           var root = new THREE.Group();
           root.position.set(cursor + adv / 2, y, 0);
           root.add(glowMesh);
+          if (shadowMesh) root.add(shadowMesh);
           root.add(mesh);
 
           tokens.push({
-            root: root, mat: mat, gmat: gmat, mesh: mesh, glowMesh: glowMesh,
+            root: root, mat: mat, gmat: gmat, mesh: mesh, glowMesh: glowMesh, smat: smat,
             tex: m.tex, gtex: gg.tex, baseY: y, baseZ: 0, phase: Math.random() * Math.PI * 2,
             time: tk.time, ci: tk.ci, k: 0, delay: tokens.length * 0.022,
             wasLit: (S.t >= tk.time) ? 1 : 0, litAt: -99
@@ -735,6 +779,10 @@ addEventListener('message', function (e) {
       var gop = o.op * t.k * (0.10 + isCur * 0.16 + beatPulse * 0.10);
       t.gmat.opacity = gop;
       t.gmat.color.copy(GLOW_COLOR);
+      if (t.smat) {
+        /* 软影跟着整行淡入淡出；已唱的字更实一点，保证亮照片上也压得住 */
+        t.smat.opacity = o.op * (0.30 + 0.30 * t.k);
+      }
     }
   }
 
@@ -817,21 +865,28 @@ addEventListener('message', function (e) {
     camera.rotateZ(cam.roll);
     camera.updateMatrixWorld();
 
+    // 背景平面挂在相机下，fov 每帧在变，尺寸也得跟着重算（默认路径不执行）
+    if (bgActive) layoutBgPlane();
+
     if (blurMat) {
       var pv = new THREE.Vector3(a.x, a.y, a.z).project(camera);
       blurMat.uniforms.uCenter.value.set(pv.x * 0.5 + 0.5, pv.y * 0.5 + 0.5);
     }
 
-    var proj = (H * 0.5) / halfTan;
-    for (var sm = 0; sm < starMats.length; sm++) starMats[sm].uniforms.uProj.value = proj;
+    /* 自定义背景时星空材质和锁定点一起停更：只藏不更会留着每帧无谓的
+       uniform 写入和旋转，且锁定点的光晕会残留在照片上。2026-11-16 */
+    if (!bgActive) {
+      var proj = (H * 0.5) / halfTan;
+      for (var sm = 0; sm < starMats.length; sm++) starMats[sm].uniforms.uProj.value = proj;
 
-    // 锁定点：歌词中心的一枚极淡光点，镜头始终瞄准它
-    if (lockMarker) {
-      lockMarker.position.set(a.x, a.y, a.z - 0.05);
-      var lm = (S.idx >= 0 ? 1 : 0) * (0.07 + cam.kick * 0.26 + beatPulse * 0.07);
-      lockMarker.material.opacity = lm * (RM ? 0.55 : 1);
-      lockMarker.scale.setScalar(0.11 + cam.kick * 0.11);
-      lockMarker.rotation.z += dt * 0.5;
+      // 锁定点：歌词中心的一枚极淡光点，镜头始终瞄准它
+      if (lockMarker) {
+        lockMarker.position.set(a.x, a.y, a.z - 0.05);
+        var lm = (S.idx >= 0 ? 1 : 0) * (0.07 + cam.kick * 0.26 + beatPulse * 0.07);
+        lockMarker.material.opacity = lm * (RM ? 0.55 : 1);
+        lockMarker.scale.setScalar(0.11 + cam.kick * 0.11);
+        lockMarker.rotation.z += dt * 0.5;
+      }
     }
 
     // 动态模糊：由变焦速度、推拉速度、压弯角速度驱动
@@ -876,7 +931,9 @@ addEventListener('message', function (e) {
         updateLines(dt, now);
         updateCamera(dt, now);
         updateStars(dt, now);
-        if (blurStr > 0.0018 && rt && blurMat) {
+        /* 自定义背景时跳过整帧动态模糊：照片底图被整张模糊只会糊成一片，
+           歌词自己的发光副本仍在，视觉上更干净。默认路径条件完全没动。2026-11-16 */
+        if (!bgActive && blurStr > 0.0018 && rt && blurMat) {
           renderer.setRenderTarget(rt);
           renderer.render(scene, camera);
           renderer.setRenderTarget(null);
@@ -962,6 +1019,7 @@ addEventListener('message', function (e) {
     var p = d.payload || {};
     try {
       if (d.type === "init") applyInit(p);
+      else if (d.type === "setting") onSetting(p);
       else if (d.type === "tick") {
         var t = Number(p.time);
         if (isFinite(t)) S.t = t;
@@ -1003,6 +1061,8 @@ addEventListener('message', function (e) {
     if (!fbCv) return;
     var sz = safeSize(); W = sz.w; H = sz.h;
     fbCv.width = Math.round(W); fbCv.height = Math.round(H);
+    /* 2026-11-16 后备路径的裁切是按像素算的，窗口变了要重铺 */
+    if (bgActive) applyFallbackBg();
   }
 
   function buildFallback() {
@@ -1024,6 +1084,9 @@ addEventListener('message', function (e) {
       });
     }
     fbMode = true;
+    /* 设置在 WebGL 启动前就到达时，boot 的 gl 分支不会执行；
+       后备路径自己补一次模式判定。嵌套 try 避免背景问题反而打断兜底。 */
+    try { syncCustomBg(); } catch (e) { logErr(e); }
   }
 
   function fbRenderLine() {
@@ -1044,19 +1107,25 @@ addEventListener('message', function (e) {
 
   function updateFallback(dt) {
     if (!fbg) return;
-    fbg.fillStyle = "#02030a";
-    fbg.fillRect(0, 0, W, H);
-    var cx = W / 2, cy = H / 2;
-    for (var i = 0; i < fbStars.length; i++) {
-      var s = fbStars[i];
-      s.z -= dt * 0.012;
-      if (s.z < 0.08) { s.z = 1; s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; }
-      var sx = cx + (s.x / s.z) * cx * 0.92;
-      var sy = cy + (s.y / s.z) * cy * 0.92;
-      if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
-      var tw = 0.65 + 0.35 * Math.sin(clockSec * 1.4 + s.p);
-      fbg.fillStyle = "rgba(225,235,255," + (0.75 * tw * (1.05 - s.z * 0.55)).toFixed(3) + ")";
-      fbg.fillRect(sx, sy, s.r, s.r);
+    if (bgActive && bgImgEl) {
+      /* 自定义背景（后备路径）：照片由 #fb 的 CSS 背景负责，canvas 保持透明，
+         每帧只清一次；星点整段跳过，连 z 推进也停掉，和 WebGL 路径一致。2026-11-16 */
+      fbg.clearRect(0, 0, W, H);
+    } else {
+      fbg.fillStyle = "#02030a";
+      fbg.fillRect(0, 0, W, H);
+      var cx = W / 2, cy = H / 2;
+      for (var i = 0; i < fbStars.length; i++) {
+        var s = fbStars[i];
+        s.z -= dt * 0.012;
+        if (s.z < 0.08) { s.z = 1; s.x = Math.random() * 2 - 1; s.y = Math.random() * 2 - 1; }
+        var sx = cx + (s.x / s.z) * cx * 0.92;
+        var sy = cy + (s.y / s.z) * cy * 0.92;
+        if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
+        var tw = 0.65 + 0.35 * Math.sin(clockSec * 1.4 + s.p);
+        fbg.fillStyle = "rgba(225,235,255," + (0.75 * tw * (1.05 - s.z * 0.55)).toFixed(3) + ")";
+        fbg.fillRect(sx, sy, s.r, s.r);
+      }
     }
     if (S.idx !== fbIdx) { fbIdx = S.idx; fbRenderLine(); }
     for (var j = 0; j < fbSpans.length; j++) {
@@ -1148,6 +1217,378 @@ addEventListener('message', function (e) {
     blurMat.uniforms.uRes.value.set(v.x, v.y);
   }
 
+  /* ================= 12.5 自定义背景（可选，默认关） =================
+     用户要的是「设置里的一个功能」，不是替代原形态。所以：
+     - bgOn / bgImg 任一不满足，bgActive 始终为 false，下面所有分支不执行；
+     - 原星空对象照常创建、照常存在，只是在这个模式里被隐藏并停止更新。
+     日期：2026-11-16
+
+     为什么用户图必须进 three.js 场景：
+     renderer 是 alpha:false + 不透明 clearColor #02030a，任何垫在 canvas
+     底下的 CSS 背景都会被整块盖住。照片只能是场景里的一个 Mesh。
+     实现把平面挂在 camera 下（局部 z=-BG_DIST），每帧按当前 fov/aspect
+     重算缩放，任何焦距下都刚好铺满取景框，也不会被近远裁剪面切到。
+     取舍：相机 roll 时照片会跟着倾斜 —— 这本来就是「跟拍」镜头的一部分。 */
+
+  var BG_DIST = 40;   // 背景景距：远在歌词锚点（z≈-8）之前，避免和点云抢排序
+
+  /* 2026-11-16 媒体卸载：图片只丢纹理；视频还要停播、断源、load()，
+     不然 blob 会一直被解码器占着。bgToken 自增让所有在途回调作废。 */
+  function disposeBgMedia() {
+    bgToken++;
+    if (bgTex) { try { bgTex.dispose(); } catch (_) {} bgTex = null; }
+    if (bgPlane && bgPlane.material) {
+      try { bgPlane.material.map = null; bgPlane.material.needsUpdate = true; } catch (_) {}
+    }
+    if (bgVideoEl) {
+      var v = bgVideoEl;
+      bgVideoEl = null;
+      try { v.pause(); } catch (_) {}
+      try { v.removeAttribute("src"); v.load(); } catch (_) {}   /* load() 才会真正释放解码器 */
+      if (v.parentNode) v.parentNode.removeChild(v);
+    }
+    bgLoadedUrl = "";
+    bgLoadedKind = "";
+    bgLoadingKey = "";
+  }
+
+  function ensureBgTexture() {
+    if (bgTex || !bgImgEl) return;
+    /* 视频必须用 VideoTexture：它由 requestVideoFrameCallback（不支持时由
+       渲染器每帧 update()）推进 needsUpdate，手设 needsUpdate 等于每帧重复
+       上传，白烧带宽。图片仍用普通 Texture。2026-11-16 */
+    if (bgKind === "video") {
+      bgTex = new THREE.VideoTexture(bgImgEl);
+      bgTex.colorSpace = THREE.SRGBColorSpace;
+      bgTex.generateMipmaps = false;   /* VideoTexture 默认 false，写明意图 */
+      /* 只在这一刻标记一次：保证自动播放被拒、rVFC 不回调时也有首帧上传。
+         之后绝不再手设，交给 VideoTexture 自己的回调。 */
+      bgTex.needsUpdate = true;
+    } else {
+      bgTex = new THREE.Texture(bgImgEl);
+      bgTex.colorSpace = THREE.SRGBColorSpace;
+      /* 照片最终会被压暗、当底图看，不需要 mipmap：省一次生成，
+         也避免缩小时被过度磨平。 */
+      bgTex.generateMipmaps = false;
+    }
+    bgTex.minFilter = THREE.LinearFilter;
+    bgTex.magFilter = THREE.LinearFilter;
+    bgTex.wrapS = bgTex.wrapT = THREE.ClampToEdgeWrapping;
+    if (bgKind !== "video") bgTex.needsUpdate = true;
+    applyBgCrop();   /* 纹理一建好就把裁切的 offset/repeat 落上去 */
+    if (bgPlane && bgPlane.material) {
+      bgPlane.material.map = bgTex;
+      bgPlane.material.needsUpdate = true;
+    }
+  }
+
+  function ensureBgPlane() {
+    if (bgPlane || !scene || !camera) return;
+    ensureBgTexture();
+    if (!bgTex) return;
+
+    /* depthTest 关 + renderOrder 最低（-10）：不参与深度遮挡，先铺底，
+       之后所有透明物体（软影 2、发光 3、正文 4）按 renderOrder 叠上去。
+       transparent:false 让它走不透明队列，不会和 clearColor 混色。 */
+    var mat = new THREE.MeshBasicMaterial({
+      map: bgTex, transparent: false, depthWrite: false, depthTest: false,
+      side: THREE.DoubleSide, toneMapped: false
+    });
+    bgPlane = new THREE.Mesh(UNIT_GEO, mat);
+    bgPlane.position.set(0, 0, -BG_DIST);
+    bgPlane.renderOrder = -10;
+    bgPlane.frustumCulled = false;
+
+    /* 对比度方案之二：整屏黑色遮罩（opacity 由 bgDim 调）。
+       为什么不自动取照片亮度：逐像素分析要读回 GPU/DOM、照片还可能跨域，
+       代价大且不一定准；固定比例压暗最稳、最便宜，用户可自行调到合适。
+       作为背景平面的子物体，尺寸和位置自动跟随。 */
+    var smat = new THREE.MeshBasicMaterial({
+      color: 0x000000, transparent: true, opacity: clamp(bgDim, 0, 0.7),
+      depthWrite: false, depthTest: false, side: THREE.DoubleSide, toneMapped: false
+    });
+    var scrim = new THREE.Mesh(UNIT_GEO, smat);
+    scrim.renderOrder = -9;
+    scrim.frustumCulled = false;
+    bgPlane.add(scrim);
+
+    /* camera 原本不在场景图里；挂上去后它的子物体才会被渲染。
+       相机本身没有可视对象，所以这一步不会改变默认形态的任何像素。 */
+    scene.add(camera);
+    camera.add(bgPlane);
+    bgPlane.visible = false;
+    layoutBgPlane();
+  }
+
+  function layoutBgPlane() {
+    if (!bgPlane || !camera) return;
+    var tanH = Math.tan(camera.fov * Math.PI / 360);
+    var vh = 2 * BG_DIST * tanH;
+    var vw = vh * (W / (H || 1));
+    var va = vw / (vh || 1);
+    var pw, ph;
+    if (bgAspect >= va) { ph = vh; pw = vh * (bgAspect || 1); }  // 图更宽：高度铺满，左右裁
+    else { pw = vw; ph = vw / (bgAspect || 1); }                  // 图更高：宽度铺满，上下裁
+    bgPlane.scale.set(pw, ph, 1);
+  }
+
+  /* 2026-11-16 裁切：归一化 UV 子矩形 → 纹理 offset/repeat。
+     three 的 v 轴与裁切 UI 的 y 轴相反，所以下边界 = 1-y-h。
+     同时把裁切后的**有效**画幅比交给 layoutBgPlane：默认 (0,0,1,1) 时
+     bgAspect 仍等于源图比例，平面尺寸与改动前逐像素一致。 */
+  function applyBgCrop() {
+    var c = bgCrop;
+    if (bgTex) {
+      bgTex.offset.set(c.x, 1 - c.y - c.h);
+      bgTex.repeat.set(c.w, c.h);
+      /* 图片纹理改 offset/repeat 不需要重传；VideoTexture 每帧本来就会更新 */
+    }
+    bgAspect = (bgSrcAspect || 1) * (c.w / Math.max(1e-4, c.h));
+    if (bgPlane) layoutBgPlane();
+    applyFallbackBg();
+  }
+
+  function setBgCrop(v) {
+    var o = (v && typeof v === "object") ? v : {};
+    var x = Number(o.x), y = Number(o.y), w = Number(o.w), h = Number(o.h);
+    if (!isFinite(x)) x = 0;
+    if (!isFinite(y)) y = 0;
+    if (!isFinite(w) || w <= 0) w = 1;
+    if (!isFinite(h) || h <= 0) h = 1;
+    x = Math.max(0, Math.min(1, x));
+    y = Math.max(0, Math.min(1, y));
+    w = Math.max(0.02, Math.min(1 - x, w));
+    h = Math.max(0.02, Math.min(1 - y, h));
+    if (x === bgCrop.x && y === bgCrop.y && w === bgCrop.w && h === bgCrop.h) return;
+    bgCrop = { x: x, y: y, w: w, h: h };
+    applyBgCrop();
+  }
+
+  function setBgKind(v) {
+    var k = (v === "video") ? "video" : "image";
+    if (k === bgKind) return;
+    bgKind = k;
+    /* 同一条 blob URL 换了种类，也要按新种类重建，不能复用旧纹理 */
+    if (bgImgUrl) setBgUrl(bgImgUrl, true);
+  }
+
+  function applyBgVisibility(on) {
+    var i, list = starLayers.concat(milkyLayers);
+    for (i = 0; i < list.length; i++) { if (list[i]) list[i].visible = !on; }
+    if (dust) dust.visible = !on;
+    if (farRot) farRot.visible = !on;
+    if (lockMarker) lockMarker.visible = !on;
+    if (bgPlane) bgPlane.visible = !!on;
+  }
+
+  /* 2026-11-16 后备路径的裁切：把「裁切区域按 cover 铺满屏幕」算成像素。
+     默认 (0,0,1,1) 时结果就是原来的 cover + center，视觉不变。 */
+  function bgMediaSize() {
+    var el = bgImgEl;
+    if (!el) return null;
+    var iw = el.videoWidth || el.naturalWidth || el.width || 0;
+    var ih = el.videoHeight || el.naturalHeight || el.height || 0;
+    if (!iw || !ih) return null;
+    return [iw, ih];
+  }
+
+  function bgCoverCropPx(W0, H0) {
+    var sz = bgMediaSize();
+    if (!sz) return null;
+    var c = bgCrop;
+    var k = Math.max(W0 / Math.max(1e-4, sz[0] * c.w), H0 / Math.max(1e-4, sz[1] * c.h));
+    var bw = sz[0] * k, bh = sz[1] * k;
+    var offX = (W0 - bw * c.w) / 2 - c.x * bw;   /* 裁切区域居中，= 原 cover 的 center */
+    var offY = (H0 - bh * c.h) / 2 - c.y * bh;
+    return [bw, bh, offX, offY];
+  }
+
+  function applyFallbackBg() {
+    var fb = document.getElementById("fb");
+    if (!fb) return;
+    /* WebGL 失败时的 #fb 后备路径：canvas 每帧 clearRect 让出透明层，
+       照片直接交给 #fb 的 CSS 背景，省掉一次全屏 drawImage。
+       这条路径只在用户主动开启后才生效。2026-11-16
+       2026-11-16 裁切与视频：图片按换算好的 background-size/position 铺，
+       不再一刀切 cover；视频无法进 CSS 背景，直接把 <video> 放进 #fb。 */
+    var on = bgActive && bgImgUrl;
+    var box = on ? bgCoverCropPx(window.innerWidth || 1, window.innerHeight || 1) : null;
+
+    if (on && box && bgKind === "video" && bgVideoEl) {
+      fb.style.backgroundImage = "";
+      fb.style.backgroundSize = "";
+      fb.style.backgroundPosition = "";
+      fb.style.backgroundRepeat = "";
+      var v = bgVideoEl;
+      /* 只在 DOM 后备路径里挪进 #fb；GL 路径下 #fb 是 display:none，
+         放进去可能让部分内核暂停解码。 */
+      if (mode === "dom") {
+        if (v.parentNode !== fb) fb.insertBefore(v, fb.firstChild);
+        v.style.cssText = "position:absolute;left:" + box[2].toFixed(2) + "px;top:" + box[3].toFixed(2) +
+          "px;width:" + box[0].toFixed(2) + "px;height:" + box[1].toFixed(2) +
+          "px;opacity:1;pointer-events:none;filter:brightness(" + (1 - clamp(bgDim, 0, 0.7)).toFixed(3) + ")";
+      }
+    } else if (on && box) {
+      var W0 = window.innerWidth || 1, H0 = window.innerHeight || 1;
+      var dim = clamp(bgDim, 0, 0.7).toFixed(2);
+      fb.style.backgroundImage =
+        "linear-gradient(rgba(0,0,0," + dim + "),rgba(0,0,0," + dim + "))," +
+        'url("' + bgImgUrl.replace(/"/g, "%22") + '")';
+      fb.style.backgroundSize = "100% 100%, " + (box[0] / W0 * 100).toFixed(3) + "% " + (box[1] / H0 * 100).toFixed(3) + "%";
+      var px = Math.abs(W0 - box[0]) < 0.5 ? 0 : box[2] / (W0 - box[0]) * 100;
+      var py = Math.abs(H0 - box[1]) < 0.5 ? 0 : box[3] / (H0 - box[1]) * 100;
+      fb.style.backgroundPosition = "0 0, " + px.toFixed(3) + "% " + py.toFixed(3) + "%";
+      fb.style.backgroundRepeat = "no-repeat, no-repeat";
+    } else {
+      fb.style.backgroundImage = "";
+      fb.style.backgroundSize = "";
+      fb.style.backgroundPosition = "";
+      fb.style.backgroundRepeat = "";
+      if (bgVideoEl) {
+        bgVideoEl.style.cssText = "position:fixed;left:-10px;top:-10px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1";
+        if (bgVideoEl.parentNode !== document.body) document.body.appendChild(bgVideoEl);
+      }
+    }
+  }
+
+  function deactivateBg() {
+    if (!bgActive) { applyBgVisibility(false); applyFallbackBg(); return; }
+    bgActive = false;
+    applyBgVisibility(false);
+    applyFallbackBg();
+    /* 重建当前行：把只在这个模式里创建的黑色软影一并去掉 */
+    if (mode === "gl") rebuildCurrent();
+  }
+
+  function activateBg() {
+    if (bgActive) return;
+    if (!bgOn || !bgImgEl) return;
+    if (mode === "gl") {
+      ensureBgTexture();
+      if (!bgTex) return;
+      ensureBgPlane();
+      if (!bgPlane) return;
+    }
+    bgActive = true;
+    applyBgVisibility(true);
+    applyFallbackBg();
+    /* 重建当前行，让每个字拿到黑色软影 */
+    if (mode === "gl") rebuildCurrent();
+  }
+
+  /** 按当前状态决定是否进入「只保留字」模式；任一条件不满足就回原形态 */
+  function syncCustomBg() {
+    if (bgOn && bgImgEl && (mode === "gl" || mode === "dom")) activateBg();
+    else deactivateBg();
+  }
+
+  function setBgUrl(v, force) {
+    var url = (typeof v === "string") ? v.trim() : "";
+    var key = bgKind + "|" + url;
+    /* 宿主 pushAll 会重复推同一个值：同 URL + 同种类直接复用；
+       正在加载的同一个 key 也不重启（避免视频被反复 load()）。 */
+    if (!force && key === bgLoadingKey) return;
+    if (!force && url === bgLoadedUrl && bgKind === bgLoadedKind && bgImgEl) return;
+
+    disposeBgMedia();   /* 会 ++bgToken，之前在途的回调全部作废 */
+    bgImgUrl = url;
+    bgLoadingKey = url ? key : "";
+    bgImgEl = null;
+    // 换媒体期间先回原形态，避免停在上一次画面上
+    deactivateBg();
+    if (!url) { applyFallbackBg(); return; }
+
+    var token = bgToken;
+    if (bgKind === "video") loadBgVideo(url, token);
+    else loadBgImage(url, token);
+  }
+
+  function loadBgImage(url, token) {
+    var img = new Image();
+    img.decoding = "async";
+    img.onload = function () {
+      if (token !== bgToken) return;   // 换图/清除后旧请求作废
+      bgImgEl = img;
+      bgSrcAspect = (img.naturalWidth || img.width || 1) / (img.naturalHeight || img.height || 1) || 1;
+      bgLoadedUrl = url;
+      bgLoadedKind = "image";
+      bgLoadingKey = "";
+      // onload 在消息总线之外触发，单独兜一下，别让背景问题冒成未捕获异常
+      try { syncCustomBg(); } catch (e) { logErr(e); }
+    };
+    img.onerror = function () {
+      if (token !== bgToken) return;
+      logErr(new Error("自定义背景图片加载失败"));
+      bgImgEl = null;
+      bgLoadingKey = "";
+      deactivateBg();
+    };
+    img.src = url;
+  }
+
+  function loadBgVideo(url, token) {
+    var v = document.createElement("video");
+    v.loop = true;
+    v.muted = true;                 /* 静音是移动端允许自动播放的前提 */
+    v.defaultMuted = true;
+    v.playsInline = true;
+    v.setAttribute("playsinline", "");
+    v.setAttribute("webkit-playsinline", "");
+    v.preload = "auto";
+    v.autoplay = true;
+    /* 藏起来但留在 DOM 里：display:none 的 video 在部分内核里会停止解码 */
+    v.style.cssText = "position:fixed;left:-10px;top:-10px;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1";
+    document.body.appendChild(v);
+    bgVideoEl = v;
+
+    v.addEventListener("loadedmetadata", function () {
+      if (token !== bgToken) return;
+      if (!v.videoWidth || !v.videoHeight) return;
+      bgImgEl = v;
+      bgSrcAspect = v.videoWidth / v.videoHeight || 1;
+      bgLoadedUrl = url;
+      bgLoadedKind = "video";
+      bgLoadingKey = "";
+      /* 纹理由 ensureBgTexture 按 bgKind 建 VideoTexture；它自己推进
+         needsUpdate，这里不能再手设。 */
+      try { syncCustomBg(); } catch (e) { logErr(e); }
+    });
+    v.addEventListener("error", function () {
+      if (token !== bgToken) return;
+      logErr(new Error("自定义背景视频加载失败"));
+      bgImgEl = null;
+      bgLoadingKey = "";
+      deactivateBg();
+    });
+    var p = v.play();
+    /* 自动播放被拒不能变成未捕获 rejection；失败就停在第一帧 */
+    if (p && typeof p.catch === "function") p.catch(function () {});
+    v.src = url;
+  }
+
+  function onSetting(p) {
+    if (!p || typeof p.key !== "string") return;
+    var k = p.key, v = p.value;
+    if (k === "bgOn") {
+      bgOn = (v !== false);
+      syncCustomBg();
+    } else if (k === "bgImg") {
+      setBgUrl(v);
+    } else if (k === "bgImgKind") {
+      setBgKind(v);
+    } else if (k === "bgImgCrop") {
+      setBgCrop(v);
+    } else if (k === "bgDim") {
+      var d = Number(v);
+      bgDim = isFinite(d) ? clamp(d, 0, 0.7) : 0.35;
+      if (bgPlane) {
+        var scrim = bgPlane.children && bgPlane.children[0];
+        if (scrim && scrim.material) scrim.material.opacity = bgDim;
+      }
+      applyFallbackBg();
+    }
+  }
+
   /* ================= 13. 布局与启动 ================= */
   function layout() {
     var sz = safeSize(); W = sz.w; H = sz.h;
@@ -1193,6 +1634,9 @@ addEventListener('message', function (e) {
         curIdx = i; S.idx = i;
         switchLine(i, true);
       }
+      /* 设置在 boot 之前就到达时，这里补一次模式判定；嵌套 try 是为了
+         万一背景初始化失败，不要把整个形态误判成 WebGL 不可用。 */
+      try { syncCustomBg(); } catch (e2) { logErr(e2); }
     } catch (e) {
       logErr(e);
       GL_OK = false;
@@ -1228,5 +1672,6 @@ addEventListener('message', function (e) {
 })();
 
 </script>
+<script src="assets/we-bg-pick.js"></script>
 </body>
 </html>

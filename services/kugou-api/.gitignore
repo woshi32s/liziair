@@ -2,9 +2,12 @@
 
 node_modules/
 .port
+.port-lite
 .log
+.log-lite
 *.log
 .auth-cookies.json
+.auth-cookies-lite.json
 
 # 设备身份（device.json）：删了酷狗会当成一台新设备
 .auth-state/

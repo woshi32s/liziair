@@ -1,0 +1,94 @@
+/* ==========================================================================
+   手机层 · 终局清理（clean-ui.css）
+   --------------------------------------------------------------------------
+   只由 /m/index.html 引入（桌面 index.html 不引入，外观零改动）。
+   1) 去掉安卓 WebView / Chromium 默认的系统蓝点按高亮、蓝选择与默认蓝焦点环
+      （这一节不套媒体查询：/m 横屏也照样要去蓝）
+   2) 歌词字号 ×1.5，行高同比（行高是用字号算的，自动等比）
+   3) 歌词可视窗口收到约 5 行，当前行仍由 app.js 的 scrollLyricToEl 居中
+   ========================================================================== */
+
+/* ---------------- 1. 系统蓝：点按高亮 / 文本选择 / 焦点环 ---------------- */
+/* Chromium 手机端默认的 -webkit-tap-highlight-color 是
+   rgba(51, 181, 229, 0.4)（实测值）。海报 .hall-hero 及其文字、歌词 #lyrics
+   与 .ly、input / textarea 之前都没有声明，所以点哪里都闪一层系统蓝。
+   已有规则里所有显式值都是 transparent，这一条把它们统一收口。 */
+* { -webkit-tap-highlight-color: transparent; }
+
+/* 文本选择：整页本来 user-select:none，只有输入框放行（app.css:41-44）。
+   输入框的选中底色改成中性墨色，不再是系统蓝。 */
+::selection { background: transparent; color: inherit; }
+input::selection,
+textarea::selection {
+  background: oklch(21% 0.022 270 / 0.16);
+  color: inherit;
+}
+
+/* 没有专门 :focus-visible 色值的控件兜底用当前文字色，避免 UA 默认蓝环。
+   .btn / .icbtn / .hall-hero / #phone-progress 等已有更高权重的规则，
+   它们的 accent 红或白色焦点环保持原样。 */
+:focus-visible { outline-color: currentColor; }
+
+/* 舞台设置（#stage-settings）里的「选中蓝」也一并换成中性白：
+   - 开关 ON      app.css:5500 oklch(62% 0.16 250 / 0.9)
+   - 图集选中描边  app.css:5543 oklch(80% 0.13 250 / 0.9)
+   - 滑块焦点圈    app.css:5485 oklch(80% 0.14 250 / 0.7)
+   面板本身是深色，白色在选中/聚焦时照样清楚。 */
+.spnl__sw[aria-checked="true"] { background: oklch(100% 0 0 / 0.55); }
+.spnl__galcard.is-on img { box-shadow: 0 0 0 2px oklch(100% 0 0 / 0.9); }
+.spnl__range:focus-visible { outline: 2px solid oklch(100% 0 0 / 0.6); outline-offset: 3px; }
+
+/* 「我的」平台方块的焦点环：app.css:5614 的兜底色就是 #4a7dff（蓝）。
+   这里改成 currentColor（深底白字 / 浅底深字都跟着卡片自己的文字色）。 */
+.plat:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+
+/* DIY 滑杆 thumb 的蓝色 focus 光圈（app.css:1014
+   oklch(70% 0.14 264 / 0.22)）换成同结构的中性白。 */
+.sl:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 5px oklch(100% 0 0 / 0.22),
+    0 3px 6px oklch(21% 0.022 270 / 0.22),
+    inset 0 1px 0 oklch(100% 0 0 / 0.95),
+    inset 0 -2px 3px oklch(78% 0.012 270 / 0.6);
+}
+
+@media (max-width: 560px) {
+
+  /* ---------------- 2. 歌词字号 ×1.5 ---------------- */
+  body.is-now #view-now #lyrics .ly {
+    /* 原 phone.css:479 clamp(18px, 5.4vw, 26px)，390 宽实测 21.06px；
+       ×1.5 → 31.59px = clamp(27px, 8.1vw, 39px)。 */
+    font-size: clamp(27px, 8.1vw, 39px);
+    line-height: 1.32;          /* 无单位值随字号等比放大：27.8px → 41.7px */
+    padding: 15px 0;            /* 原 10px，同比 ×1.5 */
+  }
+  body.is-now #view-now #lyrics .ly__tr {
+    font-size: 18px;            /* 原 12px */
+    margin-top: 4.5px;          /* 原 3px */
+  }
+
+  /* ---------------- 3. 歌词可视行数：约 11 行 → 约 5 行 ---------------- */
+  /* 原 #lyrics 撑满面板：390×844 实测可视区 612px，整行 10 行、露边 11 行。
+     收成 56vh（844 高时 473px）并在面板里垂直居中；不再靠 18vh 底部内边距
+     撑滚动。滚动仍由 app.js:705 scrollLyricToEl 负责，它按 #lyrics.clientHeight
+     把当前行放在窗口中线上，所以不用改 JS。 */
+  body.is-now #view-now.phone-lyr-open #lyrics {
+    flex: 0 0 auto;
+    height: clamp(320px, 56vh, 480px);
+    max-height: 100%;
+    margin-top: auto;
+    margin-bottom: auto;
+    padding: 6px 18px 34px;
+    -webkit-mask-image: linear-gradient(transparent 0%, #000 7%, #000 93%, transparent 100%);
+    mask-image: linear-gradient(transparent 0%, #000 7%, #000 93%, transparent 100%);
+  }
+
+  /* 当前行钉死为桌面既有的白色（app.css:3480 本就是白色）。
+     实测它不是蓝的；蓝只来自点按高亮。这里显式声明，防止别的 token 再渗色。 */
+  body.is-now #view-now #lyrics .ly.is-active,
+  body.is-now #view-now #lyrics .ly.is-active .ly__main,
+  body.is-now #view-now #lyrics .ly.is-active .ly__c,
+  body.is-now #view-now #lyrics .ly.is-active .ly__c.is-sung {
+    color: oklch(100% 0 0);
+  }
+}

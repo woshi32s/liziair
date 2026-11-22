@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>歌单世界杯 · 对阵树海报预览</title>
+<style>
+  :root {
+    --bg: #16110c;
+    --panel: rgba(255, 255, 255, 0.045);
+    --line: rgba(232, 196, 124, 0.20);
+    --gold: #e8c47c;
+    --text: #f6ead9;
+    --muted: rgba(246, 234, 217, 0.52);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(1100px 560px at 50% -120px, rgba(232, 196, 124, 0.10), transparent 70%),
+      radial-gradient(900px 700px at 50% 110%, rgba(255, 45, 122, 0.07), transparent 72%),
+      var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    padding: 34px 22px 54px;
+  }
+  .page { width: min(1720px, 100%); margin: 0 auto; }
+  header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+    font: 700 12px "Geist Mono", "Microsoft YaHei", monospace;
+    letter-spacing: 3px;
+    color: var(--gold);
+    text-transform: uppercase;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    background: #19c8ff;
+    transform: rotate(45deg);
+    box-shadow: 18px 0 0 #ff2d7a;
+    margin-right: 15px;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(24px, 3.2vw, 40px);
+    font-weight: 900;
+    letter-spacing: 1px;
+    font-style: italic;
+  }
+  h1 em { font-style: inherit; color: var(--gold); }
+  .meta {
+    font: 500 13px/1.7 "Geist Mono", "Microsoft YaHei", monospace;
+    color: var(--muted);
+    text-align: right;
+  }
+  .meta b { color: rgba(246, 234, 217, 0.86); font-weight: 700; }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    background: var(--panel);
+    padding: 16px;
+    margin-bottom: 22px;
+    box-shadow: 0 26px 70px rgba(0, 0, 0, 0.35);
+  }
+  .card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  h2 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 0.5px;
+  }
+  .card p {
+    margin: 0;
+    font: 500 12px/1.7 "Geist Mono", "Microsoft YaHei", monospace;
+    color: var(--muted);
+  }
+  button {
+    appearance: none;
+    border: 1px solid rgba(232, 196, 124, 0.45);
+    background: rgba(232, 196, 124, 0.10);
+    color: var(--gold);
+    border-radius: 999px;
+    padding: 8px 18px;
+    font: 700 12px "PingFang SC", "Microsoft YaHei", sans-serif;
+    letter-spacing: 1px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  button:hover {
+    background: rgba(232, 196, 124, 0.18);
+    border-color: rgba(232, 196, 124, 0.8);
+  }
+  .poster {
+    background: #0d0a07;
+    border-radius: 10px;
+    overflow: hidden;
+    min-height: 120px;
+  }
+  .poster canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .error {
+    padding: 44px 20px;
+    text-align: center;
+    color: #ff9bbd;
+    font-weight: 700;
+  }
+  footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+    font: 500 12px/1.7 "Geist Mono", "Microsoft YaHei", monospace;
+    color: rgba(246, 234, 217, 0.38);
+  }
+  footer b { color: rgba(246, 234, 217, 0.62); font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <div>
+      <div class="eyebrow">LIZI · Playlist World Cup</div>
+      <h1>对阵树 <em>海报预览</em></h1>
+    </div>
+    <div class="meta">
+      旧海报 UI · 纸底 / 墨线 / 金色胜者条<br>
+      参考图只借「左 4 场 / 右 4 场」的排序
+    </div>
+  </header>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>16 首 · 完整 16 强</h2>
+        <p>左右各 4 场，八强 / 四强向中间收，决赛居中；没有轮空。</p>
+      </div>
+      <button type="button" data-dl="p16">下载 PNG</button>
+    </div>
+    <div class="poster" id="p16"></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <h2>12 首 · 带 4 个轮空</h2>
+        <p>轮空也占节点，空的那一行写「轮空」，阵列不会塌。</p>
+      </div>
+      <button type="button" data-dl="p12">下载 PNG</button>
+    </div>
+    <div class="poster" id="p12"></div>
+  </section>
+
+  <footer>
+    <span>文件：<b>public/tools/worldcup/bracket-preview.html</b></span>
+    <span>绘制：<b>worldcup.js → drawBracketPoster / drawSymmetricKoTree</b></span>
+  </footer>
+</div>
+
+<script>window.__LIZI_WC_PREVIEW = true;</script>
+<script src="worldcup.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var API = window.LIZI_WORLDCUP;
+  if (!API || typeof API.__previewBracket !== 'function') {
+    document.getElementById('p16').innerHTML =
+      '<div class="error">worldcup.js 没有加载成功，或没有挂上 __previewBracket。</div>';
+    return;
+  }
+
+  /* 16 首假歌：长名、短名、中英混排都有 */
+  var SONGS = [
+    ['晴天', '周杰伦'],
+    ['这世界那么多人', '莫文蔚'],
+    ['Lemon', '米津玄師'],
+    ['反方向的钟', '周杰伦'],
+    ['City of Stars', 'Ryan Gosling'],
+    ['海底', '一支榴莲'],
+    ['起风了', '买辣椒也用券'],
+    ['夜色钢琴曲：月光下的告白与漫长的告别', 'V.K克'],
+    ['稻香', '周杰伦'],
+    ['Blinding Lights', 'The Weeknd'],
+    ['我用什么把你留住', '福禄寿FloruitShow'],
+    ['Lose Yourself', 'Eminem'],
+    ['孤勇者', '陈奕迅'],
+    ['小情歌', '苏打绿'],
+    ['Stay', 'Justin Bieber'],
+    ['没有名字的夜晚', '温室杂草']
+  ];
+
+  var TRACKS = SONGS.map(function (row, i) {
+    return {
+      id: 'preview-' + i,
+      source: 'preview',
+      name: row[0],
+      artists: row[1],
+      artist: row[1],
+      cover: ''
+    };
+  });
+
+  function nextPow2(n) {
+    var p = 1;
+    while (p < n) p *= 2;
+    return p;
+  }
+
+  function roundLabel(size) {
+    if (size >= 16) return '十六强';
+    if (size >= 8) return '八强';
+    if (size >= 4) return '半决赛';
+    return '决赛';
+  }
+
+  /* 和 worldcup.js 的 plan 结构对齐；不用打开工具，也不碰播放器 */
+  function buildPlan(list) {
+    var n = list.length;
+    var p = nextPow2(n);
+    var byes = p - n;
+    var byePairs = [];
+    var realPairs = [];
+    var i = 0;
+    var b;
+    for (b = 0; b < byes; b++) byePairs.push([list[i++], null]);
+    while (i < list.length) realPairs.push([list[i++], list[i++]]);
+
+    var totalPairs = p / 2;
+    var pairs = [];
+    for (var k = 0; k < totalPairs; k++) {
+      if (k % 2 === 0 && byePairs.length) pairs.push(byePairs.shift());
+      else if (realPairs.length) pairs.push(realPairs.shift());
+      else pairs.push(byePairs.shift());
+    }
+
+    var stages = [];
+    for (var size = p; size > 1; size /= 2) {
+      stages.push({
+        size: size,
+        matchLabel: roundLabel(size),
+        slots: new Array(size).fill(null)
+      });
+    }
+    stages[0].slots = [];
+    pairs.forEach(function (pair) {
+      stages[0].slots.push(pair[0] || null, pair[1] || null);
+    });
+
+    var matches = [];
+    var current = pairs.map(function (pair, idx) {
+      var a = pair[0];
+      var b = pair[1];
+      if (a && b) {
+        matches.push({
+          a: a, b: b, winner: a, loser: b,
+          label: stages[0].matchLabel,
+          group: null, stageIndex: 0, matchIndex: idx
+        });
+        return { winner: a };
+      }
+      return { winner: a || b };
+    });
+
+    var champion = current[0] ? current[0].winner : null;
+    for (var si = 1; si < stages.length; si++) {
+      stages[si].slots = current.map(function (x) { return x.winner || null; });
+      var next = [];
+      for (var j = 0; j < current.length; j += 2) {
+        var A = current[j];
+        var B = current[j + 1];
+        var ta = A ? A.winner : null;
+        var tb = B ? B.winner : null;
+        var w = null;
+        if (ta && tb) {
+          w = ta;
+          matches.push({
+            a: ta, b: tb, winner: w, loser: tb,
+            label: stages[si].matchLabel,
+            group: null, stageIndex: si, matchIndex: j / 2
+          });
+        } else {
+          w = ta || tb;
+        }
+        next.push({ winner: w });
+      }
+      current = next;
+      champion = current[0] ? current[0].winner : champion;
+    }
+
+    return {
+      n: n,
+      total: n - 1,
+      allCount: n,
+      groupCount: 0,
+      groups: [],
+      matches: matches,
+      koStages: stages,
+      champion: champion,
+      playerName: '我喜欢的音乐',
+      truncated: false
+    };
+  }
+
+  /* 冠军圆盘 / 底部冠军条只吃一张封面；现搓一张，不引外链 */
+  function makeCover(track, i) {
+    var c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 256;
+    var g = c.getContext('2d');
+    if (!g) return null;
+    var hue = (i * 47 + 318) % 360;
+    var grad = g.createLinearGradient(0, 0, 256, 256);
+    grad.addColorStop(0, 'hsl(' + hue + ', 72%, 58%)');
+    grad.addColorStop(1, 'hsl(' + ((hue + 54) % 360) + ', 68%, 28%)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 256);
+
+    g.strokeStyle = 'rgba(255,255,255,0.22)';
+    g.lineWidth = 2;
+    for (var r = 34; r < 220; r += 32) {
+      g.beginPath();
+      g.arc(128, 128, r, 0, Math.PI * 2);
+      g.stroke();
+    }
+
+    g.fillStyle = 'rgba(255,255,255,0.13)';
+    g.beginPath();
+    g.moveTo(0, 186);
+    g.lineTo(186, 0);
+    g.lineTo(256, 0);
+    g.lineTo(256, 58);
+    g.lineTo(58, 256);
+    g.lineTo(0, 256);
+    g.closePath();
+    g.fill();
+
+    g.fillStyle = 'rgba(255,255,255,0.92)';
+    g.font = '900 92px "PingFang SC","Microsoft YaHei",sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(Array.from(track.name)[0] || '♪', 128, 132);
+    return c;
+  }
+
+  var canvases = {};
+
+  function render(id, list) {
+    var plan = buildPlan(list);
+    var cover = makeCover(plan.champion, 0);
+    var canvas = API.__previewBracket(plan, cover);
+    var box = document.getElementById(id);
+    if (!canvas) {
+      box.innerHTML = '<div class="error">海报绘制失败。</div>';
+      return;
+    }
+    canvas.className = 'poster-canvas';
+    box.appendChild(canvas);
+    canvases[id] = canvas;
+  }
+
+  render('p16', TRACKS.slice(0, 16));
+  render('p12', TRACKS.slice(0, 12));
+
+  document.querySelectorAll('[data-dl]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-dl');
+      var canvas = canvases[id];
+      if (!canvas) return;
+      var a = document.createElement('a');
+      a.download = id === 'p16' ? '歌单世界杯-16强对阵树.png' : '歌单世界杯-12首轮空.png';
+      a.href = canvas.toDataURL('image/png');
+      a.click();
+    });
+  });
+})();
+</script>
+</body>
+</html>

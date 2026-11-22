@@ -18,7 +18,7 @@
    ================================================================== */
 .hcc {
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 240;
   overflow: hidden;
   color: inherit;
@@ -30,7 +30,12 @@
       rgba(6, 8, 14, .72) 58%,
       rgba(4, 5, 9, .88) 100%);
   opacity: 0;
-  transition: opacity 260ms ease;
+  /* 2026-11-12：展开时不给整屏 3D 覆盖层做 opacity 过渡。这个层里同时挂了
+     ~25 个 preserve-3d 槽位和克隆封面，260ms 的 opacity 动画要求 WebView
+     为整层反复重建渲染表面；和跑马带的 blur 淡出叠在拖动首帧，就是部分
+     安卓机白屏 / 冻住的触发点。现在 is-open 直接切 1；收回仍由 JS 逐帧写
+     opacity（.is-closing 本来就 transition:none），手感不变。 */
+  transition: none;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
@@ -117,7 +122,7 @@
 .hcc__card .marq__art.hcc__art--empty::after {
   content: '无封面';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: grid;
   place-items: center;
   font-size: 11px;
@@ -142,7 +147,11 @@
   background: #000;
   opacity: 0;
   pointer-events: none;
-  transform: translate(-50%, -50%) translateZ(0);
+  /* 2026-11-12：压暗层和卡片原来都是 translateZ(0)，完全共面。安卓 WebView
+     对共面的 preserve-3d 子层会争用同一块表面（层距 <2.4px 的挤层问题），
+     拖动时表现为闪 / 局部缺块。把压暗层往观察者方向抬 2.5px，保证层距；
+     2.5px 在 R≈780 的环上只会带来 <0.2% 的放大，肉眼不可见。 */
+  transform: translate(-50%, -50%) translateZ(2.5px);
 }
 
 .hcc__hint {
@@ -159,21 +168,28 @@
   pointer-events: none;
 }
 
-/* 原跑马带：展开时暂停并淡出。JS 通过给 app.js 派发 pointerenter/leave
+/* 原跑马带：展开时暂停并隐藏。JS 通过给 app.js 派发 pointerenter/leave
    让它真正停住（位置不变），收回时再恢复自动走。 */
+/* 2026-11-12 安卓拖动白屏修复：这里原来是 260ms 过渡，把整条跑马带的
+   opacity 1→0、filter blur 0→6px。带子本身横跨整个面板（几十张封面卡），
+   .hall-marq__track 还常驻 will-change: transform；它又位于带 filter: brightness
+   的 3D 翻面（.plat-face）里，背后是 22px backdrop-filter 的流色层。
+   拖动一开环，WebView 要在同一帧再分配一层「整条带」的离屏模糊表面，
+   部分机型（GPU / 显存吃紧的老 WebView）会丢掉这块合成表面；页面兜底
+   是 body::before 的纯白，于是整条带位置直接变成白色、卡片全消失。
+   改成纯 class 硬切：不做 filter、不做过渡，opacity / visibility 一帧到位。
+   （环覆盖层的打开也不再加 opacity 过渡，见下面 .hcc。） */
 #hall-marq,
 .hall-marq {
-  transition: opacity 260ms ease, filter 260ms ease, visibility 0s;
+  transition: none;
 }
 #hall-marq.is-hcc-faded,
 .hall-marq.is-hcc-faded {
   opacity: 0;
-  filter: blur(6px);
-  /* 淡出结束后彻底从合成里摘掉：opacity:0 的整条跑马带仍可能带着
-     6px 模糊参与合成，环一转就成了大头。 */
+  filter: none;
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 260ms ease, filter 260ms ease, visibility 0s 260ms;
+  transition: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

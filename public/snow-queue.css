@@ -1,0 +1,691 @@
+/* snow-queue.css — 形态页右上角迷你播放器的队列下拉（2026-11-16）
+ * ------------------------------------------------------------------
+ * 入口按钮 .snowq__btn 插在 #stage-d 之后、.snow__prog 的最右端（16px 级）。
+ * 浮层 .snowq__pop 由 snow-queue.js 创建为 .snow 的子元素，和 .snow__pill
+ * 平级 —— .snow__body 是 overflow:hidden，浮层放进去会被裁掉。
+ *
+ * 浮层向下展开，right / top / width 由 JS 按按钮实际位置写内联样式：
+ *   右边缘对齐按钮右边缘（不是 left:0），左边缘至少留 12px；
+ *   窄屏宽度由 max-width: calc(100vw - 24px) 兜底。
+ *
+ * 2026-11-17 外观重做：整套取值对齐「形态」下拉 .smenu / .dstages__*（app.css:2960 起）。
+ *   · 外壳底 / 圆角 / 边框 / 阴影 / 开合动画照抄 .smenu；
+ *   · 页签和分类页签一样，接同一个 window.LIZI_RUBBER；
+ *   · 队列 / 搜索结果 / 歌单行统一成 .stage-item 的 31px 行；
+ *   · 搜索框对齐 .dstages__search（32px 高、8px 圆角、半透明淡底）。
+ *   这是「同一套设计语言的另一个面板」，不是直接套 .smenu 的 class ——
+ *   宿主选择器（#stage-menu-pop .stage-item 等）会互相打架。
+ *
+ * 硬约束：
+ *   · 动画只碰 transform / opacity；
+ *   · 不用 backdrop-filter（形态页 WebGL 流色 + 22px 模糊会把大厅卡死，项目已查明）；
+ *   · 浅色风景时 #stage-hud.is-on-light 把整套 --snowq-* 变量翻成浅底深字。
+ * ------------------------------------------------------------------ */
+
+/* 浮层的定位参照。.snow 原本只有 flex:none，加 relative 不影响胶囊布局。 */
+.snow { position: relative; }
+
+/* ---- 入口按钮 ---------------------------------------------------------- */
+.snowq__btn {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: oklch(100% 0 0 / .56);
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 160ms var(--ease-out);
+}
+.snowq__btn .ico {
+  width: 12px;
+  height: 12px;
+  transform: rotate(90deg);          /* #i-chevron 原生朝右，转 90° 变成倒三角 */
+  transition: transform 200ms var(--ease-out);
+  pointer-events: none;
+}
+.snowq__btn[aria-expanded="true"] .ico { transform: rotate(-90deg); }
+.snowq__btn:active { transform: scale(.86); }
+.snowq__btn:focus-visible {
+  outline: 2px solid oklch(100% 0 0 / .55);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .snowq__btn:hover {
+    color: oklch(100% 0 0 / .95);
+    background: oklch(100% 0 0 / .14);
+  }
+}
+
+/* ---- 浮层外壳：对齐 .smenu（app.css:2960） -----------------------------
+   2026-11-17：底色从蓝色渐变改成和形态下拉同一块 rgba(12,12,17,.96) 纯深底；
+   圆角 18、1px 白 12% 边框、内阴影 + 26/64 外阴影、-6px/0.98 进场都照抄。
+   深底上的可交互面全部从下面这组 --snowq-* 取色，浅色形态只换变量不换结构。 */
+.snowq__pop {
+  --snowq-bg: rgba(12, 12, 17, 0.96);
+  --snowq-border: rgba(255, 255, 255, 0.12);
+  --snowq-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 26px 64px rgba(0, 0, 0, 0.55);
+  --snowq-ink: #f4f5f8;
+  --snowq-muted: rgba(255, 255, 255, 0.78);
+  --snowq-faint: rgba(255, 255, 255, 0.42);
+  --snowq-line: rgba(255, 255, 255, 0.1);
+  --snowq-hover: rgba(255, 255, 255, 0.08);
+  --snowq-on: rgba(255, 255, 255, 0.14);
+  --snowq-ring: rgba(255, 255, 255, 0.65);
+  /* 选中态：深底上是一块实心浅色，浅底上翻成一块实心深色 */
+  --snowq-solid: #ffffff;
+  --snowq-solid-ink: #111216;
+  --snowq-solid-faint: rgba(17, 18, 22, 0.48);
+  --snowq-solid-wash: rgba(17, 18, 22, 0.08);
+  /* 橡皮滑块配色，和 .dstages__cats 那组一一对应 */
+  --snowq-track: rgba(255, 255, 255, 0.055);
+  --snowq-thumb: #f2f3f5;
+  --snowq-rs-text: rgba(255, 255, 255, 0.46);
+  --snowq-rs-active: #17181c;
+  /* 搜索框：.dstages__search 的 32px / 8px 圆角 / 白 6% 底 */
+  --snowq-input-bg: rgba(255, 255, 255, 0.06);
+  --snowq-input-line: rgba(255, 255, 255, 0.08);
+  --snowq-input-bg-focus: rgba(255, 255, 255, 0.09);
+  --snowq-input-line-focus: rgba(255, 255, 255, 0.28);
+  --snowq-input-ink: #f4f5f8;
+  --snowq-input-icon: rgba(255, 255, 255, 0.52);
+
+  position: absolute;
+  z-index: 30;
+  max-width: calc(100vw - 24px);
+  height: min(60vh, 470px);
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 18px;
+  color: var(--snowq-ink);
+  background: var(--snowq-bg);
+  border: 1px solid var(--snowq-border);
+  box-shadow: var(--snowq-shadow);
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  transform-origin: 100% 0;           /* 从右上角向下展开 */
+  transition: opacity 180ms var(--ease-out),
+              transform 220ms cubic-bezier(0.2, 0.9, 0.25, 1);
+  touch-action: pan-y;
+  text-align: left;
+  font-size: 12px;
+}
+.snowq__pop[hidden] { display: none !important; }
+.snowq__pop.is-open { opacity: 1; transform: none; }
+/* 只继承字族：用 font 简写会把下面各按钮自己的 font-size 一起压掉
+   （.snowq__pop button 的优先级比单个类高）。 */
+.snowq__pop button { font-family: inherit; }
+
+/* 浅色风景：app.css 的 #stage-hud.is-on-light 会把 .snow__prog .time 压深；
+   按钮和浮层跟着换一套浅底深字，避免白字铺在白底上。
+   2026-11-17：面板不再是一团黑 —— 和深色形态一一对位翻成浅底深字，
+   选中态仍然是一块实心高对比块（这里是深块白字）。 */
+#stage-hud.is-on-light .snowq__btn { color: rgb(23 23 26 / .58); }
+#stage-hud.is-on-light .snowq__btn:focus-visible {
+  outline-color: rgb(23 23 26 / .45);
+}
+@media (hover: hover) and (pointer: fine) {
+  #stage-hud.is-on-light .snowq__btn:hover {
+    color: #17171a;
+    background: rgb(0 0 0 / .08);
+  }
+}
+#stage-hud.is-on-light .snowq__pop {
+  --snowq-bg: rgba(246, 247, 250, 0.98);
+  --snowq-border: rgba(0, 0, 0, 0.12);
+  --snowq-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 26px 64px rgba(0, 0, 0, 0.24);
+  --snowq-ink: #17181c;
+  --snowq-muted: rgba(23, 23, 26, 0.72);
+  --snowq-faint: rgba(23, 23, 26, 0.46);
+  --snowq-line: rgba(0, 0, 0, 0.1);
+  --snowq-hover: rgba(0, 0, 0, 0.055);
+  --snowq-on: rgba(0, 0, 0, 0.08);
+  --snowq-ring: rgba(0, 0, 0, 0.55);
+  --snowq-solid: #17181c;
+  --snowq-solid-ink: #ffffff;
+  --snowq-solid-faint: rgba(255, 255, 255, 0.62);
+  --snowq-solid-wash: rgba(255, 255, 255, 0.14);
+  --snowq-track: rgba(0, 0, 0, 0.055);
+  --snowq-thumb: #17181c;
+  --snowq-rs-text: rgba(23, 23, 26, 0.5);
+  --snowq-rs-active: #ffffff;
+  --snowq-input-bg: rgba(0, 0, 0, 0.04);
+  --snowq-input-line: rgba(0, 0, 0, 0.08);
+  --snowq-input-bg-focus: rgba(0, 0, 0, 0.06);
+  --snowq-input-line-focus: rgba(0, 0, 0, 0.24);
+  --snowq-input-ink: #17181c;
+  --snowq-input-icon: rgba(23, 23, 26, 0.5);
+}
+/* 浅底上组件的白色 focus 圈看不见：换深色 */
+#stage-hud.is-on-light .snowq__cats .rubber-segment__item:focus-visible,
+#stage-hud.is-on-light .snowq__cats:has(.rubber-segment__item:focus-visible) {
+  outline-color: rgba(23, 23, 26, 0.55);
+}
+
+/* ---- 头部 / 页签：对齐 .dstages__top + 分类页签 ------------------------
+   2026-11-17：页签不再手写胶囊，改成 .dstages__cats 同款 Rubber Segment
+   （JS 挂载 / 销毁）。这里的 nav 只负责 flex 占位和上下 9px 间距，
+   组件几何（滑块、副本、2px inset）一个字都不覆盖。 */
+.snowq__top {
+  flex: none;
+  padding: 10px 14px 0;
+  border-bottom: 1px solid var(--snowq-line);
+}
+.snowq__tabbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.snowq__cats {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 9px 0;
+}
+/* 组件未加载时的兜底页签（正式两页都加载了 rubber-segment.js，不会走到） */
+.snowq__cats--fallback {
+  display: flex;
+  gap: 6px;
+}
+.snowq__count {
+  flex: none;
+  font-size: 11px;
+  color: var(--snowq-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.snowq__x {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--snowq-line);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--snowq-muted);
+  background: var(--snowq-hover);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 140ms var(--ease-out);
+}
+.snowq__x .ico { width: 13px; height: 13px; }
+.snowq__x:active { transform: scale(0.94); }
+.snowq__x:focus-visible {
+  outline: 1px solid var(--snowq-ring);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .snowq__x:hover { color: var(--snowq-ink); background: var(--snowq-on); }
+}
+
+/* ---- 面板主体 ----------------------------------------------------------
+   2026-11-17：外框定高（和 .smenu 一样不滚），只滚里面的 .snowq__list。
+   内边距照抄 .dstages__pane 的 10/10/12/14，右侧多留一点给玻璃滑钮。 */
+.snowq__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.snowq__pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+}
+.snowq__pane[hidden] { display: none !important; }
+
+.snowq__now,
+.snowq__hint {
+  flex: none;
+  margin: 0;
+  padding: 10px 14px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--snowq-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 滚动条：和形态下拉同一颗玻璃滑钮。
+   注意别写 scrollbar-width / scrollbar-color —— 标准属性一出现，
+   Chromium 会丢掉下面的 ::-webkit-scrollbar 自定义样式。 */
+.snowq__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 10px 12px 14px;
+}
+.snowq__list::-webkit-scrollbar { width: 10px; height: 0; }
+.snowq__list::-webkit-scrollbar-button,
+.snowq__list::-webkit-scrollbar-button:start,
+.snowq__list::-webkit-scrollbar-button:end { display: none; width: 0; height: 0; }
+.snowq__list::-webkit-scrollbar-track-piece,
+.snowq__list::-webkit-scrollbar-track,
+.snowq__list::-webkit-scrollbar-corner { background: transparent; }
+.snowq__list::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.26);
+  background-image: linear-gradient(to bottom,
+    rgba(255, 255, 255, 0.44),
+    rgba(255, 255, 255, 0.2));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
+}
+.snowq__list::-webkit-scrollbar-thumb:hover {
+  background-image: linear-gradient(to bottom,
+    rgba(255, 255, 255, 0.62),
+    rgba(255, 255, 255, 0.36));
+}
+#stage-hud.is-on-light .snowq__list::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.22);
+  background-image: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0.36),
+    rgba(0, 0, 0, 0.16));
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.16);
+}
+#stage-hud.is-on-light .snowq__list::-webkit-scrollbar-thumb:hover {
+  background-image: linear-gradient(to bottom,
+    rgba(0, 0, 0, 0.5),
+    rgba(0, 0, 0, 0.26));
+}
+
+/* ---- 列表行：对齐 .stage-item（31px 行高 / 0 9px 内边距 / 8px 圆角） ----
+   队列、搜索结果、歌单都用同一条行；左侧是 26px 图标位（搜索/歌单放 24px
+   封面），中间名称 + 灰色副标题，右侧时长和操作位。
+   选中态是一块实心高对比块（深色形态白底黑字，浅色形态反过来）。 */
+.snowq__row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  height: 31px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--snowq-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  /* 硬约束：动画只碰 transform / opacity，行高亮直接切。 */
+  transition: opacity .16s var(--ease-out),
+              transform .16s cubic-bezier(.32,.72,0,1);
+}
+.snowq__row + .snowq__row { margin-top: 2px; }
+.snowq__row.is-on {
+  background: var(--snowq-solid);
+  color: var(--snowq-solid-ink);
+  font-weight: 600;
+}
+.snowq__row.is-dragging { opacity: .4; }
+.snowq__row.is-drop { box-shadow: inset 0 0 0 1px var(--snowq-solid); }
+.snowq__row.is-loading { opacity: .55; cursor: default; }
+.snowq__row:focus-visible {
+  outline: 1px solid var(--snowq-ring);
+  outline-offset: -1px;
+}
+.snowq__row.is-on:focus-visible { outline-color: var(--snowq-solid-ink); }
+@media (hover: hover) and (pointer: fine) {
+  .snowq__row:not(.is-on):not(.snowq__row--note):hover {
+    background: var(--snowq-hover);
+    color: var(--snowq-ink);
+  }
+}
+
+.snowq__idx {
+  flex: none;
+  width: 26px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--snowq-faint);
+  font-variant-numeric: tabular-nums;
+}
+.snowq__row.is-on .snowq__idx,
+.snowq__row.is-on .snowq__sub,
+.snowq__row.is-on .snowq__dur { color: var(--snowq-solid-faint); }
+.snowq__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snowq__sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 38%;
+  font-size: 11px;
+  color: var(--snowq-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snowq__dur {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: var(--snowq-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 右侧操作位：和 .dstages__random / .dstages__add 同一种小方钮，不用胶囊 */
+.snowq__op {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--snowq-line);
+  border-radius: 6px;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--snowq-muted);
+  background: var(--snowq-hover);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 140ms var(--ease-out);
+}
+.snowq__op:active { transform: scale(0.94); }
+.snowq__op--now {
+  border-color: transparent;
+  color: var(--snowq-solid-ink);
+  background: var(--snowq-solid-wash);
+}
+@media (hover: hover) and (pointer: fine) {
+  .snowq__op:hover { color: var(--snowq-ink); background: var(--snowq-on); }
+}
+
+/* ---- 搜索 / 歌单 ------------------------------------------------------- */
+/* 左侧图标位：31px 行里放 24px 封面，和 .stage-item__id 的 26px 槽位同宽 */
+.snowq__cover {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--snowq-faint);
+  background: var(--snowq-hover);
+}
+.snowq__cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.snowq__cover .ico { width: 13px; height: 13px; }
+.snowq__row--res { cursor: default; }
+.snowq__res-ops { flex: none; display: flex; gap: 4px; }
+.snowq__mini {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--snowq-line);
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  color: var(--snowq-muted);
+  background: var(--snowq-hover);
+  cursor: pointer;
+  transition: transform 140ms var(--ease-out);
+}
+.snowq__mini .ico { width: 11px; height: 11px; }
+.snowq__mini:active { transform: scale(0.9); }
+@media (hover: hover) and (pointer: fine) {
+  .snowq__mini:hover { color: var(--snowq-ink); background: var(--snowq-on); }
+}
+
+.snowq__row--list { cursor: pointer; }
+.snowq__list-go {
+  flex: none;
+  font-size: 10.5px;
+  color: var(--snowq-faint);
+  white-space: nowrap;
+}
+/* 未登录 / 读取失败的说明行：占满整行、不响应 hover */
+.snowq__row--note {
+  cursor: default;
+  color: var(--snowq-faint);
+}
+.snowq__row--note .snowq__name { flex: 0 1 auto; font-weight: 500; }
+.snowq__row--note .snowq__sub { flex: 1 1 auto; max-width: none; }
+
+/* 搜索框：和 .dstages__search 同一套（32px 高 / 8px 圆角 / 白 6% 底 /
+   focus-within 才提亮边框），搜索按钮是小方钮而不是胶囊。 */
+.snowq__searchbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px 0;
+}
+.snowq__search {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--snowq-input-line);
+  border-radius: 8px;
+  background: var(--snowq-input-bg);
+  color: var(--snowq-input-icon);
+  transition: border-color 140ms var(--ease-out),
+              background 140ms var(--ease-out);
+}
+.snowq__search:focus-within {
+  border-color: var(--snowq-input-line-focus);
+  background: var(--snowq-input-bg-focus);
+  color: var(--snowq-input-ink);
+}
+.snowq__search-ico { width: 14px; height: 14px; flex: none; }
+.snowq__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--snowq-input-ink);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.snowq__input::placeholder { color: var(--snowq-faint); }
+.snowq__input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.snowq__go {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--snowq-line);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--snowq-muted);
+  background: var(--snowq-hover);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 140ms var(--ease-out);
+}
+.snowq__go:active { transform: scale(0.94); }
+.snowq__srcs {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 0;
+}
+/* 音源切换和页签行末端的小按钮同一套；选中态是一块实心高对比块 */
+.snowq__src {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--snowq-line);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--snowq-muted);
+  background: var(--snowq-hover);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 140ms var(--ease-out);
+}
+.snowq__src:active { transform: scale(0.94); }
+.snowq__src.is-on {
+  border-color: transparent;
+  color: var(--snowq-solid-ink);
+  background: var(--snowq-solid);
+  font-weight: 600;
+}
+@media (hover: hover) and (pointer: fine) {
+  .snowq__go:hover { color: var(--snowq-ink); background: var(--snowq-on); }
+  .snowq__src:not(.is-on):hover { color: var(--snowq-ink); background: var(--snowq-on); }
+}
+
+.snowq__foot {
+  flex: none;
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid var(--snowq-line);
+}
+.snowq__foot[hidden] { display: none !important; }
+.snowq__foot-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  border: 1px solid var(--snowq-line);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--snowq-muted);
+  background: var(--snowq-hover);
+  cursor: pointer;
+  transition: transform 140ms var(--ease-out);
+}
+.snowq__foot-btn:active { transform: scale(0.97); }
+.snowq__foot-btn--main {
+  border-color: transparent;
+  color: var(--snowq-solid-ink);
+  background: var(--snowq-solid);
+  font-weight: 600;
+}
+/* 和 .dstages__random / .dstages__add 一样：键盘焦点走单色圈，不用品牌色 */
+.snowq__go:focus-visible,
+.snowq__src:focus-visible,
+.snowq__op:focus-visible,
+.snowq__mini:focus-visible,
+.snowq__foot-btn:focus-visible {
+  outline: 1px solid var(--snowq-ring);
+  outline-offset: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .snowq__foot-btn:hover { color: var(--snowq-ink); background: var(--snowq-on); }
+  .snowq__foot-btn--main:hover {
+    color: var(--snowq-solid-ink);
+    background: var(--snowq-solid);
+  }
+}
+
+.snowq__empty {
+  margin: 28px 12px;
+  padding: 0;
+  text-align: center;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--snowq-faint);
+}
+.snowq__status {
+  flex: none;
+  margin: 0;
+  padding: 7px 14px;
+  font-size: 11px;
+  color: var(--snowq-ink);
+  background: var(--snowq-hover);
+  border-top: 1px solid var(--snowq-line);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+}
+.snowq__status.is-on { opacity: 1; }
+.snowq__status[hidden] { display: none !important; }
+
+/* ---- 窄屏 / 矮屏 ------------------------------------------------------- */
+/* app.css 在 760px 以下把 .snow__pill 卡在 200px（收起态够用）。
+   展开态本来就只有约 40px 的进度条；再加一个 18px 入口会压到十几像素。
+   这里只放宽展开态的胶囊上限，并把按钮缩到 16px，进度条恢复到 40px 以上；
+   纵向比例（两行信息 + 进度）不变。 */
+@media (max-width: 760px) {
+  .stagebar.is-near .snow__pill { max-width: 228px; }
+  .snowq__btn { width: 16px; height: 16px; }
+  .snowq__btn .ico { width: 11px; height: 11px; }
+}
+@media (max-width: 350px) {
+  .stagebar.is-near .snow__pill { max-width: 208px; }
+}
+/* 手机：和形态下拉一样把行加高到 36px（只走触屏分支，不写纯宽度规则） */
+@media (max-width: 1280px) and (pointer: coarse) {
+  .snowq__pop { height: min(62vh, 460px); max-height: calc(100vh - 88px); }
+  .snowq__row { height: 36px; }
+  .snowq__op { height: 24px; }
+  .snowq__mini { width: 24px; height: 24px; }
+  .snowq__foot-btn { height: 36px; }
+}
+@media (max-height: 520px) {
+  /* 浮层顶端大约在 78px；矮屏多借一点高度，但必须给底部留 24px。 */
+  .snowq__pop { height: min(78vh, 420px, calc(100vh - 110px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .snowq__pop,
+  .snowq__btn,
+  .snowq__btn .ico,
+  .snowq__row,
+  .snowq__status,
+  .snowq__x,
+  .snowq__go,
+  .snowq__src,
+  .snowq__mini,
+  .snowq__op,
+  .snowq__foot-btn { transition-duration: 1ms; }
+}

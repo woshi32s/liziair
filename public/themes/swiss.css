@@ -1,0 +1,245 @@
+/* 瑞士国际主义 Swiss International Style · 1957
+ * 纸白、墨黑、灰阶、唯一红点；Helvetica 系、紧字距、tabular 数字、1px 规线、零圆角零阴影。
+ * 签名只有一条：分区标题上方的 24×2 红短线；其余交给网格、留白和细线。
+ * 依据：public/app.css 顶栏 161–270、设置标题 331–342、大厅分区标题 4891/5103、
+ *       浏览分组 1720、设置卡 8893、主按钮 1563–1568、文字按钮 461、
+ *       标签 1779/7430、设置页 hero 8755–8799；migrate.css 12–30/56–70。
+ */
+
+html[data-ui-theme="swiss"] {
+  --sw-rule-gap: 12px;
+
+  /* 字体 */
+  --tm-font-display: "Helvetica Neue", Helvetica, Arial, "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --tm-font-body: "Helvetica Neue", Helvetica, Arial, "PingFang SC",
+    "Microsoft YaHei", system-ui, sans-serif;
+  --tm-font-mono: "SFMono-Regular", Menlo, Consolas, ui-monospace, monospace;
+  --tm-display-weight: 700;
+  --tm-display-tracking: -0.02em;
+  --tm-display-transform: none;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 颜色 */
+  --tm-bg: #fafafa;
+  --tm-bg-pattern: none;
+  --tm-surface: #ffffff;
+  --tm-surface-2: #f1f1f1;
+  --tm-surface-3: #e5e5e5;
+  --tm-ink: #111111;
+  --tm-ink-2: #333333;
+  --tm-ink-3: #666666;
+  --tm-accent: #e2231a;
+  --tm-accent-2: #111111;
+  --tm-accent-ink: #ffffff;
+  --tm-line: #dedede;
+  --tm-line-strong: #111111;
+  --tm-focus: #e2231a;
+
+  /* 形状 */
+  --tm-border-w: 1px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 0px;
+  --tm-radius-pill: 0px;
+  --tm-radius-input: 0px;
+  --tm-shadow: none;
+  --tm-shadow-sm: none;
+  --tm-shadow-inset: none;
+
+  /* 其他 */
+  --tm-card-bg: var(--tm-surface);
+  --tm-overlay-bg: rgba(250, 250, 250, .97);
+  --tm-scrim: rgba(0, 0, 0, .35);
+  --tm-filter: none;
+}
+
+/* 瑞士排版：所有数字走等宽数字，时间 / 计数不跳动 */
+html[data-ui-theme="swiss"] body:not(.is-stage) {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 签名：分区标题上方 24×2 红短线。
+   画在标题自己的背景上，不新增 DOM、不用伪元素，也就不挡点击。 */
+html[data-ui-theme="swiss"] body:not(.is-stage) .setpage__h,
+html[data-ui-theme="swiss"] body:not(.is-stage) .setgroup__h,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-cell__h,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-feed__h,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-public__head,
+html[data-ui-theme="swiss"] body:not(.is-stage) .track-group,
+html[data-ui-theme="swiss"] body:not(.is-stage) .panel__label,
+html[data-ui-theme="swiss"] body:not(.is-stage) .pg-sec__h,
+html[data-ui-theme="swiss"] body:not(.is-stage) .ma-drawer__h,
+html[data-ui-theme="swiss"] body:not(.is-stage) .recent__h,
+html[data-ui-theme="swiss"] body:not(.is-stage) .searchgroup {
+  padding-top: var(--sw-rule-gap);
+  background-image: linear-gradient(#e2231a, #e2231a);
+  background-repeat: no-repeat;
+  background-origin: content-box;
+  background-position: 0 calc(-1 * var(--sw-rule-gap));
+  background-size: 24px 2px;
+  font-weight: 700;
+}
+/* 标题里的 <b> 自带 500 字重，单独拉黑，让分区层级只靠字重和留白 */
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-cell__h b,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-feed__h b,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-public__head b,
+html[data-ui-theme="swiss"] body:not(.is-stage) .pg-sec__h b,
+html[data-ui-theme="swiss"] body:not(.is-stage) .ma-drawer__h b {
+  font-weight: 700;
+}
+
+/* 按钮：黑底白字矩形；文字按钮只留一条下划线；悬停只换底色，不位移不发光 */
+html[data-ui-theme="swiss"] body:not(.is-stage) .btn--primary,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-cta__btn {
+  /* app.css:1563–1567 的主按钮渐变带 !important，只能同样用 !important 压过 */
+  background: #111111 !important;
+  color: #fafafa;
+  border: 1px solid #111111;
+  border-radius: 0;
+  box-shadow: none;
+  filter: none;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .btn--primary:hover,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-cta__btn:hover {
+  background: #333333 !important;
+  color: #ffffff;
+  filter: none;
+  transform: none;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .btn:hover,
+html[data-ui-theme="swiss"] body:not(.is-stage) .btn:active {
+  transform: none;
+}
+/* app.css:301–309 用 ID + !important 把设置页主按钮钉成 #17171a，这里同样用 ID 压过 */
+html[data-ui-theme="swiss"] body:not(.is-stage) #view-settings .btn--primary {
+  background: #111111 !important;
+  color: #ffffff;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) #view-settings .btn--primary:hover {
+  background: #333333 !important;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-hero__play {
+  border-radius: 0;
+  background-color: #111111;
+  background: #111111;
+  color: #fafafa;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-hero__play:hover {
+  transform: none;
+  background: #333333;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-hero.is-hover .hall-hero__play {
+  box-shadow: none;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .setpage__act {
+  color: #111111;
+  border-bottom-color: #111111;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .setpage__act:hover {
+  color: #555555;
+  border-bottom-color: #555555;
+}
+
+/* 局部补齐：app.css 里硬编码的取色雾、上浮、投影、spotlight 与玻璃光效一律压平 */
+html[data-ui-theme="swiss"] body:not(.is-stage) .track::after {
+  display: none;            /* 纯装饰伪元素：行右侧的模糊取色雾 */
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .track {
+  border-bottom: 1px solid #e4e4e4;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .dcard:hover .dcard__art,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-pl:hover .hall-pl__cover,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-tools__i:hover,
+html[data-ui-theme="swiss"] body:not(.is-stage) .tools-page__card:hover {
+  transform: none;
+  box-shadow: none;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .dcard__art,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-thumb,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-pl__cover,
+html[data-ui-theme="swiss"] body:not(.is-stage) .pg-ava,
+html[data-ui-theme="swiss"] body:not(.is-stage) .setnav__item.is-on,
+html[data-ui-theme="swiss"] body:not(.is-stage) .setpage__switch-knob {
+  box-shadow: none;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .setcard::before {
+  display: none;            /* 纯装饰伪元素：跟随鼠标的 spotlight */
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .setconsole__aurora {
+  background: none;
+  filter: none;
+  opacity: 0;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .setconsole__shiny {
+  background-image: none;
+  -webkit-background-clip: border-box;
+  background-clip: border-box;
+  color: var(--ink);
+}
+/* 直角：把仍写死为圆形的控件压平（状态小圆点不在此列） */
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-hero__lock,
+html[data-ui-theme="swiss"] body:not(.is-stage) .hall-pl__play,
+html[data-ui-theme="swiss"] body:not(.is-stage) .icbtn,
+html[data-ui-theme="swiss"] body:not(.is-stage) .icbtn--play,
+html[data-ui-theme="swiss"] body:not(.is-stage) .tool-card__ico,
+html[data-ui-theme="swiss"] body:not(.is-stage) .tools-page__ico,
+html[data-ui-theme="swiss"] body:not(.is-stage) .setpage__switch-knob,
+html[data-ui-theme="swiss"] body:not(.is-stage) .sw i {
+  border-radius: 0;
+}
+
+/* 局部硬编码色：琥珀标签改黑底白字小方块；圆角标签压成直角 */
+html[data-ui-theme="swiss"] body:not(.is-stage) .track__flag {
+  border-radius: 0;
+  background: #111111;
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .marq__tag {
+  border-radius: 0;
+  background: #111111;
+  color: #ffffff;
+  box-shadow: none;
+  text-transform: uppercase;
+}
+/* pages.css 的「我的专辑」自带两档冷灰，单独对齐瑞士灰阶 */
+html[data-ui-theme="swiss"] body:not(.is-stage) .ma {
+  --ma-ink-4: #767676;
+  --ma-rule-soft: #e8e8e8;
+}
+
+/* 搬运浮层自带暖纸令牌，单独映射到纸白 / 灰阶 / 唯一红 */
+html[data-ui-theme="swiss"] body:not(.is-stage) .mig {
+  --mig-paper: #fafafa;
+  --mig-paper-2: #ffffff;
+  --mig-card: #ffffff;
+  --mig-ink: #111111;
+  --mig-ink-2: #444444;
+  --mig-ink-3: #767676;
+  --mig-line: #dddddd;
+  --mig-line-strong: #bbbbbb;
+  --mig-accent: #e2231a;
+  --mig-accent-ink: #b3120b;
+  --mig-accent-soft: #fbe9e8;
+  --mig-orange: #666666;
+  --mig-orange-soft: #efefef;
+  --mig-green: #111111;
+  --mig-green-soft: #eeeeee;
+  --mig-red: #e2231a;
+  --mig-red-soft: #fbe9e8;
+  background: rgba(0, 0, 0, .35);
+}
+html[data-ui-theme="swiss"] body:not(.is-stage) .mig__sheet {
+  border-color: #111111;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 手机：标题上的红短线收紧一档，避免触屏页头过高 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="swiss"] body:not(.is-stage) {
+    --sw-rule-gap: 9px;
+  }
+}

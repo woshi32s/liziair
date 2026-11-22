@@ -78,7 +78,7 @@ const Beat = (() => {
   let downbeatSlot = 0;
 
   const listeners = {};
-  const on = (evt, fn) => (listeners[evt] ||= []).push(fn);
+  const on = (evt, fn) => (listeners[evt] = listeners[evt] || []).push(fn);
   const emit = (evt, data) => (listeners[evt] || []).forEach((f) => f(data));
 
   /* ------------------------------------------------------------------ *
@@ -597,7 +597,9 @@ const Beat = (() => {
     get audioFailed() { return failed; },
     get context() { return ctx; },
     get spectrum() { return freq; },
+    get audioSrc() { return (audio && (audio.currentSrc || audio.src)) || ''; },
     // 给单测用（node tempo-unit.mjs）：把纯计算部分暴露出去
     _pickTempo: pickTempo,
   };
 })();
+if (typeof window !== 'undefined') window.__LIZI_BEAT = Beat;

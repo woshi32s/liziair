@@ -1,0 +1,243 @@
+/* 拟物化 Skeuo · 2010
+ * 一句话：亚麻桌面上一块皮革顶栏，按钮是带高光的玻璃胶囊，卡片像压了纹的纸。
+ * 依据：public/app.css 顶栏 161–284、品牌 223–257、按钮 1537–1568、
+ *       开关 1517–1532 / 8982–9019、设置卡 8893–8935、大厅入口卡 4985–5054、
+ *       登录弹窗 2636–2652；public/win-controls.css 25–41。
+ * 本文件只写契约 §5 的变量 + 3 组签名（皮革顶栏 / 玻璃胶囊控件 / 纸面卡片），
+ * 通用表面、令牌映射、玻璃中和交给 base.css。所有风格规则都限定在
+ * html[data-ui-theme="skeuo"] body:not(.is-stage) 下，形态页不命中。
+ */
+
+html[data-ui-theme="skeuo"] {
+  /* 私有纹理：8px 亚麻、10px 纸纹、24px 皮革颗粒；低对比、可平铺 */
+  --skeuo-linen: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8'%3E%3Cpath d='M0,0h8v1H0z' fill='%23ffffff' fill-opacity='.14'/%3E%3Cpath d='M0,4h8v1H0z' fill='%234a3222' fill-opacity='.045'/%3E%3Cpath d='M0,0v8h1V0z' fill='%234a3222' fill-opacity='.055'/%3E%3Cpath d='M4,0v8h1V0z' fill='%23ffffff' fill-opacity='.06'/%3E%3C/svg%3E");
+  --skeuo-paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10'%3E%3Cpath d='M0,0h10v1H0z' fill='%23ffffff' fill-opacity='.22'/%3E%3Cpath d='M0,5h10v1H0z' fill='%234a3222' fill-opacity='.028'/%3E%3C/svg%3E");
+  --skeuo-leather: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24'%3E%3Cg fill='%23000000' fill-opacity='.10'%3E%3Cpath d='M2,3h1v1H2zM11,1h1v1h-1zM18,5h1v1h-1zM6,9h1v1H6zM15,12h1v1h-1zM3,16h1v1H3zM20,19h1v1h-1zM9,21h1v1H9z'/%3E%3C/g%3E%3Cg fill='%23ffffff' fill-opacity='.035'%3E%3Cpath d='M5,2h1v1H5zM14,4h1v1h-1zM20,9h1v1h-1zM8,13h1v1H8zM18,15h1v1h-1zM1,20h1v1H1zM12,22h1v1h-1z'/%3E%3C/g%3E%3C/svg%3E");
+
+  /* 字体：2010 年的系统界面字，标题比正文重一档 */
+  --tm-font-display: "Lucida Grande", "Lucida Sans Unicode", "Segoe UI",
+    Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --tm-font-body: "Lucida Grande", "Lucida Sans Unicode", "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", Helvetica, Arial, sans-serif;
+  --tm-font-mono: "Lucida Console", Menlo, Consolas, "Courier New", monospace;
+  --tm-display-weight: 600;
+  --tm-display-tracking: 0em;
+  --tm-display-transform: none;
+  --tm-heading-font: var(--tm-font-display);
+
+  /* 颜色：亚麻底、皮革墨色、暖白纸面；强调蓝比 #4a90e2 压深一点，
+     保证白字按钮与正文链接的对比度 */
+  --tm-bg: #d8cfc0;
+  --tm-bg-pattern: var(--skeuo-linen);
+  --tm-surface: #f4eee3;
+  --tm-surface-2: #eae1d2;
+  --tm-surface-3: #dccfbb;
+  --tm-ink: #2b2016;
+  --tm-ink-2: #5a4632;
+  --tm-ink-3: #6e5a46;
+  --tm-accent: #2f63a4;
+  --tm-accent-2: #2e6b4f;
+  --tm-accent-ink: #ffffff;
+  --tm-line: #8f7a61;
+  --tm-line-strong: #4a3222;
+  --tm-focus: #3a72b8;
+
+  /* 形状：细描边；卡片 12px、胶囊 16px（30px 高的开关会自动成为全圆） */
+  --tm-border-w: 1px;
+  --tm-border: var(--tm-border-w) solid var(--tm-line);
+  --tm-radius-card: 12px;
+  --tm-radius-pill: 16px;
+  --tm-radius-input: 10px;
+  --tm-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .85),
+    inset 0 -1px 0 rgba(74, 50, 34, .12),
+    0 2px 3px rgba(58, 40, 26, .14),
+    0 16px 30px -18px rgba(58, 40, 26, .55);
+  --tm-shadow-sm:
+    inset 0 1px 0 rgba(255, 255, 255, .70),
+    inset 0 -1px 0 rgba(74, 50, 34, .18),
+    0 1px 2px rgba(58, 40, 26, .22);
+  --tm-shadow-inset:
+    inset 0 2px 5px rgba(74, 50, 34, .30),
+    inset 0 -1px 0 rgba(255, 255, 255, .45);
+
+  /* 其他 */
+  --tm-card-bg: #f8f3e9;
+  --tm-overlay-bg: rgba(245, 239, 228, .95);
+  --tm-scrim: rgba(42, 30, 19, .55);
+  --tm-filter: none;
+}
+
+/* ==========================================================================
+   签名 1：顶栏是一条深皮革条
+   低对比颗粒 + 顶部 1px 亮边 + 底部暗边；栏内文字改用暖白。
+   ========================================================================== */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar.lg-surface {
+  color: #f7ecdc;
+  --ink: #f7ecdc;
+  --ink-2: #e8d7c2;
+  --ink-3: #c7b095;
+  background-color: #4a3222;
+  /* 先给一条不含 data URI 的可用底，再叠颗粒；老内核丢后一条也不至于透明 */
+  background-image:
+    radial-gradient(120% 160% at 50% -20%, rgba(255, 255, 255, .12) 0%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, #5a3e2a 0%, #4a3222 48%, #412b1d 52%, #3a2518 100%);
+  background-image:
+    var(--skeuo-leather),
+    radial-gradient(120% 160% at 50% -20%, rgba(255, 255, 255, .12) 0%, rgba(255, 255, 255, 0) 58%),
+    linear-gradient(180deg, #5a3e2a 0%, #4a3222 48%, #412b1d 52%, #3a2518 100%);
+  /* 顶栏始终是整宽的一条，不带 base 给 .lg-surface 的卡片圆角/描边 */
+  border: 0;
+  border-bottom: 1px solid #2c1c11;
+  border-radius: 0;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .16),
+    inset 0 -1px 0 rgba(0, 0, 0, .42),
+    0 2px 7px rgba(40, 26, 15, .30);
+}
+/* 栏内品牌、图标、搜索框都吃暖白；Air 改回系统字，不走 Fraunces 斜体 */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .brand,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .tbtn,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .search,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .search .ico {
+  color: #f7ecdc;
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .tbtn {
+  background: transparent;
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .brand__air {
+  color: #e8d7c2;
+  font-family: var(--tm-font-display);
+  font-style: normal;
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .tbtn:hover {
+  background: rgba(255, 255, 255, .12);
+  color: #ffffff;
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .search {
+  background: transparent;
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .search:hover,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .search:focus-within {
+  background: rgba(26, 16, 9, .30);
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .search input::placeholder {
+  color: #c7b095;
+}
+/* 深色皮条上的焦点环换成暖白，--tm-focus 的蓝色在这里不够亮 */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .tbtn:focus-visible,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar .brand:focus-visible,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .win-controls button:focus-visible {
+  outline-color: #f7ecdc;
+}
+/* 窗口三键固定浮在顶栏右上角（win-controls.css:25），跟着皮革条换浅色 */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .win-controls button {
+  color: #f0e3d1;
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .win-controls button:hover {
+  background: rgba(255, 255, 255, .14);
+  color: #ffffff;
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .win-controls .win-close:hover {
+  background: #b54337;
+  color: #ffffff;
+}
+
+/* ==========================================================================
+   签名 2：按钮 / 开关是玻璃胶囊
+   上部高光、中线以下转暗；按下改成 inset 凹陷。只给本来就有底色表面的控件，
+   不给透明图标键加白斑。
+   ========================================================================== */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .btn.lg-surface,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .icbtn--play,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .setpage__switch,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .setpage__seg button.is-on,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .sw,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .hall-hero__play,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .hall-cta__btn {
+  background-image: linear-gradient(180deg,
+    rgba(255, 255, 255, .62) 0%,
+    rgba(255, 255, 255, .24) 44%,
+    rgba(255, 255, 255, 0) 50%,
+    rgba(74, 50, 34, .07) 100%);
+}
+/* app.css:1563–1567 的主按钮渐变带 !important，只能同样用 !important 压成玻璃蓝 */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .btn--primary {
+  color: #ffffff;
+  background:
+    linear-gradient(180deg,
+      rgba(255, 255, 255, .52) 0%,
+      rgba(255, 255, 255, .18) 44%,
+      rgba(255, 255, 255, 0) 50%,
+      rgba(10, 28, 48, .12) 100%),
+    linear-gradient(180deg, #4a90e2 0%, #3a72b8 26%, #2f63a4 56%, #275488 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .45),
+    0 1px 2px rgba(58, 40, 26, .24);
+}
+/* 开关的滑块是实体塑料：顶部纯白，底部一圈暗边 */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .setpage__switch-knob,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .sw i {
+  background: linear-gradient(180deg, #ffffff 0%, #f6f0e5 48%, #ddd2c0 100%);
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    inset 0 -1px 0 rgba(74, 50, 34, .18),
+    0 1px 3px rgba(58, 40, 26, .34);
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .btn.lg-surface:active,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .btn--primary:active,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .icbtn--play:active,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .setpage__switch:active,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .setpage__seg button.is-on:active,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .hall-hero__play:active,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .hall-cta__btn:active {
+  background-image: linear-gradient(180deg,
+    rgba(74, 50, 34, .12) 0%,
+    rgba(74, 50, 34, 0) 64%);
+  box-shadow: var(--tm-shadow-inset);
+}
+
+/* ==========================================================================
+   签名 3：卡片是亚麻 / 纸面
+   低对比纸纹 + 顶部一层很淡的纸面反光，标题加 1px 白色压印。
+   ========================================================================== */
+html[data-ui-theme="skeuo"] body:not(.is-stage) .setpage__sec.setcard,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .hall-tools__i,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .modal__card {
+  background-image: linear-gradient(180deg,
+    rgba(255, 255, 255, .42) 0%,
+    rgba(255, 255, 255, .10) 34%,
+    rgba(255, 255, 255, 0) 55%);
+  background-image: linear-gradient(180deg,
+    rgba(255, 255, 255, .42) 0%,
+    rgba(255, 255, 255, .10) 34%,
+    rgba(255, 255, 255, 0) 55%),
+    var(--skeuo-paper);
+}
+html[data-ui-theme="skeuo"] body:not(.is-stage) .setcard > .setpage__h,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .hall-cell__h b,
+html[data-ui-theme="skeuo"] body:not(.is-stage) .modal__title {
+  text-shadow: 0 1px 0 rgba(255, 255, 255, .8);
+}
+
+/* 手机：纹理本身已是低对比；外阴影收轻一点，圆角沿用 12 / 16px 不会溢出 */
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-ui-theme="skeuo"] {
+    --tm-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .80),
+      inset 0 -1px 0 rgba(74, 50, 34, .10),
+      0 1px 2px rgba(58, 40, 26, .12),
+      0 7px 16px -12px rgba(58, 40, 26, .45);
+    --tm-shadow-sm:
+      inset 0 1px 0 rgba(255, 255, 255, .62),
+      inset 0 -1px 0 rgba(74, 50, 34, .16),
+      0 1px 2px rgba(58, 40, 26, .18);
+  }
+  html[data-ui-theme="skeuo"] body:not(.is-stage) .topbar {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, .14),
+      inset 0 -1px 0 rgba(0, 0, 0, .38),
+      0 1px 4px rgba(40, 26, 15, .26);
+  }
+}

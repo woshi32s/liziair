@@ -5,11 +5,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>504 · 已发送</title>
 <script src="assets/custom-bg.js"></script>
+<script>/* 安卓标记要早于首帧，CSS 里 html.lz-android 的 zoom 修正才能第一帧就生效 */
+try { if (/Android/i.test(navigator.userAgent || '')) document.documentElement.classList.add('lz-android'); } catch (e) {}</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;-webkit-font-smoothing:antialiased}
 html,body{margin:0;height:100%;overflow:hidden;background:#000}
 body{font-family:"SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
      -webkit-user-select:none;user-select:none;cursor:default}
+/* 自由视角：整页吃手势。否则浏览器把手势判成滚动/长按，Android WebView 会在拖几像素后
+   pointercancel（断触）。只在本形态页里生效，不会碰到宿主设置面板。 */
+body.is-free{touch-action:none;overscroll-behavior:none;-webkit-touch-callout:none}
+body.is-free *{touch-action:none;-webkit-touch-callout:none}
 
 /* ================= 背景：黑 ================= */
 .bg{position:fixed;inset:0;
@@ -21,22 +27,19 @@ body{font-family:"SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft
 
 /* ================= 舞台 ================= */
 .stage{position:fixed;inset:0}
+#chassis{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
 .anchor{position:absolute;left:63%;top:50%;transform:translate(-50%,-50%);
-        perspective:1250px;perspective-origin:48% 44%}
+        perspective:1250px;perspective-origin:48% 44%;z-index:1}
 
-/* 摄影机：机械臂。每次换句由 JS 重设 transform（时长/曲线逐镜不同） */
-.tilt{position:relative;transform-style:preserve-3d;will-change:transform;
+/* 摄影机：机械臂。由 JS rAF 统一推进状态并同步写入 DOM 与 WebGL（无 CSS transition） */
+.tilt{position:relative;transform-style:preserve-3d;
       transform:rotateX(11deg) rotateY(23deg) rotateZ(-1.3deg)}
-/* 视差：鼠标带着转一点点，挂在摄影机里侧，不参与运镜 */
-.par{transform-style:preserve-3d;transition:transform .5s cubic-bezier(.22,.75,.28,1)}
-.float{transform-style:preserve-3d;animation:float 12s ease-in-out infinite alternate}
-@keyframes float{
-  from{transform:translateY(-7px)}
-  to  {transform:translateY(8px)}
-}
+/* 视差：鼠标带着转一点点，挂在摄影机里侧，不参与运镜（无 CSS transition） */
+.par{transform-style:preserve-3d}
+.float{transform-style:preserve-3d}
 .box{position:relative;transform-style:preserve-3d;transform:scale(calc(var(--k,1) * 0.5))}
 
-/* 机身厚度：40 层实心片沿 z 轴挤出（约 44px），转起来是一条金属侧壁 */
+/* 降级备用：仅在 WebGL 初始化失败时生成 4 层大间距 CSS 切片 */
 .layers{position:absolute;inset:0;transform-style:preserve-3d;pointer-events:none}
 .layers i{position:absolute;inset:0;border-radius:112px;background:#2a2a30;
           -webkit-backface-visibility:hidden;backface-visibility:hidden}
@@ -56,6 +59,11 @@ body{font-family:"SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft
          0 -2px 5px rgba(0,0,0,.92) inset,
          0 0 60px -6px rgba(150,165,255,.10),
          0 40px 90px -30px rgba(0,0,0,.95)}
+
+/* 安卓去掉 .phone 的 zoom:2（横屏与竖屏统一），避免 Blink 按 zoom 放大栅格丢块 */
+html.lz-android .phone{zoom:1}
+html.lz-android .box{transform:scale(var(--k,1))}
+html.lz-android .layers i{border-radius:56px}
 
 /* ================= 屏幕 ================= */
 .screen{position:absolute;inset:6px;border-radius:50px;overflow:hidden;background:#fff;
@@ -176,6 +184,9 @@ body{font-family:"SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft
 .rec__w{position:relative;flex:0 1 auto;height:18px;min-width:100px}
 .rec__w i{position:absolute;top:0;bottom:0;width:2px;background:#b0b0b7;border-radius:1px;
           transform:scaleY(.18);transform-origin:center;transition:transform .13s linear,background .3s ease}
+/* 安卓用 height 过渡替代 40 个 scaleY 合成层，避免自由视角拖动共面闪烁 */
+html.lz-android .rec__w i{top:50%;bottom:auto;height:3.24px;transform:translateY(-50%);
+                          transition:height .13s linear,background .3s ease}
 .rec__w i.ps{background:#0b84ff}
 .rec__t{font-size:12px;color:#8e8e93;font-variant-numeric:tabular-nums;flex:none;letter-spacing:.2px}
 
@@ -230,10 +241,12 @@ body{font-family:"SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft
   .meta__n{font-size:17px}
 }
 @media (max-aspect-ratio: 9/10){
+  #chassis{display:none}
   .anchor{left:50%;top:50%;perspective:none}
   .halo{display:none}
-  .tilt{transform:none;transition:none}
-  .float{animation:none}
+  .tilt{transform:none}
+  .par{transform:none}
+  .float{transform:none}
   .box{transform:scale(var(--k,1))}
   .layers{display:none}
   .phone{border-radius:44px;box-shadow:none}
@@ -257,11 +270,12 @@ body{font-family:"SF Pro Text",-apple-system,"Segoe UI","PingFang SC","Microsoft
 <canvas id="grain"></canvas>
 
 <div class="stage">
+  <canvas id="chassis"></canvas>
   <div class="anchor" id="anchor">
     <div class="halo"></div>
     <div class="tilt" id="tilt">
     <div class="par" id="par">
-    <div class="float">
+    <div class="float" id="float">
     <div class="box" id="box">
       <div class="layers" id="layers"></div>
       <div class="phone" id="phone">
@@ -371,6 +385,8 @@ var S = { lines: [], idx: -1, t: 0, playing: true, frames: 0, js: 0, err: "" };
 var RM = false;
 try { RM = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches); } catch(e){}
 
+var glActive = false;
+
 window.__stage = function(){
   var i = S.idx;
   return {
@@ -382,7 +398,7 @@ window.__stage = function(){
     js:      Math.round(S.js * 100) / 100,
     err:     S.err,
     text:    (i >= 0 && S.lines[i] && S.lines[i].text) ? String(S.lines[i].text) : "",
-    gl:      false,
+    gl:      !!glActive,
     rm:      RM
   };
 };
@@ -455,15 +471,18 @@ function toRGB(a){
 /* ==========================================================
    4) DOM
    ========================================================== */
-var root    = document.documentElement;
-var anchor  = $('anchor'), phone = $('phone');
-var chat    = $('chat'), thread = $('thread'), stamp = $('stamp'), typing = $('typing');
-var emptyEl = $('empty');
-var island  = $('island'), islWave = $('islWave'), islArt = $('islArt'), islCh = $('islCh');
-var islImg  = $('islImg'), avImg = $('avImg'), avCh = $('avCh');
-var recWave = $('recWave'), recT = $('recT');
-var glow    = $('glow'), metaEl = $('meta');
-var mBar    = $('mBar'), mCur = $('mCur'), mDur = $('mDur');
+var root      = document.documentElement;
+var screenEl  = document.querySelector('.screen');
+var anchor    = $('anchor'), phone = $('phone'), chassisEl = $('chassis');
+var chat      = $('chat'), thread = $('thread'), stamp = $('stamp'), typing = $('typing');
+var emptyEl   = $('empty');
+var island    = $('island'), islWave = $('islWave'), islArt = $('islArt'), islCh = $('islCh');
+var islImg    = $('islImg'), avImg = $('avImg'), avCh = $('avCh');
+var recWave   = $('recWave'), recT = $('recT');
+var glow      = $('glow'), metaEl = $('meta');
+var mBar      = $('mBar'), mCur = $('mCur'), mDur = $('mDur');
+var tiltEl    = $('tilt'), parEl = $('par'), floatEl = $('float');
+var ANDROID   = /Android/i.test(navigator.userAgent || '');
 
 /* ==========================================================
    5) 尺寸
@@ -493,7 +512,9 @@ function fit(){
     anchor.style.left = W > 1180 ? '62%' : '56%';
     SMAX = Math.min(1.40, (H * 1.00) / (844 * k), (W * 0.84) / (390 * k));
   }
-  buildLayers();   /* 机身挤层随 K 重建（安卓按实际缩放自适应层距） */
+
+  resizeChassis(W, H, portrait);
+  if (!glActive) buildLayersFallback();
 
   var cw = chat.clientWidth || 350;
   var ch = chat.clientHeight || 470;
@@ -752,31 +773,103 @@ function updateTyping(){
 }
 
 /* ==========================================================
-   9) 机械臂运镜
-   ----------------------------------------------------------
-   每一镜 = 一个机位。换句时切镜，时长与缓动逐镜不同（这就是"非线性"）：
-   有的先慢后快砸到位，有的带一点伺服回弹，有的长推。
-   抖动极小、落位极准 —— 像一台运动控制摄影机，不像人手持。
+   9) 机械臂运镜（JS rAF 精确求值 cubic-bezier，同源驱动 DOM 与 WebGL）
    ========================================================== */
 var SHOTS = [
   /* n          俯仰   偏摆   滚转   距离   横移%(屏)  时长   曲线 */
-  { n:'tight-l', rx:  5, ry: -7, rz:-1.4, s:1.95, ox:-4.0, d:1150, e:'cubic-bezier(.62,.02,.18,1)' },
-  { n:'tight-r', rx:  2, ry:  8, rz: 1.1, s:1.70, ox: 4.0, d: 900, e:'cubic-bezier(.72,0,.14,1)' },
-  { n:'angle',   rx: 10, ry:  5, rz:-2.2, s:1.46, ox: 0.0, d:1320, e:'cubic-bezier(.25,1.06,.32,1)' },
-  { n:'extreme', rx:  1, ry: -4, rz: 0.7, s:2.15, ox:-2.0, d:1520, e:'cubic-bezier(.38,1.08,.30,1)' },
-  { n:'low',     rx: -9, ry:  6, rz: 1.6, s:1.60, ox: 2.5, d:1200, e:'cubic-bezier(.30,.92,.26,1)' },
-  { n:'breathe', rx:  7, ry:-10, rz:-1.0, s:1.18, ox: 0.0, d:1440, e:'cubic-bezier(.58,.02,.20,1)' },
-  { n:'macro',   rx:  0, ry: 11, rz: 2.0, s:2.05, ox:-3.0, d:1660, e:'cubic-bezier(.50,0,.12,1)' },
-  { n:'drift',   rx:  4, ry: -6, rz:-2.6, s:1.52, ox: 3.0, d:1780, e:'cubic-bezier(.55,0,.20,1)' }
+  { n:'tight-l', rx:  5, ry: -7, rz:-1.4, s:1.95, ox:-4.0, d:1150, b:[.62,.02,.18,1] },
+  { n:'tight-r', rx:  2, ry:  8, rz: 1.1, s:1.70, ox: 4.0, d: 900, b:[.72,  0,.14,1] },
+  { n:'angle',   rx: 10, ry:  5, rz:-2.2, s:1.46, ox: 0.0, d:1320, b:[.25,1.06,.32,1] },
+  { n:'extreme', rx:  1, ry: -4, rz: 0.7, s:2.15, ox:-2.0, d:1520, b:[.38,1.08,.30,1] },
+  { n:'low',     rx: -9, ry:  6, rz: 1.6, s:1.60, ox: 2.5, d:1200, b:[.30,.92,.26,1] },
+  { n:'breathe', rx:  7, ry:-10, rz:-1.0, s:1.18, ox: 0.0, d:1440, b:[.58,.02,.20,1] },
+  { n:'macro',   rx:  0, ry: 11, rz: 2.0, s:2.05, ox:-3.0, d:1660, b:[.50,  0,.12,1] },
+  { n:'drift',   rx:  4, ry: -6, rz:-2.6, s:1.52, ox: 3.0, d:1780, b:[.55,  0,.20,1] }
 ];
 var K = 1;              /* 基础缩放（fit 里算） */
 var shotIdx = -1;
 var lastBucket = -9999; /* 当前在第几个"换镜组" */
-var tiltEl = $('tilt');
 var settleTimer = 0, settleToken = 0;
 var chatTopLocal = 222; /* 对话区顶边在手机本地坐标里的 y */
 var threadTY = 0;       /* 对话区当前的上滚量 */
 var anchorPx = 0;       /* 手机中心在屏幕上的 x */
+
+var camCur = { px: 0, py: 0, rx: 11, ry: 23, rz: -1.3, s: 1 };
+var camAnim = null;     /* { from, to, t0, dur, bez } */
+var floatY = 0;
+
+function solveBezier(x1, y1, x2, y2, x){
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  var cx = 3 * x1, bx = 3 * (x2 - x1) - cx, ax = 1 - cx - bx;
+  var cy = 3 * y1, by = 3 * (y2 - y1) - cy, ay = 1 - cy - by;
+  var lo = 0, hi = 1, u = x, i, xu, dx;
+  for (i = 0; i < 8; i++){
+    xu = ((ax * u + bx) * u + cx) * u - x;
+    if (Math.abs(xu) < 1e-6) break;
+    if (xu < 0) lo = u; else hi = u;
+    dx = (3 * ax * u + 2 * bx) * u + cx;
+    if (Math.abs(dx) < 1e-6){
+      u = 0.5 * (lo + hi);
+    } else {
+      u = u - xu / dx;
+      if (u <= lo || u >= hi) u = 0.5 * (lo + hi);
+    }
+  }
+  if (Math.abs(((ax * u + bx) * u + cx) * u - x) > 1e-5){
+    for (i = 0; i < 14; i++){
+      xu = ((ax * u + bx) * u + cx) * u - x;
+      if (Math.abs(xu) < 1e-6) break;
+      if (xu < 0) lo = u; else hi = u;
+      u = 0.5 * (lo + hi);
+    }
+  }
+  return ((ay * u + by) * u + cy) * u;
+}
+
+function cloneCam(c){
+  return { px: c.px, py: c.py, rx: c.rx, ry: c.ry, rz: c.rz, s: c.s };
+}
+
+function stepCamAnim(now){
+  if (!camAnim) return;
+  var u = camAnim.dur > 0 ? (now - camAnim.t0) / camAnim.dur : 1;
+  if (u >= 1){
+    camCur.px = camAnim.to.px; camCur.py = camAnim.to.py;
+    camCur.rx = camAnim.to.rx; camCur.ry = camAnim.to.ry; camCur.rz = camAnim.to.rz;
+    camCur.s  = camAnim.to.s;
+    camAnim = null;
+    return;
+  }
+  if (u < 0) u = 0;
+  var b = camAnim.bez;
+  var e = solveBezier(b[0], b[1], b[2], b[3], u);
+  var f = camAnim.from, t = camAnim.to;
+  camCur.px = f.px + (t.px - f.px) * e;
+  camCur.py = f.py + (t.py - f.py) * e;
+  camCur.rx = f.rx + (t.rx - f.rx) * e;
+  camCur.ry = f.ry + (t.ry - f.ry) * e;
+  camCur.rz = f.rz + (t.rz - f.rz) * e;
+  camCur.s  = f.s  + (t.s  - f.s)  * e;
+}
+
+function startCamTween(to, dur, bez, now){
+  stepCamAnim(now);
+  if (RM || dur <= 0){
+    camAnim = null;
+    camCur.px = to.px; camCur.py = to.py;
+    camCur.rx = to.rx; camCur.ry = to.ry; camCur.rz = to.rz;
+    camCur.s  = to.s;
+    return;
+  }
+  camAnim = {
+    from: cloneCam(camCur),
+    to:   cloneCam(to),
+    t0:   now,
+    dur:  dur,
+    bez:  bez
+  };
+}
 
 var metaZoomHide = false;
 /* 左侧曲目信息：用户关掉就永远不显示；没关时镜头贴太近也会让位 */
@@ -785,10 +878,10 @@ function syncMeta(){
   metaEl.style.opacity = (want && !metaZoomHide) ? '1' : '0';
 }
 
-function shotTransform(sh, s, px, py){
-  return 'translate3d(' + px.toFixed(1) + 'px,' + py.toFixed(1) + 'px,0) ' +
-    'rotateX(' + sh.rx + 'deg) rotateY(' + sh.ry + 'deg) rotateZ(' + sh.rz + 'deg) ' +
-    'scale(' + s + ')';
+function shotTransform(c){
+  return 'translate3d(' + c.px.toFixed(2) + 'px,' + c.py.toFixed(2) + 'px,0) ' +
+    'rotateX(' + c.rx.toFixed(3) + 'deg) rotateY(' + c.ry.toFixed(3) + 'deg) rotateZ(' + c.rz.toFixed(3) + 'deg) ' +
+    'scale(' + c.s.toFixed(4) + ')';
 }
 
 /* 用户改了设置：立刻按新规则重新落镜 */
@@ -796,15 +889,15 @@ function rezoom(){
   if (curIdx >= 0) applyShot(curIdx, true);
 }
 
-function applyShot(i, force){
+function applyShot(i, force, durOverride){
   if (RM || !tiltEl) return;
   if (i < 0) return;
   /* 竖屏是"真手机"模式，不做运镜 */
-  if (PORTRAIT){ tiltEl.style.transform = ''; return; }
+  if (PORTRAIT){ camAnim = null; tiltEl.style.transform = ''; return; }
   /* 自由视角：镜头归用户，这里什么都不做 */
   if (P.mode === 'free') return;
 
-  var si, sh, dur, ease;
+  var si, sh, dur, bez;
   if (P.mode === 'hold'){
     si = clamp(parseInt(P.shot, 10) || 0, 0, SHOTS.length - 1);
   } else {
@@ -819,8 +912,8 @@ function applyShot(i, force){
   sh = SHOTS[si];
   /* 同镜位、只是跟着歌词平移 —— 用更柔的曲线，不要做出"切镜"的错觉 */
   var same = (si === shotIdx) && !force;
-  dur  = same ? 780 : sh.d;
-  ease = same ? 'cubic-bezier(.33,.7,.3,1)' : sh.e;
+  dur = (durOverride > 0) ? durOverride : (same ? 780 : sh.d);
+  bez = same ? [.33, .7, .3, 1] : sh.b;
 
   var s = sh.s;
   var W = innerWidth || 1440, H = innerHeight || 900;
@@ -832,8 +925,11 @@ function applyShot(i, force){
 
   /* 固定视角：机位真的不动，手机居中摆好，不跟歌词晃 */
   if (P.mode === 'hold'){
-    tiltEl.style.transition = 'transform ' + (force ? 900 : 420) + 'ms cubic-bezier(.33,.72,.28,1)';
-    tiltEl.style.transform = shotTransform(sh, s, W * 0.5 - anchorPx, 0);
+    var holdDur = (durOverride > 0) ? durOverride : (force ? 900 : 420);
+    startCamTween(
+      { px: W * 0.5 - anchorPx, py: 0, rx: sh.rx, ry: sh.ry, rz: sh.rz, s: s },
+      holdDur, [.33, .72, .28, 1], performance.now()
+    );
     shotIdx = si;
     metaZoomHide = (s > 1.55); syncMeta();
     return;
@@ -843,8 +939,10 @@ function applyShot(i, force){
   var px = (W * 0.5 - anchorPx) + (sh.ox || 0) * W / 100;
   var py = (H * 0.58 - H * 0.5) - dy * K * s;
 
-  tiltEl.style.transition = 'transform ' + dur + 'ms ' + ease;
-  tiltEl.style.transform = shotTransform(sh, s, px, py);
+  startCamTween(
+    { px: px, py: py, rx: sh.rx, ry: sh.ry, rz: sh.rz, s: s },
+    dur, bez, performance.now()
+  );
   shotIdx = si;
 
   /* 贴近拍的时候，左边那块曲目信息就该让位 */
@@ -855,10 +953,12 @@ function applyShot(i, force){
   if (settleTimer) clearTimeout(settleTimer);
   if (same) return;
   settleTimer = setTimeout(function(){
-    if (tok !== settleToken || P.mode === 'free') return;
+    if (tok !== settleToken || P.mode === 'free' || PORTRAIT || RM) return;
     var dx = (si % 2 ? 1.4 : -1.4), dy2 = (si % 3 ? -1.1 : 1.1);
-    tiltEl.style.transition = 'transform 300ms cubic-bezier(.28,.9,.36,1)';
-    tiltEl.style.transform = shotTransform(sh, s, px + dx, py + dy2);
+    startCamTween(
+      { px: px + dx, py: py + dy2, rx: sh.rx, ry: sh.ry, rz: sh.rz, s: s },
+      300, [.28, .9, .36, 1], performance.now()
+    );
   }, Math.max(200, dur - 140));
 }
 
@@ -867,22 +967,26 @@ function applyShot(i, force){
    ========================================================== */
 var freeRX = 9, freeRY = 22, freeS = 1.35;
 var freeDrag = null;
-var freeResetToken = 0;   /* 离开自由视角后延迟恢复基础分层的令牌 */
+
+/* 自由视角开关：只加在形态页自己的 body 上，宿主设置面板在另一个文档里，不受影响 */
+function syncFreeClass(){
+  document.body.classList.toggle('is-free', P.mode === 'free');
+}
 
 function applyFree(){
-  if (!tiltEl) return;
+  if (!tiltEl || PORTRAIT) return;
   var W = innerWidth || 1440;
   var px = W * 0.5 - anchorPx;
-  /* 安卓不能再用 90ms 缓动：缓动期间相机角度落后于 freeRX/freeRY 目标值，
-     往回缩的那几帧真实角度仍接近侧视，层距会低于守卫值又闪一下。
-     桌面深度精度够，保留原来的 90ms 手感。 */
-  tiltEl.style.transition = ANDROID ? 'none' : 'transform 90ms linear';
-  tiltEl.style.transform =
-    'translate3d(' + px.toFixed(1) + 'px,0,0) ' +
-    'rotateX(' + freeRX.toFixed(2) + 'deg) ' +
-    'rotateY(' + freeRY.toFixed(2) + 'deg) rotateZ(0deg) ' +
-    'scale(' + freeS.toFixed(3) + ')';
-  freeDepthUpdate();   /* 安卓自由视角：按当前 freeS/角度重排层距（不重建 DOM） */
+  var target = { px: px, py: 0, rx: freeRX, ry: freeRY, rz: 0, s: freeS };
+  /* 安卓用即时跟随，避免缓动期间相机角度落后于手指（桌面保留 90ms 线性插值） */
+  if (ANDROID || RM){
+    camAnim = null;
+    camCur.px = target.px; camCur.py = 0;
+    camCur.rx = target.rx; camCur.ry = target.ry; camCur.rz = 0;
+    camCur.s  = target.s;
+  } else {
+    startCamTween(target, 90, [0, 0, 1, 1], performance.now());
+  }
   metaZoomHide = (freeS > 1.55); syncMeta();
 }
 
@@ -893,16 +997,25 @@ function enterFree(){
   applyFree();
 }
 
+function dragCaptureEl(){
+  return document.documentElement || document.body;
+}
+
 addEventListener('pointerdown', function(e){
   if (P.mode !== 'free' || PORTRAIT) return;
   if (e.button !== undefined && e.button !== 0) return;
-  freeDrag = { x: e.clientX, y: e.clientY, rx: freeRX, ry: freeRY };
+  if (freeDrag) return;                       /* 只跟第一根手指，第二根不抢 */
+  freeDrag = { id: e.pointerId, x: e.clientX, y: e.clientY, rx: freeRX, ry: freeRY };
   document.body.style.cursor = 'grabbing';
-  try { e.target.setPointerCapture && e.target.setPointerCapture(e.pointerId); } catch(_){}
-}, { passive: true });
+  /* 捕获挂在 <html>：504 的 paintWindow 会删掉窗口外的气泡，挂在气泡上会连捕获一起丢 */
+  try { dragCaptureEl().setPointerCapture(e.pointerId); } catch(_){}
+  /* 这一下就是旋转，别让浏览器再补兼容鼠标 / 长按手势。
+     双击暂停由宿主在 pointerup 上自行判定，不依赖 click，所以不受影响。 */
+  if (e.cancelable) e.preventDefault();
+}, { passive: false });
 
 addEventListener('pointermove', function(e){
-  if (!freeDrag) return;
+  if (!freeDrag || e.pointerId !== freeDrag.id) return;
   var dx = e.clientX - freeDrag.x;
   var dy = e.clientY - freeDrag.y;
   /* ±62° 就够看到侧面了，再转就是背面 —— 卡住 */
@@ -913,11 +1026,27 @@ addEventListener('pointermove', function(e){
 
 function endDrag(){
   if (!freeDrag) return;
+  var id = freeDrag.id;
   freeDrag = null;
   document.body.style.cursor = '';
+  try {
+    var cap = dragCaptureEl();
+    if (cap.hasPointerCapture && cap.hasPointerCapture(id)) cap.releasePointerCapture(id);
+  } catch(_){}
 }
-addEventListener('pointerup', endDrag, { passive: true });
-addEventListener('pointercancel', endDrag, { passive: true });
+addEventListener('pointerup', function(e){
+  if (!freeDrag || e.pointerId !== freeDrag.id) return;
+  endDrag();
+}, { passive: true });
+addEventListener('pointercancel', function(e){
+  if (!freeDrag || e.pointerId !== freeDrag.id) return;
+  endDrag();
+}, { passive: true });
+/* 捕获被浏览器收走（节点移除 / 手势被接管）也要结束，别留在 grabbing */
+addEventListener('lostpointercapture', function(e){
+  if (!freeDrag || e.pointerId !== freeDrag.id) return;
+  endDrag();
+}, true);
 addEventListener('blur', endDrag);
 
 addEventListener('wheel', function(e){
@@ -932,7 +1061,6 @@ addEventListener('wheel', function(e){
    ========================================================== */
 var islandTimer = 0;
 var islandDone = false;
-var screenEl = null;
 /* 只在进全屏时展开一次（2 秒），之后永远收起 */
 function expandIslandOnce(){
   if (RM || islandDone) return;
@@ -961,15 +1089,20 @@ function mkBars(host, n){
   return out;
 }
 
-function setBars(bars, amp, phase){
+function setBars(bars, amp, phase, useHeight){
   var i, n = bars.length, x, env, wob, v, s;
+  var heightMode = !!(useHeight && ANDROID);
   for (i = 0; i < n; i++){
     x = n > 1 ? i / (n - 1) : 0;
     env = 0.42 + 0.58 * Math.sin(Math.PI * (0.12 + 0.78 * x));
     wob = 0.4 + 0.6 * Math.abs(Math.sin(i * 1.9 + phase * 1.7));
     v = amp * env * wob;
     s = clamp(v * 1.75 + 0.18, 0.18, 1);
-    bars[i].style.transform = 'scaleY(' + s.toFixed(2) + ')';
+    if (heightMode){
+      bars[i].style.height = (s * 18).toFixed(2) + 'px';
+    } else {
+      bars[i].style.transform = 'scaleY(' + s.toFixed(2) + ')';
+    }
   }
 }
 
@@ -990,7 +1123,7 @@ function setRecProgress(p){
 }
 
 /* ==========================================================
-   10) 宿主消息
+   12) 宿主消息
    ========================================================== */
 function setAccent(a){
   var c = toRGB(a) || [150, 165, 255];
@@ -1076,10 +1209,9 @@ function onInit(p){
   layout();
   var first = idxAt(S.t);
   setIdx(first >= 0 ? first : -1);
-  /* 开场这一下用短一点的时间落位，不要拖着上一首的机位慢慢摇过来 */
+  /* 开场这一下用 620ms 落位，不要拖着上一首的机位慢慢摇过来 */
   if (first >= 0 && P.mode !== 'free'){
-    tiltEl.style.transitionDuration = '620ms';
-    applyShot(first, true);
+    applyShot(first, true, 620);
   }
   S.err = '';
   /* 首次拿到歌（= 已进全屏）时，灵动岛展开一次就永远收起 */
@@ -1095,8 +1227,8 @@ function onLive(p){
   lv = clamp(lv,0,1); ba = clamp(ba,0,1); mi = clamp(mi,0,1); tr = clamp(tr,0,1);
   liveAmp = clamp(ba * 0.5 + mi * 0.28 + tr * 0.22 + lv * 0.26 + 0.04, 0.03, 1);
   noiseSeed += 0.7;
-  setBars(barsRec, S.playing ? liveAmp : 0.02, noiseSeed);
-  setBars(barsIsl, S.playing ? liveAmp * 0.9 : 0.06, noiseSeed + 1.3);
+  setBars(barsRec, S.playing ? liveAmp : 0.02, noiseSeed, true);
+  setBars(barsIsl, S.playing ? liveAmp * 0.9 : 0.06, noiseSeed + 1.3, false);
 }
 
 function onBeat(p){
@@ -1105,8 +1237,8 @@ function onBeat(p){
   lv = clamp(lv, 0, 1);
   if (!S.playing) return;
   noiseSeed += 0.5;
-  setBars(barsRec, clamp(lv * 0.9 + 0.16, 0, 1), noiseSeed + 0.4);
-  setBars(barsIsl, clamp(lv * 0.85 + 0.2, 0, 1), noiseSeed + 1.7);
+  setBars(barsRec, clamp(lv * 0.9 + 0.16, 0, 1), noiseSeed + 0.4, true);
+  setBars(barsIsl, clamp(lv * 0.85 + 0.2, 0, 1), noiseSeed + 1.7, false);
 }
 
 /* 设置项变更：宿主在 ready 后会把已存的值逐条推一遍 */
@@ -1118,20 +1250,9 @@ function onSetting(p){
 
   if (k === 'mode'){
     endDrag();
-    var modeTok = ++freeResetToken;
+    syncFreeClass();
     if (P.mode === 'free'){ enterFree(); }
-    else {
-      /* 离开自由视角不能立刻把层距改回基础值：自由机位可能停在 0.80/侧视，
-         镜头要 0.8–1.8s 才摇回固定机位，过渡前半段仍很极端，立刻重建又会闪。
-         等镜头落位（最长 1780ms）后再恢复基础分层；期间沿用自由视角的大层距。 */
-      if (ANDROID){
-        setTimeout(function(){
-          if (modeTok !== freeResetToken) return;   /* 期间又切过模式，作废 */
-          if (P.mode !== 'free') buildLayers();
-        }, 1900);
-      }
-      lastBucket = -9999; rezoom();
-    }
+    else { lastBucket = -9999; rezoom(); }
   } else if (k === 'shot'){
     if (P.mode === 'hold'){ lastBucket = -9999; rezoom(); }
   } else if (k === 'every'){
@@ -1143,7 +1264,7 @@ function onSetting(p){
 }
 
 /* ==========================================================
-   11) 消息总线
+   13) 消息总线
    ========================================================== */
 addEventListener("message", function(ev){
   var d = ev.data;
@@ -1166,12 +1287,8 @@ addEventListener("message", function(ev){
   } catch(e){ fail(e); }
 });
 
-// 鼠标视差：手机跟着鼠标转一点点，静止时缓慢回到原位
-// 注意：不用 lerp 追随（高刷屏上会变成持续 DOM 写入），直接缓动到目标
-var tiltEl = $('tilt');
+/* 鼠标视差：手机跟着鼠标转一点点，静止时缓慢回到原位 */
 var tiltX = 0, tiltY = 0, tiltTX = 0, tiltTY = 0, tiltOn = false;
-var tiltPX = -99, tiltPY = -99;
-var parEl = $('par');
 addEventListener('mousemove', function(e){
   if (RM) return;
   tiltOn = true;
@@ -1197,10 +1314,365 @@ addEventListener("keydown", function(e){
 });
 
 /* ==========================================================
-   12) 主循环
+   14) WebGL 3D 圆角机身（替代原 20/40 层 DOM 切片）
+   ========================================================== */
+var gl = null, glProg = null, glVaoPos = null, glVaoNrm = null, glVaoPart = null, glIbo = null;
+var glCount = 0, uMvpLoc = null, aPosLoc = -1, aNrmLoc = -1, aPartLoc = -1;
+var glW = 0, glH = 0;
+
+var matTmpA = new Float32Array(16);
+var matTmpB = new Float32Array(16);
+var matModel = new Float32Array(16);
+var matProj = new Float32Array(16);
+var matMvp = new Float32Array(16);
+var matOp = new Float32Array(16);
+
+function setIdent(m){
+  m[0]=1; m[1]=0; m[2]=0; m[3]=0;
+  m[4]=0; m[5]=1; m[6]=0; m[7]=0;
+  m[8]=0; m[9]=0; m[10]=1; m[11]=0;
+  m[12]=0; m[13]=0; m[14]=0; m[15]=1;
+}
+function mulMat4(out, a, b){
+  for (var col = 0; col < 4; col++){
+    var c = col * 4;
+    var b0 = b[c], b1 = b[c+1], b2 = b[c+2], b3 = b[c+3];
+    out[c]   = a[0]*b0 + a[4]*b1 + a[8]*b2  + a[12]*b3;
+    out[c+1] = a[1]*b0 + a[5]*b1 + a[9]*b2  + a[13]*b3;
+    out[c+2] = a[2]*b0 + a[6]*b1 + a[10]*b2 + a[14]*b3;
+    out[c+3] = a[3]*b0 + a[7]*b1 + a[11]*b2 + a[15]*b3;
+  }
+}
+function mulRight(m, op){
+  matTmpA.set(m);
+  mulMat4(m, matTmpA, op);
+}
+function mulT(m, tx, ty, tz){
+  setIdent(matOp);
+  matOp[12] = tx; matOp[13] = ty; matOp[14] = tz;
+  mulRight(m, matOp);
+}
+function mulS(m, sx, sy, sz){
+  setIdent(matOp);
+  matOp[0] = sx; matOp[5] = sy; matOp[10] = sz;
+  mulRight(m, matOp);
+}
+function mulRx(m, deg){
+  var a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  setIdent(matOp);
+  matOp[5] = c;  matOp[6] = s;
+  matOp[9] = -s; matOp[10] = c;
+  mulRight(m, matOp);
+}
+function mulRy(m, deg){
+  var a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  setIdent(matOp);
+  matOp[0] = c; matOp[2] = -s;
+  matOp[8] = s; matOp[10] = c;
+  mulRight(m, matOp);
+}
+function mulRz(m, deg){
+  var a = deg * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  setIdent(matOp);
+  matOp[0] = c;  matOp[1] = s;
+  matOp[4] = -s; matOp[5] = c;
+  mulRight(m, matOp);
+}
+function buildCssProj(m, W, H, ox, oy, d){
+  var n = 200, f = 3000;
+  var a = -(f + n) / (f - n);
+  var b = ((f + n) * d - 2 * f * n) / (f - n);
+  m[0] = 2 * d / W;   m[1] = 0;           m[2] = 0;  m[3] = 0;
+  m[4] = 0;           m[5] = -2 * d / H;  m[6] = 0;  m[7] = 0;
+  m[8] = 1 - 2*ox/W;  m[9] = 2*oy/H - 1;  m[10] = a; m[11] = -1;
+  m[12] = -d;         m[13] = d;          m[14] = b; m[15] = d;
+}
+
+function compileShader(type, src){
+  var sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)){
+    var msg = gl.getShaderInfoLog(sh) || 'shader compile error';
+    gl.deleteShader(sh);
+    throw new Error(msg);
+  }
+  return sh;
+}
+
+function initChassisGL(){
+  if (!chassisEl) return false;
+  try {
+    var opts = { alpha:true, antialias:true, depth:true, premultipliedAlpha:true };
+    gl = chassisEl.getContext('webgl', opts) || chassisEl.getContext('experimental-webgl', opts);
+    if (!gl) return false;
+
+    var vsSrc =
+      'attribute vec3 a_pos;\n' +
+      'attribute vec3 a_nrm;\n' +
+      'attribute float a_part;\n' +
+      'uniform mat4 u_mvp;\n' +
+      'varying vec3 v_pos;\n' +
+      'varying vec3 v_nrm;\n' +
+      'varying float v_part;\n' +
+      'void main(){\n' +
+      '  v_pos = a_pos;\n' +
+      '  v_nrm = a_nrm;\n' +
+      '  v_part = a_part;\n' +
+      '  gl_Position = u_mvp * vec4(a_pos, 1.0);\n' +
+      '}\n';
+
+    var fsSrc =
+      'precision mediump float;\n' +
+      'varying vec3 v_pos;\n' +
+      'varying vec3 v_nrm;\n' +
+      'varying float v_part;\n' +
+      'void main(){\n' +
+      '  vec3 col;\n' +
+      '  if (v_part < 0.5){\n' +
+      '    float t = clamp(1.0 + v_pos.z / 29.4, 0.0, 1.0);\n' +
+      '    float lum = 0.28 + 0.72 * pow(t, 0.75);\n' +
+      '    col = vec3(10.0 + 74.0 * lum, 10.0 + 74.0 * lum, 13.0 + 82.0 * lum) / 255.0;\n' +
+      '    vec2 n2 = normalize(v_nrm.xy + vec2(1e-5, 0.0));\n' +
+      '    float env = 0.94 + 0.09 * dot(n2, normalize(vec2(-0.55, -0.83)));\n' +
+      '    col *= env;\n' +
+      '  } else if (v_part < 1.5){\n' +
+      '    float u = (v_pos.x + 195.0) / 390.0;\n' +
+      '    float v = (v_pos.y + 422.0) / 844.0;\n' +
+      '    vec2 dp = vec2((u - 0.32) / 0.72, (v - 0.30) / 0.50);\n' +
+      '    float g = clamp(length(dp) / 0.72, 0.0, 1.0);\n' +
+      '    col = mix(vec3(42.0, 42.0, 51.0) / 255.0, vec3(14.0, 14.0, 18.0) / 255.0, g);\n' +
+      '  } else {\n' +
+      '    col = vec3(18.0, 18.0, 22.0) / 255.0;\n' +
+      '  }\n' +
+      '  gl_FragColor = vec4(col, 1.0);\n' +
+      '}\n';
+
+    var vs = compileShader(gl.VERTEX_SHADER, vsSrc);
+    var fs = compileShader(gl.FRAGMENT_SHADER, fsSrc);
+    glProg = gl.createProgram();
+    gl.attachShader(glProg, vs);
+    gl.attachShader(glProg, fs);
+    gl.linkProgram(glProg);
+    if (!gl.getProgramParameter(glProg, gl.LINK_STATUS)){
+      throw new Error(gl.getProgramInfoLog(glProg) || 'program link error');
+    }
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+
+    aPosLoc  = gl.getAttribLocation(glProg, 'a_pos');
+    aNrmLoc  = gl.getAttribLocation(glProg, 'a_nrm');
+    aPartLoc = gl.getAttribLocation(glProg, 'a_part');
+    uMvpLoc  = gl.getUniformLocation(glProg, 'u_mvp');
+
+    /* 构建圆角矩形挤出机身网格：390×844, R=56, 每角 18 段 */
+    var W2 = 195, H2 = 422, R = 56, SEG = 18;
+    var corners = [
+      { cx:  W2 - R, cy: -H2 + R, a0: -Math.PI * 0.5, a1: 0 },
+      { cx:  W2 - R, cy:  H2 - R, a0: 0,              a1: Math.PI * 0.5 },
+      { cx: -W2 + R, cy:  H2 - R, a0: Math.PI * 0.5,  a1: Math.PI },
+      { cx: -W2 + R, cy: -H2 + R, a0: Math.PI,        a1: Math.PI * 1.5 }
+    ];
+    var px = [], py = [], nx = [], ny = [];
+    var ci, si, ang, ca, sa, co;
+    for (ci = 0; ci < 4; ci++){
+      co = corners[ci];
+      for (si = 0; si <= SEG; si++){
+        ang = co.a0 + (co.a1 - co.a0) * (si / SEG);
+        ca = Math.cos(ang); sa = Math.sin(ang);
+        px.push(co.cx + R * ca);
+        py.push(co.cy + R * sa);
+        nx.push(ca);
+        ny.push(sa);
+      }
+    }
+    var NP = px.length;
+
+    var posArr = [], nrmArr = [], partArr = [], idxArr = [];
+    function pushV(x, y, z, vx, vy, vz, part){
+      posArr.push(x, y, z);
+      nrmArr.push(vx, vy, vz);
+      partArr.push(part);
+      return (posArr.length / 3) - 1;
+    }
+
+    /* 1. 侧壁（z = -0.2 到 z = -29.4 细分 12 环，再倒角至 z = -30.0） */
+    var NZ = 12, r, k, k1, zr, ringStart = [];
+    for (r = 0; r <= NZ; r++){
+      zr = -0.2 + (-29.4 - (-0.2)) * (r / NZ);
+      ringStart.push(posArr.length / 3);
+      for (k = 0; k < NP; k++){
+        pushV(px[k], py[k], zr, nx[k], ny[k], 0, 0);
+      }
+    }
+    /* 背部 0.6px 倒角环 z = -30.0 */
+    ringStart.push(posArr.length / 3);
+    for (k = 0; k < NP; k++){
+      pushV(px[k] - 0.6 * nx[k], py[k] - 0.6 * ny[k], -30.0, nx[k], ny[k], -0.4, 0);
+    }
+    for (r = 0; r < ringStart.length - 1; r++){
+      var r0 = ringStart[r], r1 = ringStart[r + 1];
+      for (k = 0; k < NP; k++){
+        k1 = (k + 1) % NP;
+        /* 绕序验证：contour 在 (+X右,+Y下) 下沿顺时针，外侧面在视口中为 CCW */
+        idxArr.push(r0 + k, r0 + k1, r1 + k1);
+        idxArr.push(r0 + k, r1 + k1, r1 + k);
+      }
+    }
+
+    /* 2. 背板封底 z = -30.0（朝向 -Z，CCW） */
+    var backCenter = pushV(0, 0, -30.0, 0, 0, -1, 1);
+    var backRing = posArr.length / 3;
+    for (k = 0; k < NP; k++){
+      pushV(px[k] - 0.6 * nx[k], py[k] - 0.6 * ny[k], -30.0, 0, 0, -1, 1);
+    }
+    for (k = 0; k < NP; k++){
+      k1 = (k + 1) % NP;
+      idxArr.push(backCenter, backRing + k, backRing + k1);
+    }
+
+    /* 3. 前端封闭微暗底板 z = -0.35（略内缩 0.5px，朝向 +Z，CCW，防止大角度边缘缝隙） */
+    var frontCenter = pushV(0, 0, -0.35, 0, 0, 1, 2);
+    var frontRing = posArr.length / 3;
+    for (k = 0; k < NP; k++){
+      pushV(px[k] - 0.5 * nx[k], py[k] - 0.5 * ny[k], -0.35, 0, 0, 1, 2);
+    }
+    for (k = 0; k < NP; k++){
+      k1 = (k + 1) % NP;
+      idxArr.push(frontCenter, frontRing + k1, frontRing + k);
+    }
+
+    glVaoPos = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glVaoPos);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(posArr), gl.STATIC_DRAW);
+
+    glVaoNrm = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glVaoNrm);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(nrmArr), gl.STATIC_DRAW);
+
+    glVaoPart = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, glVaoPart);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(partArr), gl.STATIC_DRAW);
+
+    glIbo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glIbo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idxArr), gl.STATIC_DRAW);
+    glCount = idxArr.length;
+
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+    gl.enable(gl.CULL_FACE);
+    gl.cullFace(gl.BACK);
+    gl.frontFace(gl.CCW);
+    gl.clearColor(0, 0, 0, 0);
+
+    return true;
+  } catch (e) {
+    gl = null;
+    return false;
+  }
+}
+
+function resizeChassis(W, H, portrait){
+  if (!chassisEl) return;
+  if (!glActive || portrait){
+    chassisEl.style.display = 'none';
+    return;
+  }
+  chassisEl.style.display = 'block';
+  var dpr = clamp(window.devicePixelRatio || 1, 1, 3);
+  var pw = Math.max(1, Math.round(W * dpr));
+  var ph = Math.max(1, Math.round(H * dpr));
+  if (chassisEl.width !== pw || chassisEl.height !== ph){
+    chassisEl.width = pw;
+    chassisEl.height = ph;
+  }
+  glW = W; glH = H;
+  if (gl) gl.viewport(0, 0, pw, ph);
+}
+
+function drawChassis(W, H, ar){
+  if (!glActive || !gl || PORTRAIT) return;
+  if (glW !== W || glH !== H) resizeChassis(W, H, false);
+
+  var cx, cy, ox, oy;
+  if (ar && ar.width > 0 && ar.height > 0){
+    cx = ar.left + ar.width * 0.5;
+    cy = ar.top + ar.height * 0.5;
+    ox = ar.left + ar.width * 0.48;
+    oy = ar.top + ar.height * 0.44;
+  } else {
+    cx = anchorPx || W * 0.62;
+    cy = H * 0.5;
+    ox = cx - 390 * 0.02;
+    oy = cy - 844 * 0.06;
+  }
+
+  /* 严格匹配 CSS 3D 变换顺序与旋转符号：
+     T(cx+px, cy+py, 0) * Rx(rx) * Ry(ry) * Rz(rz) * S(s, s, 1) * Ry(tiltX) * Rx(-tiltY) * T(0, floatY, 0) * S(K, K, K) */
+  setIdent(matModel);
+  mulT(matModel, cx + camCur.px, cy + camCur.py, 0);
+  mulRx(matModel, camCur.rx);
+  mulRy(matModel, camCur.ry);
+  mulRz(matModel, camCur.rz);
+  mulS(matModel, camCur.s, camCur.s, 1);
+  mulRy(matModel, tiltX);
+  mulRx(matModel, -tiltY);
+  mulT(matModel, 0, floatY, 0);
+  mulS(matModel, K, K, K);
+
+  buildCssProj(matProj, W, H, ox, oy, 1250);
+  mulMat4(matMvp, matProj, matModel);
+
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(glProg);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, glVaoPos);
+  gl.enableVertexAttribArray(aPosLoc);
+  gl.vertexAttribPointer(aPosLoc, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, glVaoNrm);
+  gl.enableVertexAttribArray(aNrmLoc);
+  gl.vertexAttribPointer(aNrmLoc, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, glVaoPart);
+  gl.enableVertexAttribArray(aPartLoc);
+  gl.vertexAttribPointer(aPartLoc, 1, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, glIbo);
+  gl.uniformMatrix4fv(uMvpLoc, false, matMvp);
+  gl.drawElements(gl.TRIANGLES, glCount, gl.UNSIGNED_SHORT, 0);
+}
+
+/* WebGL 失败时的安全降级：4 层大间距（gap=7.5px）CSS 切片，保证不报错不白屏 */
+var fallbackBuilt = false;
+function buildLayersFallback(){
+  var lyEl = $('layers'), NL = 4, gap = 7.5, i, t, li, lum, zz, back;
+  if (!lyEl || fallbackBuilt) return;
+  fallbackBuilt = true;
+  while (lyEl.firstChild) lyEl.removeChild(lyEl.firstChild);
+  for (i = 0; i < NL; i++){
+    t = i / (NL - 1);
+    zz = -(i + 1) * gap;
+    li = document.createElement('i');
+    lum = 0.28 + 0.72 * Math.pow(t, 0.75);
+    li.style.transform = 'translateZ(' + zz.toFixed(2) + 'px)';
+    li.style.background = 'rgb(' + Math.round(10 + 74 * lum) + ',' +
+      Math.round(10 + 74 * lum) + ',' + Math.round(13 + 82 * lum) + ')';
+    lyEl.appendChild(li);
+  }
+  back = document.createElement('i');
+  back.style.transform = 'translateZ(-30px)';
+  back.style.background = 'radial-gradient(72% 50% at 32% 30%,#2a2a33,#0e0e12 72%)';
+  lyEl.appendChild(back);
+}
+
+/* ==========================================================
+   15) 主循环
    ========================================================== */
 var lastNow = performance.now();
 var lastRecT = 0, lastBar = -1;
+var lastTiltStr = '', lastParStr = '', lastFloatStr = '';
 
 function frame(now){
   var js0 = performance.now();
@@ -1240,18 +1712,46 @@ function frame(now){
       mCur.textContent = mmss(S.t);
     }
 
-    /* 视差：只在有鼠标活动时跟随，静止时缓慢归位 */
-    /* 视差：只在有鼠标活动时跟随，静止时缓慢归位（挂在 .par，不碰摄影机） */
-    if (tiltOn && parEl && !RM){
-      tiltX += (tiltTX - tiltX) * 0.055;
-      tiltY += (tiltTY - tiltY) * 0.055;
-      if (Math.abs(tiltX - tiltPX) > 0.02 || Math.abs(tiltY - tiltPY) > 0.02){
-        tiltPX = tiltX; tiltPY = tiltY;
-        parEl.style.transform = 'rotateY(' + tiltX.toFixed(2) + 'deg) rotateX(' +
-          (-tiltY).toFixed(2) + 'deg)';
+    /* 相机、呼吸浮动、鼠标视差：同一帧同源推进并写入 DOM + WebGL */
+    if (!PORTRAIT){
+      var W = innerWidth || 1440, H = innerHeight || 900;
+      var ar = anchor.getBoundingClientRect();
+
+      stepCamAnim(now);
+      floatY = RM ? 0 : (0.5 - 7.5 * Math.cos(now * Math.PI / 12000));
+
+      if (tiltOn && !RM){
+        tiltX += (tiltTX - tiltX) * 0.055;
+        tiltY += (tiltTY - tiltY) * 0.055;
       }
-      /* 安卓自由视角：视差也会改变实际视角，层距守卫跟着走（层数没变时内部直接 return） */
-      if (ANDROID && P.mode === 'free') freeDepthUpdate();
+
+      var ts = shotTransform(camCur);
+      if (ts !== lastTiltStr){
+        lastTiltStr = ts;
+        tiltEl.style.transform = ts;
+      }
+
+      if (parEl && !RM){
+        var ps = 'rotateY(' + tiltX.toFixed(3) + 'deg) rotateX(' + (-tiltY).toFixed(3) + 'deg)';
+        if (ps !== lastParStr){
+          lastParStr = ps;
+          parEl.style.transform = ps;
+        }
+      }
+
+      if (floatEl){
+        var fs = RM ? '' : ('translate3d(0,' + floatY.toFixed(2) + 'px,0)');
+        if (fs !== lastFloatStr){
+          lastFloatStr = fs;
+          floatEl.style.transform = fs;
+        }
+      }
+
+      if (glActive) drawChassis(W, H, ar);
+    } else {
+      if (lastTiltStr){ lastTiltStr = ''; tiltEl.style.transform = ''; }
+      if (lastParStr){ lastParStr = ''; parEl.style.transform = ''; }
+      if (lastFloatStr){ lastFloatStr = ''; floatEl.style.transform = ''; }
     }
 
     S.frames++;
@@ -1272,7 +1772,7 @@ tickClock();
 setInterval(tickClock, 15000);
 
 /* ==========================================================
-   13) 启动
+   16) 启动
    ========================================================== */
 try {
   barsRec = mkBars(recWave, 40);
@@ -1285,119 +1785,7 @@ try {
   wn.style.minWidth = (barsRec.length * 2.5) + 'px';
 } catch(e){ fail(e); }
 
-/* 机身厚度：沿 z 轴挤层（亮度连续爬升消除层纹），总厚保持约 58.8px。
-   桌面固定 40 层、层距 1.47px。
-   ⚠ 安卓 WebView 深度缓冲精度不足：层距 <2.4px 时 3D 排序会翻，侧壁整块闪到前面。
-   页面整体还要乘 --k 缩放，运镜再叠加 scale(s)，实际层距 = gap × K × s；
-   所以安卓按当前 K 动态分层，保证最广镜头（s=1.18）下实际层距 ≥2.6px。
-   自由视角还会再乘 freeS(0.80–2.60) 和视角余弦，固定层距不够用；
-   进入 free 后由 freeDepthUpdate() 按需减层、放大 gap（见下）。
-   桌面 GPU 深度精度足够，整套守卫只在 ANDROID 分支生效。 */
-var ANDROID = /Android/i.test(navigator.userAgent || '');
-var layerEls = null, layerBack = null, layerBaseN = 0, layerCurN = 0, layerCurGap = 0;
-function buildLayers(){
-  var lyEl = $('layers'), NL, gap, i, t, li, lum, zz, need, kk, back;
-  if (!lyEl) return;
-
-  /* 清空后重建；fit() 每次算出新的 K 都会调用 */
-  while (lyEl.firstChild) lyEl.removeChild(lyEl.firstChild);
-
-  if (ANDROID){
-    kk = K;
-    if (!isFinite(kk) || kk <= 0) kk = 0.56;           /* K 异常时按 1280×576 实测值 */
-    need = 2.6 / (kk * 1.18);                          /* 局部坐标下最广镜头仍 ≥2.6px */
-    NL = Math.min(20, Math.max(8, Math.floor(58.8 / need)));
-    gap = 58.8 / NL;                                   /* 总厚保持约 58.8，层数随 K 自适应 */
-  } else {
-    NL = 40;
-    gap = 1.47;
-  }
-
-  for (i = 0; i < NL; i++){
-    t = i / (NL - 1);                                  /* 0 = 最深（背板）  1 = 最亮（贴屏幕） */
-    zz = -(i + 1) * gap;
-    li = document.createElement('i');
-    /* 机身是黑的：越靠屏幕越亮一点，侧面仍有金属的明暗 */
-    lum = 0.28 + 0.72 * Math.pow(t, 0.75);
-    li.style.transform = 'translateZ(' + zz.toFixed(2) + 'px)';
-    li.style.background = 'rgb(' + Math.round(10 + 74 * lum) + ',' +
-      Math.round(10 + 74 * lum) + ',' + Math.round(13 + 82 * lum) + ')';
-    lyEl.appendChild(li);
-  }
-
-  /* 背板：安卓与最深层至少隔 2 个 gap —— 只隔 1 个时它和挤层也贴太近，同样会翻 */
-  back = document.createElement('i');
-  back.style.transform = ANDROID
-    ? 'translateZ(' + (-((NL + 2) * gap)).toFixed(2) + 'px)'
-    : 'translateZ(-60px)';
-  back.style.background = 'radial-gradient(72% 50% at 32% 30%,#2a2a33,#0e0e12 72%)';
-  lyEl.appendChild(back);
-
-  /* 安卓：记住层片引用与基础层数，自由视角守卫只改这些元素的 style，不再建 DOM */
-  if (ANDROID){
-    layerEls = [];
-    for (i = 0; i < lyEl.children.length - 1; i++) layerEls.push(lyEl.children[i]);
-    layerBack = lyEl.children[lyEl.children.length - 1];
-    layerBaseN = NL; layerCurN = NL; layerCurGap = gap;
-    if (P.mode === 'free' && !PORTRAIT) freeDepthUpdate(true);   /* 尺寸变化后按新 K 重排 */
-  }
-}
-
-/* ==========================================================
-   自由视角层距守卫（仅安卓）
-   ----------------------------------------------------------
-   安卓 WebView 的 3D 排序在投影层距 <2.4px 时会翻，实测 2.42px 起稳定。
-   自由视角的投影层距 = gap × K × freeS × cos(rx) × cos(ry)，
-   再被 perspective:1250 轻微缩小；而 buildLayers 的 gap 只按 s=1.18 算。
-   所以缩到 0.80 或转到 ±34°/±62° 时，层距会掉到 0.7–1.8px（见验收数据），
-   深色层片就会翻到屏幕前面 = 整屏闪。
-
-   这里不放大机身：总厚基本仍按 58.8 算，只把层数 n 减少、gap 放大成 58.8/n
-   （只有极小 K 的兜底会略超），保证最深层那一对的投影层距 ≥2.75px（含透视余量）。
-   层数只在跨阈值时变，改的是已有 <i> 的 transform/背景，拖动时不会重建 DOM。
-   桌面（!ANDROID）不调用、数值与分支都不变。 */
-var FREE_DEPTH_MIN = 2.75;
-function freeDepthUpdate(force){
-  if (!ANDROID || !layerEls || !layerEls.length) return;
-  if (P.mode !== 'free' || PORTRAIT) return;
-  var k = K;
-  if (!isFinite(k) || k <= 0) k = 0.56;                    /* 与 buildLayers 的兜底一致 */
-  var s = freeS;
-  if (!isFinite(s) || s <= 0) s = 1;
-  /* .par 的鼠标视差还会再叠 ±5.4°/±3.6°，按最坏方向一起算进视角余弦 */
-  var prx = Math.abs(freeRX) + Math.abs(tiltY);
-  var pry = Math.abs(freeRY) + Math.abs(tiltX);
-  var c = Math.abs(Math.cos(prx * Math.PI / 180) * Math.cos(pry * Math.PI / 180));
-  if (c < 0.28) c = 0.28;                                  /* 兜底，正常 ±34°/±62° 不会触发 */
-  var kz = 58.8 * k * s;                                   /* 整叠层片的相机空间深度 */
-  var persp = 1250 / (1250 + kz);                          /* 最深层被透视缩小的比例 */
-  var need = FREE_DEPTH_MIN / (k * s * c * persp * persp); /* 局部坐标下需要的层距 */
-  var n = Math.floor(58.8 / need + 1e-9);
-  if (n > layerBaseN) n = layerBaseN;
-  if (n < 3) n = 3;                                        /* 至少 3 层，侧壁才不至于只剩两块板 */
-  /* 迟滞 4%：角度停在阈值上时不让层数来回跳（少层=大 gap 永远安全，所以只迟滞“增层”） */
-  if (n > layerCurN && need > (58.8 / n) * 0.96) n = layerCurN;
-  var gap = 58.8 / n;
-  if (gap < need) gap = need;                              /* 极小 K 时宁可略厚，也不破阈值 */
-  if (!force && n === layerCurN && Math.abs(gap - layerCurGap) < 0.01) return;
-  layerCurN = n; layerCurGap = gap;
-
-  var i, li, t, lum;
-  for (i = 0; i < layerEls.length; i++){
-    li = layerEls[i];
-    if (i >= n){ li.style.visibility = 'hidden'; continue; }
-    li.style.visibility = '';
-    li.style.transform = 'translateZ(' + (-(i + 1) * gap).toFixed(2) + 'px)';
-    t = (n > 1) ? i / (n - 1) : 1;
-    lum = 0.28 + 0.72 * Math.pow(t, 0.75);
-    li.style.background = 'rgb(' + Math.round(10 + 74 * lum) + ',' +
-      Math.round(10 + 74 * lum) + ',' + Math.round(13 + 82 * lum) + ')';
-  }
-  /* 背板退到「最深层再往后 2 个 gap」；n=3 且 gap=need 时总厚会略超 58.8，不能写死 58.8 */
-  if (layerBack) layerBack.style.transform =
-    'translateZ(' + (-((n + 2) * gap)).toFixed(2) + 'px)';
-}
-
+glActive = initChassisGL();
 fit();
 addEventListener("resize", function(){
   fit();

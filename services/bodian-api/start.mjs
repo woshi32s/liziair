@@ -134,6 +134,13 @@ const json = (res, status, obj) => {
   res.end(JSON.stringify(obj));
 };
 
+const readJson = async (req) => {
+  let raw = '';
+  for await (const chunk of req) raw += chunk;
+  if (!raw) return {};
+  try { return JSON.parse(raw); } catch { return {}; }
+};
+
 async function handle(req, res, url) {
   const p = url.pathname;
   const q = url.searchParams;
@@ -334,6 +341,20 @@ async function handle(req, res, url) {
     });
   }
 
+  /* 红心：GET/POST /like_song?id=&liked= （POST 也可以走 JSON body）。
+     库的 like_song 只收数字 id + boolean，并且要求当前账号已有「我喜欢」歌单。 */
+  if (p === '/like_song' || p === '/like-song') {
+    const body = await readJson(req);
+    const id = String(body.id ?? q.get('id') ?? '').trim();
+    if (!id) return json(res, 400, { code: 400, error: 'id required' });
+    if (!/^\d{1,30}$/.test(id)) return json(res, 400, { code: 400, error: '波点曲目 id 必须是数字' });
+    const raw = body.liked ?? q.get('liked');
+    const liked = !(raw === false || raw === 'false' || raw === 0 || raw === '0');
+    const r = await call('like_song', { id, liked });
+    if (!r.ok) return json(res, failBody(r.error).code, failBody(r.error));
+    return json(res, 200, { code: 200, liked });
+  }
+
   if (p === '/playlist/detail') {
     const id = q.get('id') || '';
     if (!id) return json(res, 400, { code: 400, error: 'id required' });
@@ -343,7 +364,13 @@ async function handle(req, res, url) {
   }
 
   if (p === '/user/albums') {
-    const r = await call('user_albums');
+    /* 库的 user_albums 对收藏列表走 catalog 分页（limit 1..100、offset 从 0 起），
+       以前这里忽略 query，永远只读第一页（默认 50 张）。把 limit/offset 转进去，
+       hasMore 由库按上游原始页给出。 */
+    const r = await call('user_albums', {
+      limit: Math.min(100, Math.max(1, Number(q.get('limit')) || 50)),
+      offset: Math.max(0, Number(q.get('offset')) || 0),
+    });
     if (!r.ok) return json(res, failBody(r.error).code, failBody(r.error));
     return json(res, 200, { code: 200, data: r.data });
   }

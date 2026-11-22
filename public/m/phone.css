@@ -9,14 +9,55 @@
 /* 进度线由 phone.js 插入；宽屏不显示，也不占位 */
 #phone-progress { display: none; }
 
+/* 旋转过渡：横竖互换的那一下，WebView 要重排整页，最贵的是 64px 背景模糊
+   和顶栏的 backdrop-filter。这里在 420ms 内把它们降级成便宜的版本，
+   减少"卡一下黑色面板"的时长。正常浏览不受影响。 */
+/* !important：播放页的 #view-now .now-bg 用 ID 选择器把 64px 模糊写死了，
+   低权重规则压不下去，转屏那一秒等于白写。 */
+body.is-rotating .now-bg { filter: blur(12px) saturate(120%) !important; transition: none; }
+body.is-rotating .topbar {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+/* 铺色态真正贵的是 backdrop-filter（22px，逐帧采样还在重画的 WebGL 画布），
+   不是 filter —— 之前写成 filter:none 根本没命中。 */
+body.is-rotating .hall-plat__blur {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
 @media (max-width: 560px) {
 
   /* ---------------- 安全区 / 横向溢出 ---------------- */
   html, body { overflow-x: hidden; }
 
   /* 顶栏整体抬高一个刘海，视图的 top:var(--topbar-h) 也会跟着让开 */
-  :root { --topbar-h: calc(64px + env(safe-area-inset-top)); }
+  :root { --topbar-h: calc(50px + env(safe-area-inset-top)); }
   .topbar { padding-top: env(safe-area-inset-top); }
+
+  /* 顶栏：桌面那条"折射条"是通栏、无底色的，手机上也是一整条贴在屏幕最顶上
+     （压到刘海/状态栏后面），只是整体压薄 14px，并给一点玻璃底色让它在白底上
+     也看得出是一条 —— 不浮起来、不留左右边距、不做圆角。 */
+  .topbar {
+    top: 0;    right: 0;    bottom: auto;    left: 0;
+    height: var(--topbar-h);
+    border: 0;
+    border-radius: 0;
+    --lg-radius: 0;
+    --lg-tint: oklch(100% 0 0 / 0.5);
+    --lg-edge: transparent;
+    box-shadow: none;
+    /* 左上角那块彩色"黑斑"是液态玻璃的位移折射在角落把下面的封面糊上来的残影
+       （把顶栏整体上移 30px 实测它原地不动 —— 它跟着背景内容，不跟着玻璃走）。
+       手机上这条顶栏只需要"毛玻璃 + 底色"，把位移滤镜换成普通模糊，残影就没有了。
+       !important：--lg-backdrop 是 liquid-glass.js 写在元素行内样式上的。 */
+    -webkit-backdrop-filter: blur(8px) saturate(1.5) !important;
+    backdrop-filter: blur(8px) saturate(1.5) !important;
+  }
+  .topbar.is-stuck {
+    border-bottom: 1px solid oklch(21% 0.022 270 / 0.05);
+  }
+  .topbar__inner { padding-inline: 16px; }
 
   /* 播放页顶栏是 fixed top:0 的，单独让出刘海；
      手机上没有 hover，返回 / 控制必须常显（桌面靠 hover 或点屏 2.6s 才出现） */
@@ -24,6 +65,50 @@
     padding: calc(env(safe-area-inset-top) + 12px) 14px 10px;
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* 控制面板（播放页右上角「控制」打开的那块）：竖屏把工具磁贴从「一行三等分」
+     改成单列整行（2026-11-14，用户要求「一整条竖下来排列」）。
+     354 宽的屏幕减去 8+8 边距、18+18 内边距只剩约 302，三等分每个约 97，
+     40 的图标座 + 12.5 的字根本放不下，「音效 / 均衡器」被省略号截成「音效 / …」。
+     改成整行后图标、主标签、副文案、队列计数 / 展开箭头都放得下。 */
+  #drawer .drawer__tiles {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  /* 分组标题（「工具」「DIY · 显示」）在手机上只是两行噪音：磁贴本身已经
+     写清楚是什么了，删掉。 */
+  #drawer .drawer__t { display: none; }
+  #drawer .drawer__tile {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 2px;
+    height: auto;
+    min-height: 58px;
+    padding: 10px 14px 10px 12px;
+  }
+  #drawer .drawer__tile .drawer__ico {
+    grid-column: 1; grid-row: 1 / span 2;
+    width: 36px; height: 36px; border-radius: 10px;
+  }
+  #drawer .drawer__tile .drawer__label {
+    grid-column: 2; grid-row: 1;
+    font-size: 14px;
+    white-space: normal; overflow: visible; text-overflow: clip;
+  }
+  /* 单列有了位置，把磁贴里被藏掉的副文案放回来 */
+  #drawer .drawer__tile .drawer__desc {
+    display: block;
+    grid-column: 2; grid-row: 2;
+    font-size: 11.5px;
+  }
+  #drawer .drawer__tile .drawer__val,
+  #drawer .drawer__tile .drawer__caret {
+    grid-column: 3; grid-row: 1 / span 2;
+    margin-left: 0;
   }
 
   /* ---------------- 播放页：单列 ---------------- */
@@ -82,6 +167,49 @@
     aspect-ratio: 1;
     flex: none;
     margin: auto 0 16px;         /* 底部 16px：歌名不要贴着封面下沿 */
+  }
+
+  /* ---- 手机播放页 3D 悬浮 / 陀螺仪视差（2026-11-21） ----
+     默认关：设置里「播放页悬浮」打开后 body 才有 .now-float，
+     下面所有规则才生效；关着时主播放页和原来完全一样。
+     phone.js 把陀螺仪读数归一化成 --gyro-x / --gyro-y（-1..1），
+     这里只做合成层变换：封面是一张有厚度的浮卡，歌名 / 控制键 /
+     背景按不同深度错动。布局尺寸一点不变，静止时就是原版。 */
+  body.now-float #view-now .now__stage {
+    perspective: 1000px;
+    perspective-origin: 50% 38%;
+  }
+  body.now-float #view-now .now__art {
+    transform-style: preserve-3d;
+  }
+  body.now-float #view-now .disc {
+    transform:
+      rotateX(calc(var(--gyro-x, 0) * -6deg))
+      rotateY(calc(var(--gyro-y, 0) * 8deg))
+      translateZ(46px);
+    transform-origin: center;
+    transition: transform 90ms linear;
+    box-shadow:
+      inset 0 0 3px 1px oklch(100% 0 0 / 0.5),
+      0 34px 70px oklch(8% 0.02 270 / 0.5),
+      0 8px 22px oklch(8% 0.02 270 / 0.35);
+  }
+  body.now-float #view-now .now__meta {
+    /* 层深用独立的 translate 属性，不用 transform：这些元素带 nowRise
+       进场动画（fill:both 把 transform 永久钉在 none），transform 里写的
+       Z 会被动画整个盖掉；translate 与 transform 分开合成，互不打架。 */
+    translate: 0 0 24px;
+  }
+  body.now-float #view-now .now__transport,
+  body.now-float #view-now #phone-progress,
+  body.now-float #view-now .peek {
+    translate: 0 0 12px;
+  }
+  body.now-float.is-now .now-bg {
+    transform:
+      scale(1.16)
+      translate3d(calc(var(--gyro-y, 0) * -22px), calc(var(--gyro-x, 0) * 16px), 0);
+    transition: opacity 600ms var(--ease-apple), transform 90ms linear;
   }
 
   /* 歌名 / 歌手：桌面终版 22px 600 · -0.022em · 1.24，不换字体 */
@@ -169,11 +297,32 @@
     margin: 12px 0 0;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.16);
-    overflow: hidden;
+    /* 拖动把手是 22px 环，会超出这 2px 的视觉条；overflow:hidden 会把它裁掉 */
+    overflow: visible;
+    cursor: pointer;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    /* 扩出来的命中区要压在下面的细条（.peek 的 48px 热区）之上 */
+    z-index: 12;
+  }
+  /* 视觉条只有 2px，手指按不准。::before 把命中区上下各扩 12px（≈26px 高），
+     不改变布局；伪元素属于本元素，elementFromPoint 命中的仍是 #phone-progress */
+  #phone-progress::before {
+    content: '';
+    position: absolute;
+    left: -4px;
+    right: -4px;
+    top: -12px;
+    bottom: -12px;
+  }
+  #phone-progress:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.6);
+    outline-offset: 6px;
   }
   #phone-progress > i {
     position: absolute;
-    inset: 0;
+    top: 0;    right: 0;    bottom: 0;    left: 0;
     display: block;
     border-radius: inherit;
     background: rgba(255, 255, 255, 0.82);
@@ -181,6 +330,41 @@
     transform-origin: 0 50%;
     transition: transform 240ms linear;
     pointer-events: none;
+  }
+  /* 拖动中的环形把手：跟指尖走，松手淡出。只动 transform / opacity，
+     没有 filter / backdrop-filter，过渡也只给 160ms 的 opacity。 */
+  #phone-progress .pp-ring {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    box-sizing: border-box;
+    border: 1.5px solid rgba(255, 255, 255, 0.92);
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    pointer-events: none;
+    opacity: 0;
+    transform: translate3d(-11px, -50%, 0);
+    transition: opacity 160ms ease-out;
+    will-change: transform, opacity;
+  }
+  #phone-progress .pp-ring::after {
+    content: '';
+    position: absolute;
+    top: 0;    right: 0;    bottom: 0;    left: 0;
+    margin: auto;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.92);
+  }
+  /* 拖动中：fill 不再吃 240ms 的 timeupdate 过渡，环立刻出现 */
+  #phone-progress.is-seek > i { transition: none; }
+  #phone-progress.is-seek .pp-ring {
+    opacity: 1;
+    transition: none;
   }
 
   /* 传输排：贴底，圆形按钮 56 / 播放键 66（桌面触屏语言），
@@ -216,6 +400,53 @@
      进度由 #phone-progress 负责，这里只把 dock 藏掉。 */
   #view-now .dock { display: none; }
 
+  /* ---------------- 播放页背景：封面取色 ----------------
+     .now-bg 只是放大的模糊封面（一张照片），本身没有"取色"这回事。
+     这里在暗纱之上再叠一层从封面聚类出来的两个主色（--bar-a / --bar-b，
+     app.js 的 applyArtwork 每次换歌写进 :root），整屏就始终有一层可辨认的色相 ——
+     封面是灰的、米色的也能看出"从封面里取出来的那点颜色"，而不是一片灰雾。 */
+  #view-now .now-veil::after {
+    content: '';
+    position: absolute;
+    top: 0;    right: 0;    bottom: 0;    left: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(120% 90% at 16% 6%,
+        color-mix(in oklch, var(--bar-a, oklch(72% 0.16 264)) 38%, transparent) 0%,
+        transparent 60%),
+      radial-gradient(110% 85% at 86% 26%,
+        color-mix(in oklch, var(--bar-b, oklch(76% 0.14 190)) 32%, transparent) 0%,
+        transparent 64%);
+  }
+  /* 照片退一档、饱和度提一档：色相才读得出是"取色"，不是"一张糊掉的照片" */
+  #view-now .now-bg { opacity: 0.5; filter: blur(64px) saturate(168%); }
+  /* 歌词无框之后字直接压在封面上：展开时暗纱比桌面（34%）深一档，
+     取色层在它上面，颜色不会被压掉，字也稳得住 */
+  body.is-now #view-now.phone-lyr-open .now-veil {
+    background: linear-gradient(180deg,
+      oklch(9% 0.015 270 / 0.46) 0%,
+      oklch(7% 0.015 270 / 0.72) 44%,
+      oklch(5% 0.015 270 / 0.9) 100%);
+  }
+
+  /* ---------------- 形态页（舞台） ----------------
+     右侧「当前歌曲 + 形态」那一簇带一块往左扩 140px（桌面 300px）的隐形热区
+     （`.sbar-right::before`，桌面用来做 hover「靠近就展开」）。390 宽下右簇从
+     x≈88 起，热区一路铺到 x<0，正好横在左边的「返回」上面 —— 按钮看得见，点下去
+     命中的却是这块透明热区，这就是返回点不到的原因。手机没有 hover，直接撤掉，
+     再把返回抬到右簇之上（`.sbar-right` 是定位元素，本来就盖在静态按钮上面）。 */
+  #view-stage .sbar-right::before { display: none; }
+  #view-stage .stagebar > .btn {
+    position: relative;
+    z-index: 3;
+  }
+  /* 浮层淡出后（is-idle）整条是透明的，但按钮的 pointer-events 会被
+     `body.is-stage .stagebar .btn` 那条更高权重的规则重新打开 —— 手机上等于
+     在看不见的「返回」位置留了一块可点区域，点一下就直接退出形态。
+     这里按原意收回，让这一下落到点击层上（只负责把浮层叫回来）。 */
+  #view-stage .stagebar.is-idle .btn,
+  #view-stage .stagebar.is-idle .sbar-right { pointer-events: none; }
+
   /* ---------------- 歌词面板：覆盖层，默认收起 ---------------- */
   /* 无论桌面 app.js 有没有加 .is-lyrics-open，手机宽度下都收着；
      只有 .phone-lyr-open（phone.js 自己的类）才展开。 */
@@ -228,31 +459,60 @@
     transition: none;
     height: auto;
   }
+  /* 无框（1:1 桌面播放页）：歌词直接铺在模糊封面上，不再是一块不透明的深色板。
+     底色的"味道"由下面的取色层给，边框 / 圆角 / 投影全部去掉。 */
   body.is-now #view-now.phone-lyr-open .now__lyrics {
     display: flex;
     flex-direction: column;
     position: absolute;
-    left: 10px;
-    right: 10px;
+    left: 0;
+    right: 0;
     top: calc(env(safe-area-inset-top) + 84px);
     bottom: calc(env(safe-area-inset-bottom) + 92px);
     z-index: 20;
     height: auto;
     min-height: 0;
-    padding: 10px 4px 6px;
-    border-radius: 22px;
-    border: 1px solid oklch(100% 0 0 / 0.14);
-    background:
-      linear-gradient(180deg, oklch(100% 0 0 / 0.06), transparent 26%),
-      linear-gradient(165deg, oklch(15% 0.012 272 / 0.94), oklch(10% 0.01 270 / 0.97));
-    box-shadow:
-      inset 0 1px 0 oklch(100% 0 0 / 0.16),
-      0 24px 60px oklch(0% 0 0 / 0.45);
+    padding: 10px 0 6px;
+    border-radius: 0;
+    border: 0;
+    background: none;
+    box-shadow: none;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
-    opacity: 1;
+    /* 进场起点：缩在下方、淡出、不接点击；.phone-lyr-in 才是落点。
+       只动 transform / opacity 两个合成属性，时长 240ms 左右，安卓 WebView
+       不会像长过渡那样冻住。 */
+    opacity: 0;
     visibility: visible;
+    transform: translateY(28px) scale(0.98);
+    /* 面板一出现就接点击：进场这 260ms 里点到面板不该漏到下面的封面（会误触暂停）。
+       边界的“点面板外收起”靠 #view-now 的 click 判断，不受影响。 */
     pointer-events: auto;
+    transition: transform 260ms cubic-bezier(0.32, 0.72, 0, 1),
+                opacity 200ms ease-out;
+  }
+  body.is-now #view-now.phone-lyr-open.phone-lyr-in .now__lyrics {
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+  /* 兜底态：这台机器把过渡冻在起点（phone.js 探测到后挂 .phone-lyr-nofx），
+     面板直接显示 / 直接消失，不再等一次永远走不完的过渡。
+     收起时 phone-lyr-closing 在，靠 :not() 让动画态重新接管 —— 但这时过渡本来就
+     不跑，240ms 后整块 display:none，效果就是“立刻收起”。 */
+  body.is-now #view-now.phone-lyr-open.phone-lyr-nofx:not(.phone-lyr-closing) .now__lyrics {
+    opacity: 1 !important;
+    transform: none !important;
+    visibility: visible;
+    transition: none !important;
+  }
+  /* 收起：反向滑动 + 淡出，240ms 后 phone.js 才把 .phone-lyr-open 摘掉 */
+  body.is-now #view-now.phone-lyr-closing .now__lyrics {
+    opacity: 0;
+    transform: translateY(28px) scale(0.98);
+    pointer-events: none;
+    transition: transform 200ms cubic-bezier(0.4, 0, 1, 1),
+                opacity 150ms ease-in;
   }
 
   /* 歌词面板顶部关闭条（phone.js 插入，面板第一个流式子元素）：
@@ -285,7 +545,14 @@
     animation: none !important;
   }
 
-  /* 展开时封面 / 歌名 / 细条 / 进度直接收掉（不做长过渡，安卓 WebView 过渡会冻住） */
+  /* 展开歌词时，封面这一组往下让一点并淡出，和面板上滑同步（220ms） */
+  #view-now .disc,
+  #view-now .now__meta,
+  #view-now .peek,
+  #view-now #phone-progress {
+    transition: opacity 180ms ease-out,
+                transform 220ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
   #view-now.phone-lyr-open .disc,
   #view-now.phone-lyr-open .now__meta,
   #view-now.phone-lyr-open .peek,
@@ -293,6 +560,7 @@
     /* !important：进播放页时桌面的 nowRise 进场动画带 fill:both，
        动画的 opacity 会压过普通声明，这里必须用 important 才真能收掉 */
     opacity: 0 !important;
+    transform: translateY(14px) scale(0.985);
     pointer-events: none;
   }
 
@@ -302,7 +570,8 @@
     min-height: 0;
     height: auto;
     margin: 0;
-    padding: 6px 10px 18vh;
+    /* 面板现在是无框整宽的，左右留白全交给这里 */
+    padding: 6px 18px 18vh;
     overflow-y: auto;
     -webkit-mask-image: linear-gradient(transparent 0%, #000 10%, #000 82%, transparent 96%);
     mask-image: linear-gradient(transparent 0%, #000 10%, #000 82%, transparent 96%);
@@ -339,23 +608,724 @@
   #view-now .now__transport { position: relative; z-index: 21; }
 
   /* ---------------- 首页竖屏（铺色态） ---------------- */
-  /* 海报压到 300 高，剩下的高度全给平台面板：
-     app.css 的 577 : 423 是桌面比例，390×844 下会把面板挤得太矮 */
-  #view-hall.is-plat-mode .hall-hero {
-    /* 用视口高度算，矮屏（如 360×640）也压得下，不会把面板挤到溢出 */
-    flex: 0 0 clamp(220px, 35vh, 300px);
+  /* 大厅顶部海报：普通态和铺色态都排成 1:1 方形（用户要的就是这张"一比一封面"）。
+     桌面的 3:1 横条在手机上太扁，封面根本看不清。 */
+  #view-hall .hall-hero {
+    flex: 0 0 auto;
+    aspect-ratio: 1 / 1;
     height: auto;
-    max-height: 300px;
+    min-height: 0;
+    max-height: none;
   }
+  /* 铺色态必须再写一条带 .is-plat-mode 的规则（2026-11-13）：
+     app.css 的 `#view-hall.is-plat-mode .hall-hero { flex:577 1 0; aspect-ratio:auto }`
+     权重是 (1 id + 2 class)，高于上面那条 `#view-hall .hall-hero` (1 id + 1 class)，
+     与加载顺序无关。之前只有上面那条，铺色态实际拿到的仍是 577 1 0：海报按
+     577 : 1 跟平台面板分剩余高度（390×844 实测海报 713px、面板只剩 25px，
+     跑马带顶到 y=863 被面板 overflow:hidden 裁掉），这就是「登录后海报吃掉整屏」。
+     现在把 flex / 比例重新按住，并按屏高给海报封顶，保证面板至少 300px：
+       · 屏高 ≥ 约 734px（如 390×844、412×915、360×740）：海报完整 1:1
+         （358 / 380 / 328），面板分别还有 380 / 429 / 306px；
+       · 屏高更低时方形会开始压面板：海报改用
+         100vh − 顶栏 − 20(页面上留白) − 20(轨道上边距) − 16(页面底留白) − 300(面板下限)
+         = 100vh − 顶栏 − 56px − 300px；
+         例如 640 高 → 海报 234px（358×234，轻微非方形），面板仍有 300px。
+     只按宽度决定方形、按视口封顶，不写死 px；不能用 height:100% —— 铺色态的
+     .hall 高度由内容撑开，百分比高度算不出来会让整条声明失效（上一版塌成 0 的坑）。 */
+  #view-hall.is-plat-mode .hall-hero {
+    flex: 0 0 auto;
+    aspect-ratio: 1 / 1;
+    height: auto;
+    min-height: 0;
+    max-height: calc(100vh - var(--topbar-h) - 56px - var(--phone-plat-min, 300px));
+  }
+  /* 海报里的悬停歌词是桌面 pointer:fine 的交互；手机没有 hover，
+     这块内容永远出不来，直接不占层也不参与合成 */
+  #view-hall .hall-hero__lyrics { display: none; }
+  /* 海报的 hover 态整个抵消掉。桌面那套是 pointer 交互：悬停时方封面以左下角为原点
+     缩到 .86、底图压暗、标题让位。手机上一次 tap 就会触发 pointerenter，而且
+     不会自己离开，海报就长期卡在「封面缩在左下角」的悬停态（用户报的现象）。
+     这里把 hover 的每一处视觉都还原成静息态，海报永远是整块 1:1 的封面。 */
+  #view-hall .hall-hero.is-hover .hall-hero__dim { opacity: 0; }
+  #view-hall .hall-hero.is-hover .hall-hero__scrim { opacity: 1; }
+  #view-hall .hall-hero.is-hover .hall-hero__cover {
+    opacity: 0;
+    transform: translate(0, var(--hero-cy, 0px)) scale(var(--hero-ck, 1));
+  }
+  #view-hall .hall-hero.is-hover .hall-hero__badge { opacity: 1; transform: none; }
+  #view-hall .hall-hero.is-hover .hall-hero__text {
+    opacity: 1; transform: none; pointer-events: auto;
+  }
+  /* 铺色态海报顶部那根拖动横条（app.js 动态插的 .hall-hero-grip）：
+     用户要求去掉。它不是海报里的内容，是唯一的拖拽热区，隐藏后海报不再可拖叠，
+     靠列表自然滚动。 */
+  #view-hall .hall-hero-grip { display: none !important; }
   #view-hall.is-plat-mode .hall-rail,
   #view-hall.is-plat-mode .hall-plat {
     flex: 1 1 auto;
     min-height: 0;
   }
+  /* 普通态（未登录 / 没进铺色）矮屏兜底：1:1 海报取视口 46%，不再死撑方形。
+     铺色态不走这条 —— 上面 `#view-hall.is-plat-mode .hall-hero` 权重更高，
+     封顶值由「给面板留 300px」算出（见那段注释）。
+     高度必须只用视口单位：父容器高度不确定，height 里的 100% 算不出来会让
+     整条声明失效，海报塌成 0 高（这就是上一版的问题）。 */
+  @media (max-height: 760px) {
+    #view-hall .hall-hero {
+      aspect-ratio: auto;
+      height: clamp(200px, 46vh, 360px);
+      max-height: none;
+    }
+    /* 折叠态（海报收成 0）原样让开：app.css 的 is-hero-folded 是单类权重，
+       会被上面这条压掉，这里按同样条件还原 */
+    #view-hall.is-hero-folded .hall-hero {
+      flex: 0 0 0;
+      height: 0;
+      min-height: 0;
+    }
+  }
 
   /* 平台长条重新分空间：左右内边距 / 间隔收一档、图标 28px，
      左侧 crumb 列能拿到约 73px，「每日推荐精选」不再被裁成「每日…」 */
-  #view-hall .hall-plat__bar { padding: 0 8px; gap: 8px; }
+  #view-hall .hall-plat__bar { padding: 0 6px; gap: 6px; }
   #view-hall .pstrip__icons { gap: 5px; }
-  #view-hall .pstrip__i { width: 28px; height: 28px; }
+  /* LiziDock 会按 --plat-scale 往图标上写 inline width/height（实测放大到
+     34.67px），dock 左沿被推到来源选择器 chip 底下。竖屏触屏没有 hover，
+     那套放大本来就用不上：这里钉死 28px，让 chip 与 dock 之间始终留出实缝。 */
+  #view-hall .pstrip__i { width: 28px !important; height: 28px !important; }
+  /* 名称列只有 ~77px：字号不再跟着 --plat-scale 放大，根段的内边距也去掉，
+     「每日推荐精选」才放得下（否则又缩成「每日…」） */
+  #view-hall .pstrip__crumb { font-size: 12px; }
+  #view-hall .pstrip__crumb-seg.is-src { padding: 0; margin-left: 0; }
+
+  /* ---------------- 搜索结果页 ---------------- */
+  /* app.css 的 ≤480 规则把 .track__cover 缩到 36px，行还留着 132px 高：
+     封面小得像图标、右边一大片空。这里把封面放到 72，行高收到 96 */
+  #view-browse .track { min-height: 96px; gap: 12px; padding: 0 12px 0 0; }
+  #view-browse .track__cover { width: 72px; height: 72px; }
+  #view-browse .track__name { font-size: 17px; }
+  #view-browse .track__sub { font-size: 13px; }
+  #view-browse .track__dur { font-size: 12px; }
+
+  /* 音源切换：390 下原先把「网易云 / QQ 音乐 / 汽水…」挤成竖排两行，
+     改成一行横向滑动，按钮不换行；右侧「网易云 · 274 首」那行小字收起 */
+  #view-browse .src-switch {
+    flex-wrap: nowrap;
+    gap: 16px;
+    padding: 0 16px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  #view-browse .src-switch::-webkit-scrollbar { display: none; }
+  #view-browse .src-switch__b { flex: none; white-space: nowrap; font-size: 12.5px; }
+  #view-browse .src-switch__hint { display: none; }
+
+  /* ---------------- 设置页 ---------------- */
+  /* 桌面按 17px 正文排的，手机上整体收一档 */
+  #view-settings .setconsole__shiny { font-size: 30px; }
+  #view-settings .setpage__sub { font-size: 13px; }
+  #view-settings .setnav__label { font-size: 13.5px; }
+  #view-settings .setpage__h { font-size: 14px; }
+  #view-settings .setpage__row { font-size: 15px; }
+  #view-settings .setpage__label { font-size: 15px; }
+  #view-settings .setpage__hint { font-size: 12px; }
+  #view-settings .setpage__val { font-size: 13px; }
+  #view-settings .setpage__act { font-size: 13px; }
+
+  /* 平台行下面那串说明文字（「未登录只有 30 秒试听」「播放需登录 · 第三方协议」）
+     和卡片引言里「限制都写在自己那一行里」一起收掉，手机设置页只留可操作的项 */
+  #view-settings .src-limit,
+  #view-settings .setpage__note { display: none; }
+
+  /* 搜索展开时品牌让位：.search 在 .topbar__left 里，是 .brand 的兄弟而不是
+     .brand 的兄元素，所以兄弟选择器接不上；由 phone.js 的 ResizeObserver 看
+     搜索框实测宽度，给 body 挂 .phone-search-wide / .phone-search-narrow。 */
+  body.phone-search-wide .brand {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 160ms ease;
+  }
+
+  /* 手机展开态：触摸点图标时 :hover 不保证按悬停计算，没这一层点开也还是 38px。
+     规则照抄桌面 .search 的悬停态（宽 180 / 内边距 / 背景 / 图标 / 输入框）。
+     选择器多一个类，压过 app.css ≤480 的 .search:hover{width:180px}。 */
+  #topbar .search.phone-search-open {
+    width: 180px;
+    padding-inline: var(--sp-3);
+    gap: var(--sp-2);
+    background: oklch(21% 0.022 270 / 0.075);
+  }
+  #topbar .search.phone-search-open .ico { color: var(--ink); }
+  #topbar .search.phone-search-open input { flex: 1 1 0; opacity: 1; }
+
+  /* ---------------- 触屏手感（全局） ---------------- */
+  /* 去掉双击缩放的 300ms 延迟，点按立刻响应；按钮不被长按选中文字 */
+  a, button, [role="button"], .ntr, .peek__grip, #phone-lyr-close {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* 按下即时反馈：缩一点、松手回弹，让人知道「按到了」 */
+  #view-now .ntr,
+  #view-now #ntr-mode {
+    transition: transform 140ms var(--ease-apple, ease-out), background-color 140ms ease;
+  }
+  #view-now .ntr:active,
+  #view-now #ntr-mode:active {
+    transform: scale(0.92);
+  }
+  #view-now .ntr--play:active { transform: scale(0.94); }
+
+  #phone-lyr-close:active > i { background: rgba(255, 255, 255, 0.5); }
+
+  /* 歌词面板里滚到头不把整页带着滚（安卓下拉刷新 / 背景漂移） */
+  body.is-now #view-now.phone-lyr-open #lyrics {
+    overscroll-behavior: contain;
+  }
+
+  /* 安卓 WebView 会把垂直拖动当成滚动手势接管，十几像素后发 pointercancel、
+     不再给 pointerup —— 下滑返回在真机上因此失效（桌面 Chromium 不复现）。
+     播放页这一列本身不滚动，收起歌词时关掉浏览器的滚动手势，指针事件就能
+     完整走完；抽屉和歌词面板不在这棵子树里，各自照常滚。 */
+  body.is-now #view-now:not(.phone-lyr-open) .now__art {
+    touch-action: none;
+  }
+
+  /* 设置偏好减少动效的人：关掉手机层自己加的过渡 */
+  @media (prefers-reduced-motion: reduce) {
+    #view-now .ntr,
+    #view-now #ntr-mode,
+    #view-now .disc,
+    #view-now .now__meta,
+    #view-now .peek,
+    #view-now #phone-progress,
+    #view-now .now__lyrics,
+    #phone-progress > i,
+    #phone-progress .pp-ring { transition: none !important; }
+    #view-now .ntr:active,
+    #view-now #ntr-mode:active { transform: none; }
+  }
+
+  /* VIP 提示（2026-11-17）：浮在底部迷你播放条上方 12px；播放页（is-now）里
+     播放条藏了、控制键贴着底部，所以再抬高一点，别压住播放键。
+     和 app.css 同一套深色小条，这里只改站位与字号，不加 backdrop-filter。 */
+  .vip-tip {
+    right: 12px;
+    bottom: calc(env(safe-area-inset-bottom) + var(--player-h, 92px) + 12px);
+    max-width: calc(100vw - 24px);
+    font-size: 12.5px;
+  }
+  body.is-now .vip-tip {
+    bottom: calc(env(safe-area-inset-bottom) + 96px);
+  }
+}
+
+/* ==========================================================================
+   平板竖屏（561–1100px，竖着拿）
+   --------------------------------------------------------------------------
+   填 560 和桌面之间的缝：宽度一过 560，上面整段手机布局让开，页面退回
+   app.css 的桌面规则。桌面在 ≤900px 只有一套「窄窗」写法（.now__art 被改成
+   横排、封面固定 92px），那是给桌面窗口缩窄用的，在 600–820 宽的竖屏平板上
+   就是：封面缩成 92px、歌名和传输排挤在同一行、歌词被压到封面右边。
+   大厅铺色态海报继续吃 577:423，竖屏里变成接近方形的巨幅海报；触屏点一下
+   还会把桌面 hover 态钉住，右侧浮出一列竖排歌词（600 宽实测每行 1–2 字）。
+   这里只做平板竖屏兜底，≤560 手机与桌面横屏一个字节都不动。
+   ========================================================================== */
+@media (min-width: 561px) and (max-width: 1100px) and (orientation: portrait) {
+
+  /* ---------------- 大厅海报 ----------------
+     竖屏里用和桌面普通大厅一致的 3:1 横幅（min-height 保底），高度封在 38vh，
+     铺色态的平台面板才能拿到足够空间。封面仍是 .hall-hero__cover 的正方形
+     （height:100% + aspect-ratio:1/1），由 app.js 写入的 --hero-ck / --hero-cy
+     放大到铺满，不另起一套几何。 */
+  #view-hall .hall-hero,
+  #view-hall.is-plat-mode .hall-hero {
+    flex: 0 0 auto;
+    aspect-ratio: 3 / 1;
+    height: auto;
+    min-height: 200px;
+    max-height: min(38vh, 380px);
+  }
+
+  /* 粗指针平板可以拖分屏抓手把海报收成 0 高（app.css 的 pointer:coarse 那套）。
+     折叠态不能被上面的 200px 兜底钉住，否则拖下去松手又弹回来。 */
+  #view-hall.is-plat-mode.is-hero-folded .hall-hero {
+    flex: 0 0 0;
+    aspect-ratio: auto;
+    height: 0;
+    min-height: 0;
+    max-height: 0;
+    opacity: 0;
+    pointer-events: none;
+    box-shadow: none;
+  }
+
+  /* 触屏没有 hover：点一下海报会触发 pointerenter 且不会离开，海报就长期
+     卡在「封面缩到左下角 + 右侧歌词」的悬停态。和 ≤560 一样，把悬停的每一处
+     视觉还原成静息态；竖屏里歌词列只有两三百像素，本来也读不了。 */
+  #view-hall .hall-hero.is-hover .hall-hero__cover {
+    opacity: 0;
+    transform: translate(0, var(--hero-cy, 0px)) scale(var(--hero-ck, 1));
+  }
+  #view-hall .hall-hero.is-hover .hall-hero__dim { opacity: 0; }
+  #view-hall .hall-hero.is-hover .hall-hero__scrim { opacity: 1; }
+  #view-hall .hall-hero.is-hover .hall-hero__badge { opacity: 1; transform: none; }
+  #view-hall .hall-hero.is-hover .hall-hero__text {
+    opacity: 1; transform: none; pointer-events: auto;
+  }
+  #view-hall .hall-hero__lyrics { display: none; }
+  /* 锁是「钉住悬停歌词」的开关，悬停撤掉后没意义，还占一块热区 */
+  #view-hall .hall-hero__lock { display: none; }
+
+  /* ---------------- 主播放器：沿用手机单列 ----------------
+     DOM 与 ≤560 完全相同，只是尺寸按视口放大：
+       封面 → 歌名/歌手 → 传输排 → 歌词面板 → 底部进度线 */
+  #view-now .now__stage {
+    display: flex;
+    flex-direction: column;
+    grid-template-columns: none;
+    grid-template-rows: none;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0;
+    padding: calc(env(safe-area-inset-top) + 84px) 24px
+             calc(env(safe-area-inset-bottom) + 64px);
+    transition: none;
+  }
+  body.is-now #view-now .now { padding-bottom: 0; }
+
+  /* app.js 的 alignArtToLyrics() 会往这里写 inline translateY（桌面两栏对齐），
+     单列里必须清零，否则封面会被整体推到歌词的位置（实测推了 460px）。 */
+  #view-now .now__art {
+    width: 100%;
+    max-width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    transform: none !important;
+    transition: none;
+  }
+
+  #view-now .now__art > .disc { order: 1; }
+  #view-now .now__art > .now__meta { order: 2; }
+  #view-now .now__art > .now__transport { order: 3; }
+  /* 歌词在平板上是常开的桌面面板，不需要下拉手柄；手机那条 2px 进度线
+     在 >560 不更新（phone.js 的 enabled() 只认 ≤560），改用底部 dock。 */
+  #view-now .now__art > .peek { display: none; }
+  #view-now .now__art > #phone-progress { display: none; }
+
+  /* 封面：58vw / 34vh 取小，再封 480px；820×1180 下约 400，600×960 下约 326 */
+  #view-now .disc {
+    width: min(58vw, 34vh, 480px);
+    max-width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    flex: none;
+    margin: 0 0 20px;
+  }
+
+  #view-now .now__meta {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    text-align: center;
+  }
+  #view-now .now__title {
+    margin: 0;
+    font-size: clamp(26px, 3.4vw, 34px);
+    font-weight: 600;
+    letter-spacing: -0.022em;
+    line-height: 1.24;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  #view-now .now__sub {
+    margin: 4px 0 0;
+    font-size: clamp(15px, 1.8vw, 18px);
+    letter-spacing: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* 传输排：桌面触屏语言，圆形 56 / 播放键 66，热区 ≥44 */
+  #view-now .now__transport {
+    order: 3;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    flex: none;
+    gap: 10px;
+    margin: 28px 0 0;
+    padding: 0;
+    transition: none;
+  }
+  #view-now .ntr-side { flex: 1 1 0; min-width: 0; gap: 10px; }
+  #view-now .ntr-side--l { justify-content: flex-end; }
+  #view-now .ntr-side--r { justify-content: flex-start; }
+  #view-now .ntr {
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+  }
+  #view-now .ntr .ico { width: 24px; height: 24px; }
+  #view-now #ntr-mode { width: 56px; height: 56px; }
+  #view-now #ntr-mode .ico { width: 20px; height: 20px; }
+  #view-now .ntr--play { width: 66px; height: 66px; }
+  #view-now .ntr--play .ico { width: 32px; height: 32px; }
+  #view-now .ntr,
+  #view-now #ntr-mode {
+    transition: transform 140ms var(--ease-apple, ease-out), background-color 140ms ease;
+  }
+  #view-now .ntr:active,
+  #view-now #ntr-mode:active { transform: scale(0.92); }
+  #view-now .ntr--play:active { transform: scale(0.94); }
+
+  /* 歌词：桌面常开的那块玻璃面板，挪到封面/传输排下面，固定一屏高度自己滚。
+     不再参与桌面 grid 的 0/1fr 轨道动画。 */
+  #view-now .now__lyrics {
+    position: relative;
+    width: 100%;
+    max-width: min(92vw, 860px);
+    height: clamp(220px, 30vh, 380px);
+    margin: 16px auto 0;
+    flex: none;
+    padding: 14px 22px 16px;
+    border-radius: var(--r-xl);
+  }
+  body.is-now #view-now #lyrics {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    padding: 8px 6px 30%;
+    overflow-y: auto;
+    -webkit-mask-image: linear-gradient(transparent 0%, #000 8%, #000 88%, transparent 100%);
+    mask-image: linear-gradient(transparent 0%, #000 8%, #000 88%, transparent 100%);
+  }
+  body.is-now #view-now #lyrics .ly {
+    font-size: clamp(20px, 3.2vw, 30px);
+    line-height: 1.32;
+    padding: 8px 0;
+    letter-spacing: -0.018em;
+    will-change: auto;
+    transition: color 160ms linear, filter 160ms linear;
+    filter: none;
+  }
+  body.is-now #view-now #lyrics .ly__main { transform: scale(0.96); }
+  body.is-now #view-now #lyrics .ly.is-active .ly__main { transform: scale(1); }
+  body.is-now #view-now #lyrics .ly__tr {
+    font-size: clamp(12px, 1.6vw, 15px);
+    margin-top: 3px;
+  }
+
+  /* 底部进度：复用桌面 dock 的进度条（app.js 已 bindBar，时间/拖动都通），
+     藏掉方形封面缩略图，只留一条 4px 的渐变线；热区靠 ::before 上下各扩 20px。 */
+  #view-now .dock {
+    display: flex;
+    position: fixed;
+    left: 32px;
+    right: 32px;
+    bottom: calc(env(safe-area-inset-bottom) + 20px);
+    height: 44px;
+    align-items: center;
+    background: transparent;
+    box-shadow: none;
+    border-radius: 999px;
+    overflow: visible;
+    z-index: 30;
+  }
+  #view-now .dock__art { display: none; }
+  #view-now .dock__bar {
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    box-shadow: none;
+    overflow: visible;
+  }
+  #view-now .dock__bar::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; top: -20px; bottom: -20px;
+    height: auto;
+    background: transparent;
+  }
+  #view-now .dock__paint {
+    top: 0;    right: 0;    bottom: 0;    left: 0;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.78);
+  }
+  #view-now .dock__head { display: none; }
+  #view-now .dock__bar:focus-visible {
+    outline: 2px solid rgba(255, 255, 255, 0.6);
+    outline-offset: 6px;
+  }
+
+  /* 歌词面板盖不住传输排 */
+  #view-now .now__transport { position: relative; z-index: 21; }
+
+  /* ---------------- 铺色态左侧四个页签 ----------------
+     app.css:6633 的 @media (max-width:900px) 把 .hall-sidekeys 整条
+     display:none，600/768/820 竖屏实测切不了面，只能停在 localStorage
+     里上次那一面（上次是「我的专辑」就整块白）。901–1100 虽然可见，
+     但轨道只有 28px 宽，命中区不到 44。
+     这里只恢复「铺色态」的轨道：普通态仍由 app.css 的
+     .hall-rail:not(.is-plat) 藏；桌面收起态 .is-plat-folded 仍由 app.css
+     更高权重的规则藏。宽度加到 44，页签 flex 均分（最高 64），
+     高度、命中区都 ≥44；滑块 .srail__thumb 的 clip-path 由 srailMeasure
+     按真实 rect 重量，不另起一套状态。 */
+  #view-hall.is-plat-mode .hall-sidekeys {
+    display: flex;
+    width: 44px;
+  }
+  #view-hall.is-plat-mode .hall-sidekeys .srail__i {
+    width: 44px;
+    min-height: 44px;
+  }
+  /* 底部折叠三角跟着轨道加宽，不然 44 的轨道里挂着一个 28 的箭头 */
+  #view-hall.is-plat-mode .srail__fold { width: 44px; }
+  /* 44px 轨道会压住中性面（形态 / 我的专辑 / 工具箱）最左边 30px 的
+     文字：专辑空态首字、形态抬头都落在里面。中性面左边距从 10 / 0
+     加到 40，内容从 x≈56 起步，让开轨道右沿（x=46）。
+     只管平板竖屏的铺色面，不碰桌面 / 手机。 */
+  #view-hall.is-plat-mode .plat-face--albums,
+  #view-hall.is-plat-mode .plat-face--stage,
+  #view-hall.is-plat-mode .plat-face--box {
+    padding-left: 40px;
+  }
+
+  /* ---------------- 我的专辑面：空态提示 ----------------
+     app.css:7197–7202 为了面内紧凑把 .ma-top/.ma-head/.ma-note/.ma-empty
+     全藏了；0 张收藏时整面纯白，用户找不到「架子上还是空的」。
+     只把 JS 已经维护好的空态节点放出来（非空时 hasAttribute('hidden')，
+     :not([hidden]) 自然不命中），不新增 DOM。 */
+  #view-hall.is-plat-mode .plat-face--albums #view-myalbums .ma-empty:not([hidden]) {
+    display: flex;
+  }
+
+  /* ---------------- 我的专辑面：右上「全屏」热区 ----------------
+     视觉仍是 9px 等宽小字（实测 20×11），用伪元素把热区扩到 44×44。
+     face-index 抬到 2 层，避免伪元素伸进 .plat-face__body 的那一段
+     被借进来的 #view-myalbums 盖住；顶部让开 rail 顶边那 12px 的
+     分屏抓手（.hall-hero-grip，z-index 30），所以热区整体略向下偏。
+     top -5 / bottom -31 是按 11px 高的按钮算的：11 + 5 + 31 = 47，
+     实际可命中 44–45（顶部 1–2px 落在抓手里）。 */
+  #view-hall.is-plat-mode .plat-face--albums .face-index {
+    position: relative;
+    z-index: 2;
+  }
+  #view-hall.is-plat-mode .plat-face--albums .face-index__act {
+    position: relative;
+  }
+  #view-hall.is-plat-mode .plat-face--albums .face-index__act::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    right: -12px;
+    top: -5px;
+    bottom: -31px;
+  }
+}
+
+/* ==========================================================================
+   平板竖屏 600–700：歌曲面顶栏标题被图标列挤成「每.」
+   --------------------------------------------------------------------------
+   --plat-scale 在 600×960 实测 2.05，五个平台图标各 65.6px、图标列吃掉
+   377px，1fr 的标题列只剩 32px（26.7px 字号只放得下一个字）。
+   这里只收窄这一档的图标/搜索占位和两处间距，600 宽实测标题列
+   32px → 129px：「每日推荐」四个字约 108px，加 is-src 的 16px 内边距
+   刚好放得下（实测四个字全部可见）。
+   高度仍是 42×scale，不碰 fitPlatScale / 跑马带 / --plat-scale 本身。
+   只作用于 /m 的 561–700 竖屏；≤560 手机与 >700 平板不进。 */
+@media (min-width: 561px) and (max-width: 700px) and (orientation: portrait) {
+  #view-hall .plat-face--song .hall-plat__bar {
+    gap: 8px;
+    /* 左内边距要同时让开 44px 的竖向导轨（面板 x 起点的左侧 30px），
+       24px 让标题从 x=50 开始，不被轨道压住；左右对称还不偏图标列。 */
+    padding-inline: 24px;
+  }
+  #view-hall .plat-face--song .pstrip__icons { gap: 4px; }
+  #view-hall .plat-face--song .pstrip__i {
+    width: 42px;
+    height: 42px;
+  }
+  #view-hall .plat-face--song .pstrip__search {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* ==========================================================================
+   形态页 · 横屏（安卓壳 / 触屏机旋转后宽度 >560）
+   --------------------------------------------------------------------------
+   进形态时 phone.js 请求横屏（390×844 → 844×390），上面整段
+   @media (max-width:560px) 因此全部让开，但有两个规则必须继续生效 ——
+   否则左上角的「返回」会被右侧歌曲胶囊的透明热区吃掉：
+
+   1) `.sbar-right::before` 是桌面用来做 hover「靠近就展开」的隐形热区，
+      往左扩 300px（app.css 约 2201 行）。触屏上浮层一露脸就会加
+      `.is-near`，歌曲胶囊展开 288px，`.sbar-right` 从 x≈543 左移到 x≈255，
+      热区的左沿再减 300 → 约 -45px。返回按钮在 33.8–126.5，
+      整个落在热区里：elementFromPoint / 真实 click 的 target 都是
+      #stage-right，不是 #stage-back —— 看得见、点不到。
+      手机没有 hover，这层热区本来就没有用处，直接撤掉。
+   2) 浮层淡出（.is-idle）后 `body.is-stage .stagebar .btn` 会把
+      pointer-events 重新打开，看不见的返回位置仍可点；按原意收回，
+      让这一下落到 .stage-tap 上（只把浮层叫回来）。
+
+   body.phone-stage 由 phone.js 按 body[data-view] 维护（进 stage 加、离开摘），
+   所以竖屏 / 横屏都成立，不依赖 matchMedia 的 change 事件。
+   只作用于 /m（phone.css 只由 /m/index.html 加载）。
+   ========================================================================== */
+body.phone-stage #view-stage .stagebar .sbar-right::before { display: none; }
+body.phone-stage #view-stage .stagebar > .btn {
+  position: relative;
+  z-index: 3;                 /* 右簇是定位元素、在 DOM 里更靠后，抬到它上面 */
+}
+body.phone-stage #view-stage .stagebar.is-idle .btn,
+body.phone-stage #view-stage .stagebar.is-idle .sbar-right { pointer-events: none; }
+
+/* ==========================================================================
+   顶栏右上角的转屏按钮（phone.js 只在安卓壳、且有 __liziNative 时注入）
+   absolute 定位在 .topbar__inner 右侧，不参与 flex 排布，
+   所以中间品牌不会因为多一个按钮被挤偏；竖屏横屏都生效。
+   ========================================================================== */
+.phone-rotate {
+  position: absolute;
+  right: var(--gutter);
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+}
+
+/* 播放页：按钮被 phone.js 挪进「返回 / 控制」那一簇（.now__bar-right），
+   排在「控制」左边，不再用绝对定位 —— 不可能盖住「控制」。
+   这里只把外观改成和这条深色顶栏一致的圆形玻璃图标键。 */
+#view-now .now__bar-right .phone-rotate {
+  position: static;
+  right: auto;
+  top: auto;
+  transform: none;
+  z-index: auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: var(--now-fg, oklch(98% 0 0));
+  background: oklch(100% 0 0 / 0.12);
+}
+#view-now .now__bar-right .phone-rotate:active {
+  background: oklch(100% 0 0 / 0.22);
+}
+
+
+/* ==========================================================================
+   横屏（安卓壳固定 width=1280 视口）：去掉两个折叠入口
+   --------------------------------------------------------------------------
+   用户发布版的横屏没有这两样东西，之前它们只在 ≤560 那段里藏着，
+   横屏视口是 1280，整段失效，于是又冒出来了：
+
+   1) 面板顶部那条可拖的分隔抓手 .hall-hero-grip（app.js 的 ensureHeroGrip
+      动态插进 .hall-rail）。竖屏在 ≤560 那段已经 display:none。
+   2) 导轨底部贴着「工具箱」的折叠三角 .srail__fold（.hall-sidekeys 里）。
+
+   两者都只是折叠面板的入口，藏掉不影响面板本身和页签点击；
+   导轨底部原本为三角让出的 26px 也一并还给四个页签。
+   只作用于 /m（phone.css 只由 /m/index.html 加载）。
+   ========================================================================== */
+@media (orientation: landscape) and (pointer: coarse) {
+  #view-hall .hall-hero-grip { display: none !important; }
+  #view-hall .srail__fold { display: none !important; }
+  #view-hall .hall-sidekeys { padding-bottom: 0 !important; }
+}
+
+/* 形态长廊是棱柱背面：横屏放平后同样会露出一条 5px 左右的细边，卡片 <img>
+   在 lazy 赋值前没有 src 时，Chrome 仍会在这个盒子的左上角画破图占位。
+   竖屏那条规则在 ≤560 的 @media 里，够不到 1280 的横屏视口，这里补一条全局的
+   （phone.css 只由 /m 加载，不影响桌面）。卡片高度由 .hall-stage__art 的
+   aspect-ratio + 底色撑住，没图时不画 img 不会让布局塌；拿到 src 后自动恢复。 */
+#view-hall .plat-face--stage .hall-stage__img:not([src]),
+#view-hall .plat-face--stage .hall-stage__img[src=""] {
+  display: none;
+}
+
+/* ==========================================================================
+   大厅来源选择器：两种形态，各管一段
+   --------------------------------------------------------------------------
+   · 竖屏（≤560）：Glide 下拉（/m/glide-select.js），已经足够醒目，不动它。
+   · 横屏 / 平板（>560）：用桌面那套面包屑根段 .pstrip__crumb-seg.is-src，
+     点开是 app.js 的 #hall-src-menu 滚轮。横屏没有下拉，用户看不出这里能切，
+     所以在根段字上方补一个 ▲、下方补一个 ▼。
+   三角用 border 画的，不占布局、不吃点击（pointer-events:none）。
+   只作用于 /m（phone.css 只由 /m/index.html 加载）。
+   ========================================================================== */
+@media (min-width: 561px) {
+  #view-hall .pstrip__crumb-seg.is-src,
+  #view-hall .pstrip__name.is-src { position: relative; }
+
+  #view-hall .pstrip__crumb-seg.is-src::before,
+  #view-hall .pstrip__name.is-src::before,
+  #view-hall .pstrip__crumb-seg.is-src::after,
+  #view-hall .pstrip__name.is-src::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    width: 0;
+    height: 0;
+    margin-left: -5px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    opacity: .62;
+    pointer-events: none;
+    transition: opacity 160ms var(--ease-out);
+  }
+  /* ▲：贴在字上方 */
+  #view-hall .pstrip__crumb-seg.is-src::before,
+  #view-hall .pstrip__name.is-src::before {
+    top: -6px;
+    border-bottom: 7px solid currentColor;
+  }
+  /* ▼：贴在字下方 */
+  #view-hall .pstrip__crumb-seg.is-src::after,
+  #view-hall .pstrip__name.is-src::after {
+    bottom: -6px;
+    border-top: 7px solid currentColor;
+  }
+  /* 滚轮开着的时候两个三角淡下去，别跟选中的那一行抢注意力 */
+  #view-hall .hall-plat__bar.is-src-open .pstrip__crumb-seg.is-src::before,
+  #view-hall .hall-plat__bar.is-src-open .pstrip__crumb-seg.is-src::after,
+  #view-hall .hall-plat__bar.is-src-open .pstrip__name.is-src::before,
+  #view-hall .hall-plat__bar.is-src-open .pstrip__name.is-src::after,
+  #view-hall .hall-plat__bar.is-src-fading .pstrip__crumb-seg.is-src::before,
+  #view-hall .hall-plat__bar.is-src-fading .pstrip__crumb-seg.is-src::after,
+  #view-hall .hall-plat__bar.is-src-fading .pstrip__name.is-src::before,
+  #view-hall .hall-plat__bar.is-src-fading .pstrip__name.is-src::after { opacity: .16; }
+}
+
+/* 横屏（安卓壳固定 1280 视口）平台 dock 放大：
+   --plat-scale 在横屏只有 0.615，图标被算成 19.7px，手指根本点不准。
+   这里按 38px 定死（dock.js 的放大动画在触屏上没有意义），长条同步长到 48px；
+   跑马带还剩约 218px，154px 的卡片（192 高 + 上下 10px）刚好放得下。 */
+@media (orientation: landscape) and (pointer: coarse) {
+  #view-hall .hall-plat__bar { height: 48px; padding: 0 16px; gap: 10px; }
+  #view-hall .pstrip__icons { gap: 8px; }
+  #view-hall .pstrip__i { width: 38px !important; height: 38px !important; }
+  /* 左侧四个页签：轨道 28 → 44，图标 15 → 20。导轨是浮在面板左缘上的，
+     44 宽只压到面板 4px，跑马带第一张卡从 x≈55 起，不挡卡。 */
+  #view-hall .hall-sidekeys { width: 44px; }
+  #view-hall .srail__i { width: 44px; max-height: 64px; }
+  #view-hall .srail__i svg { width: 20px; height: 20px; }
+  #view-hall .pstrip__name,
+  #view-hall .pstrip__crumb { font-size: 15px; }
 }

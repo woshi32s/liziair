@@ -45,12 +45,17 @@ input, textarea { -webkit-user-select: text; user-select: text; }
 /* 圆角白底：单独一层，跟着 border-radius 裁 */
 body::before {
   content: '';
-  position: fixed; inset: 0;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0;
   background: #fff;
   border-radius: 22px;
   z-index: -1;
   pointer-events: none;
 }
+/* 窗口圆角开关（设置 → 画质，桌面专属，默认开）：
+   关掉时 app.js 给 html 挂 .win-square，把窗口这层 22px 圆角抹平。
+   只动「窗口」本身，卡片 / 按钮的小圆角不受影响。 */
+html.win-square body,
+html.win-square body::before { border-radius: 0; }
 
 /* 背景装饰层：主大厅里不要（要纯白）。
    播放页保留封面大图，那里白底会显得空。 */
@@ -83,7 +88,7 @@ code { font-family: var(--font-mono); font-size: 0.92em; background: oklch(21% 0
 /* ==========================================================================
    背景层
    ========================================================================== */
-.backdrop { position: fixed; inset: 0; z-index: -3; overflow: hidden; background: linear-gradient(150deg, oklch(97% 0.012 264), oklch(96.5% 0.01 320) 55%, oklch(97% 0.012 190)); }
+.backdrop { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: -3; overflow: hidden; background: linear-gradient(150deg, oklch(97% 0.012 264), oklch(96.5% 0.01 320) 55%, oklch(97% 0.012 190)); }
 .blob {
   position: absolute; width: 52vw; height: 52vw; border-radius: 50%;
   opacity: 0.85; will-change: transform; transform: translateZ(0);
@@ -98,7 +103,7 @@ code { font-family: var(--font-mono); font-size: 0.92em; background: oklch(21% 0
 
 /* 细网格：给玻璃一个"硬边界"背景，折射和色散才看得出来 */
 .grid {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   background-image:
     linear-gradient(oklch(21% 0.022 270 / 0.05) 1px, transparent 1px),
     linear-gradient(90deg, oklch(21% 0.022 270 / 0.05) 1px, transparent 1px);
@@ -117,7 +122,7 @@ code { font-family: var(--font-mono); font-size: 0.92em; background: oklch(21% 0
    （三个色调 --tone-a/b/c 仍然保留，但只用来给按钮/玻璃面板当主色，
      不再参与背景 —— 它来自另一套聚类，混进来就会"变色调"。） */
 .cover-bg {
-  position: fixed; inset: 0; z-index: -2;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: -2;
   opacity: 0;
   transition: opacity var(--dur-slow) var(--ease-out);
   background:
@@ -134,7 +139,7 @@ code { font-family: var(--font-mono); font-size: 0.92em; background: oklch(21% 0
    配的，压在这个浅底上会把颜色全洗掉，渐变就白做了。
    四边仍留一点白，保证顶栏和播放条上的文字对比度（这是可读性要求）。 */
 .scrim {
-  position: fixed; inset: 0; z-index: -1;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: -1;
   background:
     linear-gradient(90deg,
       oklch(100% 0 0 / 0.34) 0%,
@@ -159,7 +164,7 @@ code { font-family: var(--font-mono); font-size: 0.92em; background: oklch(21% 0
       内容往上滚经过它时会被折射。栏内按钮全部是平面样式。
    ========================================================================== */
 .topbar {
-  position: fixed; inset: 0 0 auto; z-index: 60;
+  position: fixed; top: 0; right: 0; bottom: auto; left: 0; z-index: 60;
   height: var(--topbar-h);
   /* 用 .lg-surface 拿到 JS 注入的 --lg-backdrop（位移 + 模糊 + 饱和），
      再把玻璃卡片的外观全部抹掉，只留"折射"这一个能力。 */
@@ -392,6 +397,136 @@ button.setpage__row:hover .setpage__caret { color: var(--ink); transform: transl
   color: var(--ink-3);
   opacity: .9;
 }
+/* 运行环境诊断行：整页禁选了文本，这一行放开，方便用户复制 */
+.setpage__note--diag {
+  user-select: text;
+  -webkit-user-select: text;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .01em;
+}
+
+/* 设置 → 使用帮助：纯文档排版，不接任何逻辑。
+   允许选中复制（整页默认禁选，这里单独放开）。 */
+.helpdoc {
+  max-width: 78ch;
+  margin-top: 12px;
+  color: var(--ink-2, #4a4a52);
+  font-size: 13.5px;
+  line-height: 1.75;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.helpdoc h3 {
+  margin: 26px 0 8px;
+  color: var(--ink, #17171a);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+.helpdoc h3:first-child { margin-top: 4px; }
+.helpdoc p { margin: 8px 0; }
+.helpdoc ul,
+.helpdoc ol { margin: 8px 0; padding-left: 1.4em; }
+.helpdoc li { margin: 4px 0; }
+.helpdoc b { color: var(--ink, #17171a); font-weight: 600; }
+.helpdoc__tip {
+  margin-top: 14px !important;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(23, 23, 26, .05);
+  background: color-mix(in oklch, var(--ink, #17171a) 5%, transparent);
+  color: var(--ink-2, #4a4a52);
+}
+
+/* 使用帮助浮层（2026-11-22）：设置页里整段展开的文档收进独立浮层，
+   入口是设置页「使用帮助」那一行。浅纸面 + 墨字，和设置页同一套 token；
+   不用 backdrop-filter / blur（安卓 WebView 上大面积模糊会掉帧）。 */
+.helpdoc-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(20, 20, 24, .55);
+  opacity: 0;
+  transition: opacity .18s ease;
+}
+.helpdoc-sheet[hidden] { display: none; }
+.helpdoc-sheet.is-on { opacity: 1; }
+.helpdoc-sheet__card {
+  display: flex;
+  flex-direction: column;
+  width: min(94vw, 720px);
+  max-height: min(86vh, 760px);
+  border-radius: 18px;
+  background: #fff;
+  color: var(--ink, #17171a);
+  border: 1px solid var(--rule, rgba(23, 23, 26, .12));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, .38);
+  transform: translateY(12px) scale(.985);
+  opacity: 0;
+  transition: transform .22s cubic-bezier(.2, .8, .2, 1), opacity .18s ease;
+}
+.helpdoc-sheet.is-on .helpdoc-sheet__card { transform: none; opacity: 1; }
+.helpdoc-sheet__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--rule, rgba(23, 23, 26, .10));
+}
+.helpdoc-sheet__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+.helpdoc-sheet__x {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--rule, rgba(23, 23, 26, .16));
+  background: transparent;
+  color: var(--ink-2, #4a4a52);
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+}
+.helpdoc-sheet__x:hover { background: rgba(23, 23, 26, .06); }
+.helpdoc-sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 4px 22px 22px;
+}
+.helpdoc-sheet__body .helpdoc {
+  max-width: none;
+  margin-top: 0;
+}
+@media (max-width: 640px) {
+  .helpdoc-sheet { padding: 12px; }
+  .helpdoc-sheet__card { width: 100%; max-height: 92vh; border-radius: 16px; }
+  .helpdoc-sheet__head { padding: 16px 18px 10px; }
+  .helpdoc-sheet__body { padding: 2px 18px 18px; }
+}
+@media (pointer: coarse) {
+  .helpdoc-sheet__x { width: 42px; height: 42px; font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .helpdoc-sheet,
+  .helpdoc-sheet__card { transition: none; }
+}
 
 /* 设置页里的滑杆（每日推荐跑马带速度）：标签左、滑杆吃满中间、右值收窄 */
 .setpage__row--range { gap: var(--sp-3); }
@@ -403,7 +538,46 @@ button.setpage__row:hover .setpage__caret { color: var(--ink); transform: transl
   accent-color: var(--ink);
   cursor: pointer;
 }
-.setpage__row--range .setpage__val { margin-left: 0; min-width: 2.4em; }
+/* 右值现在是「档位 · 倍数」，窄屏（/m 竖屏 354px）下不许折行，否则滑杆被挤到 90px 地板 */
+.setpage__row--range .setpage__val {
+  margin-left: 0;
+  min-width: 2.4em;
+  white-space: nowrap;
+}
+/* 来源选择器大小的实时预览（2026-11-20）：浅色长条里就一行「精选」，字号吃
+   :root 上的 --src-size。高度按最大档 40 × 1.214 × 1.1 + 上下内边距留死，
+   拖动放大时不把下面的行顶下去。放大比例和长条上按住标题一致（1.214）。 */
+.srcsize {
+  display: flex;
+  align-items: center;
+  height: 70px;
+  margin: 12px 0 16px;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: color-mix(in oklch, var(--ink, #17171a) 6%, transparent);
+  overflow: hidden;
+}
+.srcsize__label {
+  display: inline-block;
+  font-size: calc(var(--src-size, 28) * 1px);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: .01em;
+  padding: .15em .45em;
+  margin-left: -.45em;
+  border-radius: .45em;
+  white-space: nowrap;
+  transition: font-size 180ms var(--ease-out),
+              letter-spacing 180ms var(--ease-out),
+              background 160ms var(--ease-out),
+              box-shadow 160ms var(--ease-out);
+}
+.srcsize.is-pressed .srcsize__label {
+  font-size: calc(var(--src-size, 28) * 1.214 * 1px);
+  letter-spacing: -.01em;
+  background: color-mix(in oklch, currentColor 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, currentColor 15%, transparent);
+}
 
 /* ---------- 账号头像 ---------- */
 .setpage__avatar {
@@ -461,15 +635,40 @@ button.setpage__row:hover .setpage__caret { color: var(--ink); transform: transl
 .setpage__act:hover { color: var(--ink); border-color: var(--ink); }
 .setpage__act[hidden] { display: none; }
 
-/* ---------- 平台账号：网易云那行带头像，行下挂两个备用登录入口 ----------
-   七家同一级。只有网易云多一个头像和一行登录态说明，label-group 吃掉剩余宽度，
-   把昵称和登录/退出推到右边；其余六家还是「标签 · 限制 · 状态 · 按钮」。 */
+/* 设置里的三选一（形态歌词：原文 / 双文 / 译文）：一排等宽胶囊，
+   选中的那块加深底色、换成正文色。 */
+.setpage__seg { display: flex; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.setpage__seg button {
+  flex: 1 1 0; min-width: 0; height: 34px;
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: transparent; color: var(--ink-3);
+  font: inherit; font-size: 13.5px; cursor: pointer;
+  transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.setpage__seg button.is-on {
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+  border-color: transparent; color: var(--ink);
+}
+
+/* ---------- 平台账号：每行都是「色块 + 34px 图标位 + 两行文字」 ----------
+   网易云的 34px 位放账号头像，其余平台放自己的 logo（.setpage__src-mark）；
+   label-group 吃掉剩余宽度，把状态 / 登录 / 退出推到右边（2026-11-16 统一）。 */
 .setpage__row--src .setpage__label-group { flex: 1 1 auto; }
 .setpage__src-avatar {
   position: relative;
   flex: none;
   width: 34px;
   height: 34px;
+  /* 2026-11-16：非网易云平台在这个位子里放 logo，需要居中；
+     网易云的 img / 占位是绝对定位，不受影响。 */
+  display: grid;
+  place-items: center;
+}
+.setpage__src-mark {
+  width: 26px;
+  height: 26px;
+  object-fit: contain;
+  display: block;
 }
 /* 平台行左侧的品牌色块：颜色由 app.js 的 paintAccount 从 PLAT_BG 写进 --src-chip，
    CSS 只负责 30×30 圆角块，不再抄一套品牌 hex。 */
@@ -481,11 +680,17 @@ button.setpage__row:hover .setpage__caret { color: var(--ink); transform: transl
   border-radius: 8px;
   background: var(--src-chip, var(--rule));
   box-shadow: inset 0 0 0 1px oklch(0% 0 0 / .08);
+  /* 2026-11-16：色块里放平台 logo（平台管理 / 自定义音源行），
+     和 logo 一起才像一个应用图标；只有底色看不出是哪一家。 */
+  display: grid;
+  place-items: center;
+  align-self: center;
 }
+.setpage__src-chip img { width: 68%; height: 68%; object-fit: contain; display: block; }
 /* 用 .setcard 前缀压过下面 .setcard .setpage__avatar 的 56px */
 .setcard .setpage__src-avatar .setpage__avatar {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -669,8 +874,11 @@ button.setpage__row[aria-expanded="true"]:hover .setpage__caret { transform: rot
 }
 
 @media (max-width: 720px) {
-  /* 窄窗口：限制说明整行掉到第二行，别把名字挤成一列竖排 */
-  .src-limit { flex: 1 0 100%; order: 4; }
+  /* 2026-11-16：限制说明挪进 .setpage__label-group 后，旧的
+     `.src-limit { flex: 1 0 100%; order: 4 }` 对 grid 子项不再生效。
+     改成给文字组一个 180px 的 flex-basis：放不下就整组换到下一行，
+     名字和说明仍然是上下两行，不会被状态 / 按钮挤成竖排。 */
+  .setpage__row--src .setpage__label-group { flex: 1 1 180px; }
 }
 
 .qq-qr {
@@ -857,6 +1065,455 @@ button.setpage__row[aria-expanded="true"]:hover .setpage__caret { transform: rot
   color: oklch(100% 0 0 / 0.5);
 }
 .dstages__empty[hidden] { display: none; }
+
+/* 2026-11-16：形态分类目录（高对比极简目录，抽屉 #drawer-stage-list 与形态页 #stage-menu-pop 共用）
+   去掉花哨色块和整块灰底；接近纯黑深底（0.96）+ 中等字重白字（500），盖住亮封面也清晰锐利。
+   外框定高不滚，只滚下面的列表 .dstages__pane（滚动条样式见「形态列表」那节）。
+   只用 rgba() 和 opacity / transform，不加 backdrop-filter。 */
+#drawer-stage-list {
+  height: min(58vh, 470px);
+  max-height: none;
+  gap: 0;
+  padding: 0;
+  background: rgba(12, 12, 17, 0.96);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 18px 44px rgba(0, 0, 0, 0.42);
+}
+.dstages__top {
+  flex: none;
+  padding: 10px 14px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+#drawer-stage-list .dstages__search,
+#stage-menu-pop .dstages__search {
+  position: static;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.52);
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+#drawer-stage-list .dstages__search:focus-within,
+#stage-menu-pop .dstages__search:focus-within {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.86);
+}
+#drawer-stage-list .dstages__search input,
+#stage-menu-pop .dstages__search input {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #f4f5f8;
+}
+#drawer-stage-list .dstages__search input::placeholder,
+#stage-menu-pop .dstages__search input::placeholder { color: rgba(255, 255, 255, 0.38); }
+.dstages__count {
+  flex: none;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.42);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- 页签行（2026-11-16 重做） ----------
+   滑块里只放分类页签；＋ 和 随机 是同一行末端的两个独立按钮（用户选定的方案，
+   不塞进滑块）。tabbar 抬到虚化遮罩上面：长按归类时整块列表虚化，只有这排
+   页签保持清晰，作为投放目标。 */
+#drawer-stage-list,
+#stage-menu-pop-list { position: relative; }
+.dstages__tabbar {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.dstages__tabbar .dstages__cats {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dstages__random,
+.dstages__add {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.78);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  /* 只动 transform：颜色切换直接生效，不额外做过渡 */
+  transition: transform 140ms var(--ease-out);
+}
+.dstages__add {
+  width: 28px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+.dstages__random:hover,
+.dstages__add:hover { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+.dstages__random:active,
+.dstages__add:active { transform: scale(0.94); }
+.dstages__random:focus-visible,
+.dstages__add:focus-visible { outline: 1px solid rgba(255, 255, 255, 0.55); outline-offset: 2px; }
+
+/* ---------- 长按归类的虚化（2026-11-16） ----------
+   不许用 backdrop-filter：大厅 WebGL 流色 + 22px 背景模糊会把大厅卡死（项目已查明）。
+   这里用「半透明遮罩 + 给列表容器 filter: blur()」——页签行在 tabbar 里，
+   z-index 抬到遮罩之上，保持清晰。动画只碰 opacity（遮罩淡入）。 */
+.dstages__veil {
+  position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: rgba(5, 5, 9, 0.5);
+  opacity: 0;
+  transition: opacity 160ms var(--ease-out);
+}
+.is-holdmode .dstages__veil { opacity: 1; }
+.is-holdmode .dstages__search,
+.is-holdmode .dstages__pane { filter: blur(6px); }
+
+/* 拖动到页签上：高亮当前悬停的页签（不移动滑块，避免真的切分类） */
+.rubber-segment__item.is-drop {
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6);
+  color: #ffffff;
+}
+/* 落在计算型页签上：抖一下表示「不能放」，不改数据 */
+@keyframes dstagesDeny {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  30% { transform: translate3d(-3px, 0, 0); }
+  65% { transform: translate3d(3px, 0, 0); }
+}
+.rubber-segment__item.is-drop-deny { animation: dstagesDeny 280ms var(--ease-out); }
+
+/* 收藏星标：列表里只给已收藏的形态显示 */
+.stage-item__fav {
+  flex: none;
+  display: none;
+  font-size: 11px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.55);
+}
+.stage-item.is-fav .stage-item__fav { display: inline-block; }
+.stage-item.is-on .stage-item__fav { color: rgba(17, 18, 22, 0.55); }
+#drawer-stage-list .dstages__grid--c .stage-item,
+#stage-menu-pop .dstages__grid--c .stage-item {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ---------- 长按归类 / 新建分类的悬浮层（2026-11-16） ----------
+   都挂在 body 上：选择器 root 每次 paint() 都会 innerHTML 重建，放里面会被冲掉。
+   层级高于抽屉（40）/ 模态（200）；动画只碰 transform / opacity。 */
+.stage-dragcard {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1001;
+  max-width: 220px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  background: rgba(242, 243, 245, 0.96);
+  color: #17181c;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  will-change: transform;
+}
+.stage-holdmenu {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  width: 190px;
+  padding: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(18, 18, 24, 0.98);
+  color: #f4f5f8;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.stage-holdmenu__t {
+  margin: 2px 6px 7px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stage-holdmenu__btn {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms var(--ease-out);
+}
+.stage-holdmenu__btn:hover { background: rgba(255, 255, 255, 0.16); color: #ffffff; }
+.stage-holdmenu__btn:active { transform: scale(0.97); }
+.stage-holdmenu__hint {
+  margin: 7px 6px 1px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.42);
+}
+.stage-newcat {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  width: 226px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(18, 18, 24, 0.98);
+  color: #f4f5f8;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+}
+.stage-newcat__t {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.stage-newcat__i {
+  box-sizing: border-box;
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.07);
+  color: #ffffff;
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+.stage-newcat__i:focus { border-color: rgba(255, 255, 255, 0.4); }
+.stage-newcat__err {
+  margin: 6px 2px 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #ff9b9b;
+}
+.stage-newcat__err[hidden] { display: none; }
+.stage-newcat__acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 9px;
+}
+.stage-newcat__btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.8);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.stage-newcat__btn:hover { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+.stage-newcat__btn--ok {
+  border-color: #f2f3f5;
+  background: #f2f3f5;
+  color: #17181c;
+  font-weight: 600;
+}
+.stage-newcat__btn--ok:hover { background: #ffffff; color: #17181c; }
+.stage-holdtip {
+  position: fixed;
+  left: 50%;
+  bottom: 108px;
+  z-index: 1002;
+  padding: 7px 13px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(18, 18, 24, 0.96);
+  color: #f4f5f8;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(-50%, 6px, 0);
+  transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out);
+}
+.stage-holdtip.is-on {
+  opacity: 1;
+  transform: translate3d(-50%, 0, 0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rubber-segment__item.is-drop-deny { animation: none; }
+  .stage-holdtip { transition-duration: 1ms; }
+}
+
+/* 分类：Rubber Segment（2026-11-16 替换原来的纯文字索引）
+   结构和物理在 public/hall/rubber-segment.js / .css；这里只放它在深色抽屉里的
+   配色和上下间距。滑块必须是一块实心浅色，文字副本经过时翻成深色。
+   组件默认配色在 hall/rubber-segment.css，下面这层是抽屉局部覆盖。 */
+.dstages__cats {
+  --dstages-rs-track: rgba(255, 255, 255, 0.055);
+  --dstages-rs-thumb: #f2f3f5;
+  --dstages-rs-text: rgba(255, 255, 255, 0.46);
+  --dstages-rs-active: #17181c;
+  margin: 9px 0 9px;
+}
+#drawer-stage-list .dstages__cats::-webkit-scrollbar,
+#stage-menu-pop .dstages__cats::-webkit-scrollbar { display: none; width: 0; height: 0; }
+/* 旧纯文字页签的类名保留：缓存页面 / 回退分支还在引用，新控件不再渲染这些节点。
+   新结构用 .rubber-segment__*（见 hall/rubber-segment.css），两套不冲突。 */
+.dstages__slash {
+  flex: none;
+  margin: 0 9px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.16);
+  user-select: none;
+  pointer-events: none;
+}
+.dstages__cat {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: rgba(255, 255, 255, 0.44);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 180ms var(--ease-out), transform 140ms var(--ease-out);
+}
+.dstages__cat:hover { color: rgba(255, 255, 255, 0.86); }
+.dstages__cat:active { transform: scale(0.95); }
+.dstages__cat.is-on { color: #ffffff; font-weight: 600; }
+.dstages__cat:focus-visible { outline: 1px solid rgba(255, 255, 255, 0.55); outline-offset: 2px; }
+
+/* 切分类时的微动效（只动 transform / opacity） */
+@keyframes dstagesSwap {
+  from { opacity: 0; transform: translate3d(var(--swap-x, 0px), 4px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+.dstages__grid--c.is-swap,
+.dstages__pane .dstages__empty.is-swap {
+  animation: dstagesSwap 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dstages__grid--c.is-swap,
+  .dstages__pane .dstages__empty.is-swap { animation: none; }
+  .dstages__cat { transition-duration: 1ms; }
+}
+
+/* 列表：纯深底 + 3 列留白网格，无杂色、无表格框线 */
+.dstages__pane {
+  position: relative;          /* 当前项 offsetTop 以它为准，展开时把当前项滚到中间 */
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 10px 12px 14px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.dstages__grid--c {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px 10px;
+}
+.dstages__grid--c[hidden] { display: none; }
+#drawer-stage-list .dstages__grid--c .stage-item,
+#stage-menu-pop .dstages__grid--c .stage-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  height: 31px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-align: left;
+  cursor: pointer;
+}
+#drawer-stage-list .dstages__grid--c .stage-item[hidden],
+#stage-menu-pop .dstages__grid--c .stage-item[hidden] { display: none; }
+#drawer-stage-list .dstages__grid--c .stage-item:hover,
+#stage-menu-pop .dstages__grid--c .stage-item:hover { background: rgba(255, 255, 255, 0.08); color: #ffffff; }
+#drawer-stage-list .dstages__grid--c .stage-item.is-on,
+#stage-menu-pop .dstages__grid--c .stage-item.is-on {
+  background: #ffffff;
+  color: #111216;
+  font-weight: 600;
+}
+#drawer-stage-list .dstages__grid--c .stage-item:focus-visible,
+#stage-menu-pop .dstages__grid--c .stage-item:focus-visible { outline: 1px solid rgba(255, 255, 255, 0.65); outline-offset: -1px; }
+#drawer-stage-list .dstages__grid--c .stage-item__id,
+#stage-menu-pop .dstages__grid--c .stage-item__id {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.36);
+}
+#drawer-stage-list .dstages__grid--c .stage-item.is-on .stage-item__id,
+#stage-menu-pop .dstages__grid--c .stage-item.is-on .stage-item__id { color: rgba(17, 18, 22, 0.48); }
+#drawer-stage-list .dstages__grid--c .stage-item__name,
+#stage-menu-pop .dstages__grid--c .stage-item__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dstages__ok { flex: none; width: 13px; height: 13px; color: #111216; display: none; }
+#drawer-stage-list .stage-item.is-on .dstages__ok,
+#stage-menu-pop .stage-item.is-on .dstages__ok { display: block; }
+.dstages__pane .dstages__empty { margin: 28px 12px; line-height: 1.6; color: rgba(255, 255, 255, 0.56); }
+
+/* 手机：列表收成 2 列（只走触屏分支） */
+@media (max-width: 1280px) and (pointer: coarse) {
+  #drawer-stage-list { height: min(62vh, 480px); }
+  #stage-menu-pop { height: min(62vh, 460px); max-height: calc(100vh - 88px); }
+  .dstages__cats { flex-wrap: nowrap; overflow-x: auto; }
+  .dstages__grid--c { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px 8px; }
+  #drawer-stage-list .dstages__grid--c .stage-item,
+  #stage-menu-pop .dstages__grid--c .stage-item { height: 36px; }
+}
 
 #drawer-stage-list .stage-item {
   display: block;
@@ -1297,7 +1954,7 @@ button.setpage__row[aria-expanded="true"]:hover .setpage__caret { transform: rot
    这一层是临时的，动画结束就移除（见 app.js 的 runTrackTransition）。
    ========================================================================== */
 .tran {
-  position: fixed; inset: 0; z-index: 200;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 200;
   pointer-events: none;                /* 动画期间别挡住任何点击 */
   overflow: hidden;
   transition: opacity 380ms cubic-bezier(.4,0,.6,1);
@@ -1309,7 +1966,7 @@ button.setpage__row[aria-expanded="true"]:hover .setpage__caret { transform: rot
    而它俩又都是由色条颜色（--bar-a / --bar-b）生成的，所以整条链路同源：
      行内色条 → 拉起来铺满 → 落定成背景，全程一个色系，只是浓度在变。 */
 .tran__wash {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   background:
     radial-gradient(122% 96% at 16% 10%,
       color-mix(in oklch, var(--bar-a, oklch(72% 0.16 264)) 56%, oklch(100% 0 0)) 0%, transparent 62%),
@@ -1323,7 +1980,7 @@ button.setpage__row[aria-expanded="true"]:hover .setpage__caret { transform: rot
    扫行阶段它就是"色条本身"，进入扩大之后淡出，落定为上面那份背景。
    两层色相同源（都来自 --bar-a / --bar-b），所以淡出只变浓淡、不变色调。 */
 .tran__wash-strong {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   background: linear-gradient(270deg,
     var(--bar-b, oklch(80% 0.02 270)) 0%,
     var(--bar-a, oklch(88% 0.02 270)) 38%,
@@ -1669,7 +2326,7 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
 
 /* 抽屉下方的点击关闭层：#view-now 的直属子级，inset:0 = 整个播放页 */
 .drawer__scrim {
-  position: absolute; inset: 0; z-index: 29;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 29;
   background: transparent;
 }
 .drawer__scrim[hidden] { display: none; }
@@ -1748,7 +2405,7 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
   box-shadow: inset 0 0 3px 1px oklch(100% 0 0 / 0.5), 0 30px 70px oklch(21% 0.022 270 / 0.26);
 }
 .disc__img { width: 100%; height: 100%; object-fit: cover; }
-.disc__glow { position: absolute; inset: 0; background: linear-gradient(160deg, oklch(100% 0 0 / 0.22) 0%, transparent 42%); pointer-events: none; }
+.disc__glow { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: linear-gradient(160deg, oklch(100% 0 0 / 0.22) 0%, transparent 42%); pointer-events: none; }
 
 .now__meta { text-align: center; max-width: 100%; }
 .now__title {
@@ -1841,7 +2498,7 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
    比再加一块玻璃便宜得多。注意别用负 inset：.peek 要 overflow:hidden 才能做高度过渡，
    负 inset 会被裁掉（还会把 scrollHeight 撑大）。 */
 .peek::before {
-  content: ""; position: absolute; inset: 0; z-index: -1;
+  content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: -1;
   background: radial-gradient(closest-side, oklch(100% 0 0 / 0.6), oklch(100% 0 0 / 0.32) 60%, transparent 88%);
   pointer-events: none;
 }
@@ -1964,8 +2621,10 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
 .disc { will-change: transform; }
 .disc.is-beat { animation: discPulse 240ms var(--ease-out); }
 @keyframes discPulse {
-  0% { transform: scale(1.035); }
-  100% { transform: scale(1); }
+  /* 用独立的 scale 属性而不是 transform：手机播放页的陀螺仪倾斜写在
+     transform 上，transform 动画会把倾斜整条顶掉（每拍闪一下）。 */
+  0% { scale: 1.035; }
+  100% { scale: 1; }
 }
 
 /* ==========================================================================
@@ -1999,7 +2658,7 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
    只留一条 1px 顶线和很轻的模糊 —— 按钮和进度都落在"平"的表面上，
    才像系统里的播放器，而不是一个浮起来的玻璃面板。 */
 .player {
-  position: fixed; inset: auto 0 0; z-index: 60;
+  position: fixed; top: auto; right: 0; bottom: 0; left: 0; z-index: 60;
   height: var(--player-h);
   background: color-mix(in oklab, var(--paper-2) 88%, transparent);
   -webkit-backdrop-filter: blur(24px) saturate(1.1);
@@ -2024,7 +2683,7 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
 }
 .np__art:hover { transform: scale(1.04); }
 .np__art img { width: 100%; height: 100%; object-fit: cover; }
-.np__art-ph { position: absolute; inset: 0; margin: auto; width: 17px; height: 17px; color: var(--ink-3); }
+.np__art-ph { position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: auto; width: 17px; height: 17px; color: var(--ink-3); }
 .np__art img:not([hidden]) ~ .np__art-ph { display: none; }
 
 
@@ -2083,13 +2742,51 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
 }
 .badge.is-action:hover { background: oklch(100% 0 0 / 1); }
 
+/* 试听片段提示条（2026-11-15）：只在放 30 秒片段时浮出来一次，把原因说清楚。
+   颜色全用 rgba（不依赖 oklch）——这条提示最可能出现在老内核手机上，
+   而 oklch 在老内核里整条声明会失效，提示会变成透明的一层。 */
+.preview-tip {
+  position: fixed; left: 50%; bottom: calc(var(--player-h, 84px) + 16px);
+  transform: translate(-50%, 10px);
+  max-width: min(560px, calc(100vw - 40px));
+  padding: 10px 16px; border-radius: 12px;
+  background: rgba(24, 26, 30, 0.92); color: #f4f5f7;
+  font-size: 13px; line-height: 1.55; text-align: center;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  opacity: 0; pointer-events: none; z-index: 90;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.preview-tip.is-on { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; cursor: pointer; }
+/* 播放页底部换成 dock，站位跟着它走，别压在进度条上 */
+body.is-now .preview-tip { bottom: calc(var(--dock-h, 76px) + 16px); }
+
+/* VIP 提示（2026-11-17）：VIP 曲目 + 当前平台账号没 VIP 时，右下角浮一条。
+   和上面的试听提示分两处：那条在底部居中解释「为什么只有片段」，这条只说
+   「为什么放不了」，两条可能同时出现，所以靠右、z-index 再高一格。
+   颜色用 rgba（老内核 oklch 会整条失效）；进出只动 opacity / transform，
+   不用 backdrop-filter（铺色态 WebGL + 模糊会卡死大厅）。 */
+.vip-tip {
+  position: fixed; right: 24px; bottom: calc(var(--player-h, 84px) + 16px);
+  transform: translateY(10px);
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 10px 16px; border-radius: 12px;
+  background: rgba(24, 26, 30, 0.95); color: #f4f5f7;
+  font-size: 13px; line-height: 1.55;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.26);
+  opacity: 0; pointer-events: none; z-index: 91;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.vip-tip.is-on { opacity: 1; transform: translateY(0); pointer-events: auto; cursor: pointer; }
+/* 播放页底部换成 dock，站位跟着它走，别压在进度条上 */
+body.is-now .vip-tip { bottom: calc(var(--dock-h, 76px) + 16px); }
+
 /* ==========================================================================
    登录弹窗
    ========================================================================== */
 /* 用类切换显示而不是 [hidden]：hidden 会让玻璃在 0×0 时生成 1×1 位移贴图，
    打开后折射边缘全错位。这里保留布局尺寸，只切 opacity/visibility。 */
 .modal {
-  position: fixed; inset: 0; z-index: 100;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 100;
   display: grid; place-items: center;
   padding: var(--sp-5);
   background: oklch(21% 0.022 270 / 0.34);
@@ -2164,10 +2861,70 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
    只在 #view-stage.is-hud-armed 时出现；点一下 app.js 就唤醒浮层并撤掉它，
    所以这次点击不会漏进形态里。 */
 .stage-tap {
-  position: absolute; inset: 0; z-index: 1;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 1;
   display: none; cursor: default; touch-action: manipulation;
 }
 #view-stage.is-hud-armed .stage-tap { display: block; }
+
+/* ---- 形态底部电影字幕（2026-11-19）----
+   设置页「翻译 → 形态字幕」打开后由 app.js 的 StageSubtitle 创建并加 .is-on。
+   宿主自己的图层：z-index 1（和点击层同层、低于操作条 z-index 2），
+   pointer-events:none 不挡任何点击；不用 backdrop-filter（形态页要省 GPU）。
+   双语：原文 15-18px 在上、译文 17-21px 在下；单语：只剩一行（用译文那行的字号）。 */
+.stage-sub {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(18px, 4.5vh, 46px);
+  transform: translateX(-50%);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  /* 字幕有多长盒子就多宽，再被 max-width 截住；不写 width 的话绝对定位
+     在 left:50% 下按剩余的一半宽度收缩，长句会比预期更早换行。 */
+  width: max-content;
+  max-width: min(78vw, 960px);
+  padding: 10px 18px;
+  border-radius: 12px;
+  background: oklch(12% 0.02 270 / 0.62);
+  color: oklch(99% 0.004 270);
+  text-align: center;
+  text-shadow: 0 1px 3px oklch(0% 0 0 / 0.7);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 240ms var(--ease-out), transform 240ms var(--ease-out);
+}
+.stage-sub.is-on { opacity: 1; }
+.stage-sub__line {
+  margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+.stage-sub__line[hidden] { display: none; }
+.stage-sub__line--orig {
+  font-size: clamp(15px, 1.4vw, 18px);
+  line-height: 1.5;
+  color: oklch(96% 0.004 270 / 0.86);
+}
+.stage-sub__line--tr {
+  font-size: clamp(17px, 1.7vw, 21px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+/* 手机：字号略小，整体抬高避开底部迷你播放器和手势条。
+   Android WebView 是 pointer:coarse，窄桌面窗口不跟着抬。 */
+@media (max-width: 560px) and (pointer: coarse) {
+  .stage-sub {
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 86px);
+    max-width: 88vw;
+    padding: 8px 14px;
+    border-radius: 10px;
+  }
+  .stage-sub__line--orig { font-size: 14px; }
+  .stage-sub__line--tr { font-size: 16px; }
+}
 
 .stage__frame {
   position: absolute; top: 0; left: 0;
@@ -2177,7 +2934,23 @@ body.now-enter .drawer__body > *:nth-child(3) { animation-delay: 420ms; }
   transform: scale(calc(1 / var(--stage-scale, 1)));
   transform-origin: 0 0;
   border: 0; display: block; background: #05060a;
+  z-index: 1;
+  /* 和海报做交叉淡入：iframe 里形态自己那层黑底也要等到 ready
+     （形态侧声明的第一帧）才露面，否则透明 iframe 元素也挡不住文档自身的黑 */
+  transition: opacity 280ms var(--ease-out);
 }
+
+/* 进场海报：iframe 黑底在形态第一帧之前会露出来（切横屏时尤其明显）。
+   loading 期间让 poster 铺满、iframe 透明，ready 后 app.js 摘掉 is-on 淡出。
+   海报用的是形态长廊同一套预览图，没有预览图的用户形态就用底色。 */
+.stage-poster {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 0;
+  background: #05060a center / cover no-repeat;
+  opacity: 0; pointer-events: none;
+  transition: opacity 280ms var(--ease-out);
+}
+.stage-poster.is-on { opacity: 1; }
+body.is-stage-loading .stage__frame { background: transparent; opacity: 0; }
 
 /* ---- 形态页操作条：和播放页 .now__bar 同款 ----
    左侧「返回」、右侧「当前歌曲 + 形态」，都是 .btn--ghost.lg-surface 的胶囊玻璃。
@@ -2207,6 +2980,41 @@ body.is-stage .stagebar .btn {
 /* 窗口三键在右上角占 138px，右边让开（和播放页顶栏一致） */
 body.is-desktop .stagebar { padding-right: 160px; }
 
+/* ---- 形态页顶栏按钮大小（2026-11-17）----
+   设置页「外观 → 形态页按钮大小」把倍数写到 #view-stage 的
+   --stage-btn-scale（见 app.js 的 applyStageBtnSize）。
+   这里只改顶栏那三个胶囊（返回 / 设置 / 形态，以及以后直接放进这一排的
+   .btn），歌曲胶囊里的切歌键（.snow__key）、队列倒三角、形态下拉都不受影响。
+   · 不用 transform: scale()：命中区、lg-surface 玻璃底、相邻间距都会失真；
+   · 1× 的基值照抄改之前的实际计算值：height 40px、padding-inline 20px
+     （≤760 是 16px、≤480 是 12px，下面按同样断点换基数）、gap 8px、
+     font-size 14px。所以 --stage-btn-scale: 1 时和改之前逐像素一致；
+   · 图标 .ico 是 1.05em，字号一变图标自动跟，不会小图标配大胶囊；
+   · 圆角本来就是 .btn 的 --r-full 胶囊，不随倍数变。
+   · 影院模式（#view-stage.is-cinema）自带 36px 圆形按钮，选择器特异度比
+     这一组高，不会被覆盖。 */
+#view-stage { --stage-btn-scale: 1; }
+.stagebar > .btn,
+.sbar-right > .btn {
+  --stage-btn-px: var(--sp-5);
+  height: calc(40px * var(--stage-btn-scale, 1));
+  padding-inline: calc(var(--stage-btn-px) * var(--stage-btn-scale, 1));
+  gap: calc(var(--sp-2) * var(--stage-btn-scale, 1));
+  font-size: calc(var(--text-md) * var(--stage-btn-scale, 1));
+}
+@media (max-width: 760px) {
+  .stagebar > .btn,
+  .sbar-right > .btn { --stage-btn-px: var(--sp-4); }
+}
+@media (max-width: 480px) {
+  .stagebar > .btn,
+  .sbar-right > .btn { --stage-btn-px: var(--sp-3); }
+}
+
+/* 陀螺仪「回正」按钮（2026-11-17）：.btn 自己写了 display:inline-flex，
+   不压住 UA 的 [hidden] 规则就藏不住。尺寸 / 内边距仍然吃上面的 --stage-btn-scale。 */
+#stage-gyro-btn[hidden] { display: none; }
+
 .sbar-right {
   position: relative;
   margin-left: auto;
@@ -2214,7 +3022,26 @@ body.is-desktop .stagebar { padding-right: 160px; }
   pointer-events: auto;
 }
 /* 隐形热区：往左、往上下各扩一圈，指针进这个范围就算"靠近" */
-.sbar-right::before { content: ''; position: absolute; inset: -14px -10px -22px -300px; }
+.sbar-right::before { content: ''; position: absolute; top: -14px; right: -10px; bottom: -22px; left: -300px; }
+
+/* ---- 放大后的布局让位（2026-11-17）----
+   按钮按倍数变大后，窄屏（手机横屏 844 也在这段里）一行摆不下。
+   选择「换行」而不是缩小按钮或压扁歌曲胶囊：
+   · ≤1000px：右簇允许换行，放不下时「形态」按钮掉到下一行（仍右对齐），
+     三个按钮、歌曲胶囊都完整可见，不会溢出屏幕右边；
+   · ≤700px：连「返回 + 右簇」都放不下时，整簇可以再掉一行。
+   1× 时内容本来放得下，flex-wrap 不会造成任何视觉变化。
+   min-width:0 是为了让 .sbar-right 能收缩到小于内容宽度，由内部的 wrap 接住。 */
+@media (max-width: 1000px) {
+  .sbar-right {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+  }
+}
+@media (max-width: 700px) {
+  .stagebar { flex-wrap: wrap; }
+}
 
 /* 当前歌曲：收起时就是一块 1:1 的封面玻璃砖（64×64），
    指针靠近右侧那一簇横向展开成迷你播放器（歌名 / 切歌 / 时间轴）。 */
@@ -2236,7 +3063,7 @@ body.is-desktop .stagebar { padding-right: 160px; }
 }
 .snow__art img { width: 100%; height: 100%; object-fit: cover; }
 .snow__art img[hidden] { display: none; }
-.snow__art .ico { position: absolute; inset: 0; margin: auto; width: 18px; height: 18px; color: oklch(100% 0 0 / 0.6); }
+.snow__art .ico { position: absolute; top: 0; right: 0; bottom: 0; left: 0; margin: auto; width: 18px; height: 18px; color: oklch(100% 0 0 / 0.6); }
 
 /* 展开的正文：宽度 0 → 286，内容自带省略号（不会把胶囊撑开） */
 .snow__body {
@@ -2280,7 +3107,9 @@ body.is-desktop .stagebar { padding-right: 160px; }
   font-size: 9.5px; width: 30px; flex: none;
   color: oklch(100% 0 0 / 0.55); font-variant-numeric: tabular-nums;
 }
-.snow__prog .time:last-child { text-align: right; }
+/* 2026-11-16：总时长后面多了队列按钮，:last-child 不再是 #stage-d。
+   右对齐只能点名总时长，否则按钮会被当成“最后一个时间”顶到右边。 */
+.snow__prog #stage-d { text-align: right; }
 .snow__track {
   position: relative; flex: 1 1 auto; min-width: 0;
   height: 12px; display: flex; align-items: center;
@@ -2411,7 +3240,7 @@ body.is-desktop #view-stage.is-cinema .stagebar { padding-right: 160px; }
   padding: 0 8px 0 10px;
 }
 /* 悬停热区也收窄：影院模式下不需要往左扩 300px，避免误触展开 */
-#view-stage.is-cinema .sbar-right::before { inset: -10px -8px -16px -80px; }
+#view-stage.is-cinema .sbar-right::before { top: -10px; right: -8px; bottom: -16px; left: -80px; }
 
 /* 浅色风景：圆点换成半透明白，图标压深（和 is-on-light 那套反色一致） */
 #view-stage.is-cinema #stage-hud.is-on-light .btn,
@@ -2439,49 +3268,31 @@ body.is-stage.is-chrome-idle .win-controls {
 body.is-stage.is-chrome-idle,
 body.is-stage.is-chrome-idle .stage__frame,
 body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
+/* 空闲时盖在形态上的透明点击层要继承光标：它自己写了 cursor 就会把
+   body 的 cursor:none 顶掉，光标停在形态上永远不消失（2026-11-21 修）。 */
+body.is-stage.is-chrome-idle .stage-tap { cursor: none; }
 
-/* ---- 形态下拉：贴着「形态」按钮往下，两列 65 项 ---- */
+/* ---- 形态下拉：贴着「形态」按钮往下，和抽屉共用分类目录（高对比纯深底，不加 backdrop-filter） ---- */
 .smenu {
   position: absolute; top: calc(100% + 10px); right: 0; z-index: 6;
-  width: 402px; max-height: min(58vh, 520px);
+  width: min(560px, calc(100vw - 28px));
+  height: min(60vh, 470px); max-height: calc(100vh - 96px);
   display: flex; flex-direction: column;
-  padding: 8px;
+  padding: 0; overflow: hidden;
   border-radius: 18px;
-  background: oklch(13% 0.02 270 / 0.86);
-  -webkit-backdrop-filter: blur(26px) saturate(1.4);
-  backdrop-filter: blur(26px) saturate(1.4);
-  box-shadow: inset 0 0 0 1px oklch(100% 0 0 / 0.12), 0 26px 64px oklch(0% 0 0 / 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 12, 17, 0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 26px 64px rgba(0, 0, 0, 0.55);
   opacity: 0; transform: translateY(-6px) scale(0.98); transform-origin: top right;
   transition: opacity 180ms var(--ease-out), transform 220ms cubic-bezier(0.2, 0.9, 0.25, 1);
 }
+body.is-desktop .smenu { max-width: calc(100vw - 176px); }
 .smenu[hidden] { display: none; }
 .smenu.is-open { opacity: 1; transform: none; }
 
 .smenu__list {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
-  overflow-y: auto; overscroll-behavior: contain;
-}
-.smenu__i {
-  display: flex; align-items: center; gap: 8px;
-  height: 32px; padding: 0 9px; border-radius: 9px;
-  color: oklch(96% 0 0 / 0.78);
-  font-size: 12.5px;
-  text-align: left;
-  transition: background 140ms var(--ease-out), color 140ms var(--ease-out);
-}
-.smenu__i:hover { background: oklch(100% 0 0 / 0.1); color: oklch(100% 0 0); }
-.smenu__i.is-on { background: oklch(100% 0 0 / 0.14); color: oklch(100% 0 0); }
-.smenu__id {
-  flex: none; width: 24px;
-  font-family: var(--font-mono); font-size: 10px;
-  color: oklch(100% 0 0 / 0.45);
-}
-.smenu__i.is-on .smenu__id { color: oklch(100% 0 0 / 0.7); }
-.smenu__name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.smenu__list::-webkit-scrollbar { width: 8px; }
-.smenu__list::-webkit-scrollbar-thumb {
-  background: oklch(100% 0 0 / 0.22); border-radius: 4px;
-  border: 2px solid transparent; background-clip: content-box;
+  display: flex; flex-direction: column;
+  flex: 1 1 auto; min-height: 0; overflow: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2492,7 +3303,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
    全屏黑底、无白色面板；赤道格子宽、两极格子窄，横向像地球一样无限转。
    动画只用 transform / opacity；球面由 JS 逐格投影，不用 CSS 3D 球。 */
 .stagepick {
-  position: fixed; inset: 0; z-index: 120;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 120;
   background: #050506;
   color: oklch(94% 0.004 270);
   opacity: 0; visibility: hidden;
@@ -2503,7 +3314,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
 
 /* 细线网格：11 列，只在参考站给出的 4 条位置画线 */
 .stagepick__lines {
-  position: absolute; inset: 0; z-index: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 0;
   pointer-events: none;
   background-image: linear-gradient(oklch(100% 0 0 / 0.085), oklch(100% 0 0 / 0.085));
   background-size: 1px 100%;
@@ -2607,7 +3418,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
 
 /* 球面视口：铺满整屏，header 盖在上面；拖动由 pointer 事件接管 */
 .stagepick__viewport {
-  position: absolute; inset: 0; z-index: 1;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 1;
   overflow: hidden;
   touch-action: none;
   cursor: grab;
@@ -2617,7 +3428,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
 }
 .stagepick__viewport.is-dragging { cursor: grabbing; }
 .stagepick__orb {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   contain: layout paint style;
   transform: translateZ(0);
 }
@@ -2636,7 +3447,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
 }
 .pickcell--wide { width: 320px; height: 176px; }
 .pickcell__art {
-  position: absolute; inset: 1px;   /* 组内约 1% 的细缝，接近参考站的 1.064% */
+  position: absolute; top: 1px; right: 1px; bottom: 1px; left: 1px;   /* 组内约 1% 的细缝，接近参考站的 1.064% */
   overflow: hidden;
   background:
     radial-gradient(120% 120% at 30% 20%, #11131a, #08090d 62%, #050506);
@@ -2644,7 +3455,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
   transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .pickcell__art::after {
-  content: ''; position: absolute; inset: 0; z-index: 3;
+  content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 3;
   pointer-events: none;
   background: linear-gradient(180deg, transparent 55%, oklch(4% 0.01 270 / 0.62));
   opacity: 0;
@@ -2694,7 +3505,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
 
 /* 失败 / 空壳：显示编号，不拖垮整颗球 */
 .pickcell__fail {
-  position: absolute; inset: 0; z-index: 2;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2;
   display: grid; place-items: center;
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.18em;
   color: oklch(94% 0.004 270 / 0.4);
@@ -2740,7 +3551,7 @@ body.is-stage.is-chrome-idle .drag-strip { cursor: none; }
 
 /* ---- 第一次点击后的整屏预览：黑底、细线、同一 stage 的实时画面 ---- */
 .stagepick__preview {
-  position: absolute; inset: 0; z-index: 10;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 10;
   display: flex; align-items: center; justify-content: center;
   padding: clamp(18px, 3vh, 34px) clamp(20px, 5vw, 64px);
   background: #050506;
@@ -2907,7 +3718,7 @@ html.is-picking, html.is-picking body { overflow: hidden; }
 
 @media (max-width: 760px) {
   .stagebar { padding-inline: var(--sp-3); }
-  .sbar-right::before { inset: -12px -6px -18px -140px; }
+  .sbar-right::before { top: -12px; right: -6px; bottom: -18px; left: -140px; }
   .snow__pill { max-width: 200px; }
   .topbar__inner { grid-template-columns: auto minmax(0, 1fr) auto; }
 }
@@ -3052,7 +3863,7 @@ body.is-now .peek { display: none; }
 .now-bg, .now-veil { display: none; }
 body.is-now .now-bg {
   display: block;
-  position: absolute; inset: -60px; z-index: 0;
+  position: absolute; top: -60px; right: -60px; bottom: -60px; left: -60px; z-index: 0;
   background-size: cover; background-position: center;
   filter: blur(64px) saturate(155%);
   opacity: 0.62;
@@ -3062,7 +3873,7 @@ body.is-now .now-bg {
 }
 body.is-now .now-veil {
   display: block;
-  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 1; pointer-events: none;
   background: linear-gradient(180deg,
     oklch(9% 0.015 270 / 0.34) 0%,
     oklch(7% 0.015 270 / 0.66) 44%,
@@ -3114,7 +3925,7 @@ body.is-now .disc__glow { display: none; }
 
 /* 悬停才出现的播放/暂停（裸的，不加底板） */
 .disc__cue {
-  position: absolute; inset: 0; display: grid; place-items: center;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center;
   color: oklch(100% 0 0 / 0.95);
   background: oklch(0% 0 0 / 0.26);
   opacity: 0;
@@ -3293,7 +4104,7 @@ body.is-now .now__bar {
   transition: opacity 260ms var(--ease-apple);
 }
 body.is-now .now__bar::before {
-  content: ''; position: absolute; inset: 0; pointer-events: none;
+  content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; pointer-events: none;
   background: linear-gradient(to bottom, oklch(6% 0.01 270 / 0.3), transparent);
 }
 body.is-now .now__bar:hover,
@@ -3332,7 +4143,7 @@ body.is-now .dock {
 }
 .dock__art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .dock__cue {
-  position: absolute; inset: 0; display: grid; place-items: center;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center;
   color: oklch(100% 0 0 / 0.95); background: oklch(0% 0 0 / 0.32);
   opacity: 0; transition: opacity 180ms var(--ease-apple);
 }
@@ -3352,7 +4163,7 @@ body.is-playing .dock__cue-pause { display: block; }
 }
 .dock__bar:hover .dock__paint { filter: brightness(1.05); }
 .dock__paint {
-  position: absolute; inset: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0;
   background: linear-gradient(90deg,
     color-mix(in oklab, var(--bar-a, oklch(72% 0.14 275)) 42%, white) 0%,
     color-mix(in oklab, var(--bar-a, oklch(72% 0.14 275)) 80%, white) 22%,
@@ -3363,7 +4174,7 @@ body.is-playing .dock__cue-pause { display: block; }
   pointer-events: none;
 }
 .dock__paint::after {
-  content: ''; position: absolute; inset: 0 0 auto; height: 1px;
+  content: ''; position: absolute; top: 0; right: 0; bottom: auto; left: 0; height: 1px;
   background: oklch(100% 0 0 / 0.45);
 }
 .dock__bar::before {
@@ -3611,14 +4422,19 @@ body.is-now {
   --now-boost: 1.13;
 }
 body.is-now .now__stage {
+  --now-cover: calc(min(calc(400px * var(--diy-cover, 1)), 47vh) * var(--ui-scale, 1) * var(--now-boost, 1));
   --stage-col: calc(clamp(320px, 37vw, 560px) * var(--ui-scale, 1) * var(--now-boost, 1));
   --stage-gap: calc(var(--diy-gap, 100px) * var(--ui-scale, 1) * var(--now-boost, 1));
+  /* 歌词列按可用宽度封顶。37vw × ui-scale × 1.13 在「1480 宽、1160 高」
+     这类窗口里会超过 shell 的内宽；justify-content:center 把两列一起
+     往外推，封面就被窗口左边裁掉（2026-11-21 用户截图里的间距错位）。
+     第二列吸掉差额，宁可歌词窄一点，也不让整组溢出。 */
   grid-template-columns:
-    calc(min(calc(400px * var(--diy-cover, 1)), 47vh) * var(--ui-scale, 1) * var(--now-boost, 1))
-    var(--stage-col);
+    var(--now-cover)
+    max(0px, min(var(--stage-col), calc(100% - var(--now-cover) - var(--stage-gap))));
 }
 body.is-now .now__art {
-  width: calc(min(calc(400px * var(--diy-cover, 1)), 47vh) * var(--ui-scale, 1) * var(--now-boost, 1));
+  width: var(--now-cover);
   gap: calc(12px * var(--ui-scale, 1) * var(--now-boost, 1));
 }
 /* 歌词的"5 排窗口"也要跟着放大，否则字号变大、窗口没变，只剩两三行 */
@@ -3683,6 +4499,38 @@ body.is-now .now__tab.is-on { color: oklch(100% 0 0 / 0.96); }
   background: none;
 }
 #drawer .diy__val { font-variant-numeric: tabular-nums; }
+
+/* 抽屉里的歌词模糊开关：和设置页「播放页排版」是同一个设置。
+   复用 .setpage__switch 的尺寸/行程，只把配色翻到深色玻璃上
+   （设置页那套选中态是 --ink 黑底，在抽屉里会糊进背景）。 */
+.diy-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding-top: 12px;
+  border-top: 1px solid oklch(100% 0 0 / 0.10);
+}
+.diy-toggle__label {
+  font-size: var(--text-md);
+  letter-spacing: -0.01em;
+  color: oklch(100% 0 0 / 0.92);
+}
+#drawer .diy-toggle .setpage__switch {
+  margin-left: 0;
+  border-color: oklch(100% 0 0 / 0.22);
+  background: oklch(100% 0 0 / 0.16);
+}
+#drawer .diy-toggle .setpage__switch:hover { border-color: oklch(100% 0 0 / 0.36); }
+#drawer .diy-toggle .setpage__switch[aria-checked="true"] {
+  background: oklch(100% 0 0 / 0.92);
+  border-color: transparent;
+}
+#drawer .diy-toggle .setpage__switch[aria-checked="true"] .setpage__switch-knob {
+  background: oklch(21% 0.022 270);
+  box-shadow: 0 1px 2px oklch(0% 0 0 / 0.30);
+}
+#drawer .diy-toggle .setpage__switch:focus-visible { outline-color: oklch(100% 0 0 / 0.8); }
 
 /* 播放页版式：2×2 缩略图（player-layouts.js 只负责往 .nld__b 里放名字，
    这里用背景 + ::before 画简化线框；选中态只加一圈强调色） */
@@ -3830,6 +4678,9 @@ body.is-now .now__tab.is-on { color: oklch(100% 0 0 / 0.96); }
   max-height: clamp(360px, 56vh, 620px);
   border-radius: 3px;
   overflow: hidden;
+  /* 老内核兜底：下面这行 background 用的是 oklch token，旧 WebView 会整条丢弃。
+     先垫一个深色底，海报就不会变成白纸，白标题/白徽标也不会消失。 */
+  background-color: #1b2130;
   background: var(--paper-2);
   box-shadow: 0 30px 70px -34px oklch(20% 0.03 270 / 0.5);
   /* 封面还没载入时的兜底：用封面取色的三条 tone 拼一张氛围图 */
@@ -3839,7 +4690,7 @@ body.is-now .now__tab.is-on { color: oklch(100% 0 0 / 0.96); }
 }
 .hall-hero:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .hall-hero__art {
-  position: absolute; inset: 0; z-index: 0;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 0;
   background-size: cover; background-position: center;
   opacity: 0; transition: opacity .5s var(--ease-out);
   pointer-events: none;
@@ -3847,14 +4698,16 @@ body.is-now .now__tab.is-on { color: oklch(100% 0 0 / 0.96); }
 .hall-hero__art.is-on { opacity: 1; }
 /* 压暗层：悬停时盖在满幅底图上，让"缩小的封面"亮出来（只过渡 opacity） */
 .hall-hero__dim {
-  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2; pointer-events: none;
   background: oklch(9% 0.02 270 / 0.62);
   opacity: 0; transition: opacity 420ms var(--ease-out);
 }
 .hall-hero.is-hover .hall-hero__dim { opacity: 1; }
 /* 底部署名渐变：替代原来挂在 __art::after 上的那层（现在必须盖在底图之上） */
 .hall-hero__scrim {
-  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 1; pointer-events: none;
+  /* 旧内核先吃这条合法的 sRGB 渐变，现代内核由下一行 oklch 版本覆盖 */
+  background: linear-gradient(180deg, transparent 34%, rgba(10, 12, 18, .68) 100%);
   background: linear-gradient(180deg, transparent 34%, oklch(10% 0.02 270 / 0.68) 100%);
   transition: opacity 420ms var(--ease-out);
 }
@@ -3987,6 +4840,10 @@ body.is-now .hall-hero__lyrics { opacity: 0 !important; visibility: hidden; }
   width: 30px; height: 30px;
   display: grid; place-items: center;
   padding: 0;
+  /* 旧内核兜底（现代内核由后三条覆盖，值等价） */
+  border: 1px solid rgba(255, 255, 255, .28);
+  background-color: rgba(18, 20, 30, .40);
+  color: rgba(255, 255, 255, .84);
   border: 1px solid oklch(100% 0 0 / .28);
   border-radius: 50%;
   background: oklch(12% 0.02 270 / .40);
@@ -4021,6 +4878,9 @@ body.is-now .hall-hero__lyrics { opacity: 0 !important; visibility: hidden; }
   display: flex; align-items: baseline; gap: 9px;
   font-family: var(--font-mono); font-size: var(--text-2xs);
   letter-spacing: .15em; text-transform: uppercase;
+  /* 旧内核兜底：oklch 白在当前 WebView 里无效时会退成继承的黑字；
+     先写一条 sRGB 半透明白，现代内核仍由下一行 oklch 覆盖（观感不变）。 */
+  color: rgba(255, 255, 255, .78);
   color: oklch(100% 0 0 / .78);
   transition: opacity 260ms var(--ease-out), transform 320ms var(--ease-out);
 }
@@ -4042,6 +4902,7 @@ body.is-now .hall-hero__lyrics { opacity: 0 !important; visibility: hidden; }
 }
 .hall-hero__sub {
   margin: 8px 0 0; font-size: var(--text-sm);
+  color: rgba(255, 255, 255, .76);
   color: oklch(100% 0 0 / .76);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
@@ -4053,6 +4914,8 @@ body.is-now .hall-hero__lyrics { opacity: 0 !important; visibility: hidden; }
 .hall-hero__acts { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
 .hall-hero__play {
   width: 52px; height: 52px; border-radius: 50%;
+  /* 旧内核兜底：白色圆钮不能只剩一个透明三角 */
+  background-color: rgba(255, 255, 255, .95);
   background: oklch(100% 0 0 / .95); color: var(--ink);
   display: grid; place-items: center;
   transition: transform .3s var(--ease-out), background .2s, box-shadow .3s var(--ease-out);
@@ -4080,6 +4943,9 @@ body.is-now .hall-hero__lyrics { opacity: 0 !important; visibility: hidden; }
 }
 .hall-hero__ghost {
   height: 40px; padding: 0 var(--sp-4); border-radius: var(--r-full);
+  /* 旧内核兜底（现代内核由后一条覆盖，值等价） */
+  border: 1px solid rgba(255, 255, 255, .34);
+  color: rgba(255, 255, 255, .9);
   border: 1px solid oklch(100% 0 0 / .34); color: oklch(100% 0 0 / .9);
   font-size: var(--text-sm);
   transition: border-color .2s, background .2s, color .2s;
@@ -4093,7 +4959,7 @@ body.is-now .hall-hero__lyrics { opacity: 0 !important; visibility: hidden; }
    落位后隐藏替身、显示真元素。飞出 DOM 即回收，不留残骸。
    ========================================================================== */
 .hero-fly {
-  position: fixed; inset: 0; z-index: 85;
+  position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 85;
   pointer-events: none;
 }
 .hero-fly__art {
@@ -4145,9 +5011,37 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
   /* 退场时 #hall-plat 改成绝对定位浮在上面收缩，定位基准就是这里 */
   position: relative;
 }
-/* 铺色态：普通态的两块让位（display:none），整片交给 #hall-plat */
-.hall-rail.is-plat { border-top: 0; }
+/* 铺色态：普通态的两块让位（display:none），整片交给 #hall-plat。
+   轨道自己再垫一层平台纯色（--plat-bg 由 app.js 同步写到 #hall-rail）：
+   拖跑马带时合成器万一把 #hall-plat 的合成表面整层丢掉，这里仍是一块
+   平台色而不是窗口白底（跑马带自己提升过层，通常还能看见）。 */
+.hall-rail.is-plat {
+  border-top: 0;
+  background-color: var(--plat-bg, #17171a);
+  border-radius: 22px;
+}
 .hall-rail.is-plat > .hall-cell { display: none; }
+/* 普通大厅的公开推荐：同一个 #hall-marq 节点由 app.js 挪进来。
+   和铺色态同一套卡片 / 拖动 / 点击，只是数据换成匿名公开流。 */
+.hall-public {
+  padding: var(--sp-4) 0 var(--sp-2);
+  min-width: 0;
+  border-top: 1px solid var(--rule-soft);
+}
+.hall-public[hidden] { display: none; }
+#view-hall.is-plat-mode .hall-public { display: none; }
+.hall-public__head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+  font-size: 11.5px; line-height: 1.4; color: var(--mute, #777);
+}
+.hall-public__head b { font-size: 12.5px; font-weight: 600; color: inherit; }
+.hall-public__head span { opacity: .72; }
+.hall-public__slot { display: flex; height: 236px; min-width: 0; }
+.hall-public__slot .hall-marq { width: 100%; }
+@media (max-width: 900px) {
+  .hall-public__slot { height: 208px; }
+}
 .hall-cell { padding: var(--sp-4) 0; display: flex; flex-direction: column; min-width: 0; }
 .hall-cell + .hall-cell { border-top: 1px solid var(--rule-soft); }
 /* 2026-11-08：入口已改成铺色态面板左侧的竖向页签，普通态只剩登录引导，
@@ -4160,6 +5054,8 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
   gap: 16px; flex-wrap: wrap;
   padding: 18px 20px;
   border-radius: 16px;
+  /* 旧内核兜底：color-mix 整条无效时仍留一层极淡 accent 底 */
+  background-color: rgba(235, 48, 98, .05);
   background: color-mix(in oklch, var(--accent) 5%, transparent);
   box-shadow: inset 0 0 0 1px var(--rule);
 }
@@ -4169,7 +5065,11 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 .hall-cta__btn {
   flex: none; height: 34px; padding: 0 16px;
   border-radius: 999px;
-  font-size: 13px; color: oklch(100% 0 0);
+  font-size: 13px;
+  /* 旧内核兜底（现代内核由后两条覆盖，颜色值等价） */
+  color: #fff;
+  background-color: #eb3062;
+  color: oklch(100% 0 0);
   background: var(--accent);
   transition: transform 160ms var(--ease-out), filter 160ms var(--ease-out);
 }
@@ -4695,7 +5595,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 }
 
 /* ==========================================================================
-   音乐实验室（搓碟 / 自动过渡 / 插件）
+   音乐实验室（DJ 台 / 插件）
    沿用大厅那套：top:0 + 自己留出顶栏高度 → 滚动时从玻璃顶栏下面经过。
    ========================================================================== */
 .view--lab {
@@ -4752,12 +5652,12 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 }
 .platter:active, .platter.is-drag { cursor: grabbing; }
 .platter__grooves {
-  position: absolute; inset: 6%; border-radius: 50%;
+  position: absolute; top: 6%; right: 6%; bottom: 6%; left: 6%; border-radius: 50%;
   background: repeating-radial-gradient(circle at 50% 50%,
     transparent 0 3px, oklch(100% 0 0 / .035) 3px 4px);
 }
 .platter__label {
-  position: absolute; inset: 33%; border-radius: 50%;
+  position: absolute; top: 33%; right: 33%; bottom: 33%; left: 33%; border-radius: 50%;
   display: grid; place-items: center;
   background: linear-gradient(150deg, oklch(58% .12 20), oklch(32% .07 285));
   box-shadow: inset 0 0 0 1px oklch(100% 0 0 / .18), 0 2px 10px oklch(0% 0 0 / .4);
@@ -4808,25 +5708,10 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 
 .lab-hint { margin: var(--sp-3) 0 0; font-size: 11.5px; line-height: 1.7; color: var(--ink-4); }
 
-/* ---------- 自动过渡 ---------- */
-.lab-pair { display: flex; gap: var(--sp-6); padding-bottom: var(--sp-4); }
-.lab-pair__item { min-width: 0; }
-.lab-pair__item span {
-  display: block; font-family: var(--font-mono); font-size: 9.5px;
-  letter-spacing: .14em; text-transform: uppercase; color: var(--ink-4);
-}
-.lab-pair__item b {
-  display: block; margin-top: 3px; font-size: 14px; font-weight: 500;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.lab-curve {
-  width: 100%; height: auto; display: block;
-  border: 1px solid var(--rule); border-radius: 3px; background: var(--paper);
-}
-.lab-range { width: 100%; margin: 2px 0 var(--sp-3); accent-color: var(--ink); }
-
 /* ---------- 插件 ---------- */
-.lab-vst { max-width: 760px; }
+/* 2026-11-17：从「静态说明」改成可操作面板 —— 左边插件列表、右边处理区。
+   视觉沿用实验室的规矩：1px 细线、直角 3px、等宽数字、无卡片阴影。 */
+.lab-vst { max-width: 980px; }
 .lab-vst h2 { margin: 0 0 var(--sp-3); font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
 .lab-vst__lede { margin: 0 0 var(--sp-4); font-size: 14px; line-height: 1.75; color: var(--ink-2); }
 .lab-vst__lede b { color: var(--ink); }
@@ -4847,6 +5732,150 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 .lab-vst__todo {
   font-size: 13px; color: var(--ink); margin: 0; padding-top: var(--sp-3);
   border-top: 1px solid var(--rule-soft);
+}
+
+/* 插件页的真面板（2026-11-17） */
+.lab-vst__head { display: flex; align-items: baseline; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.lab-vst__head h2 { margin: 0; }        /* 覆盖上面那条给旧静态页留的 12px 下边距 */
+.lab-vst__state {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--font-mono); font-size: 12px; color: var(--ink-3);
+  white-space: nowrap;
+}
+.lab-vst__state::before {
+  content: ''; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ink-4, #9a9ea6);
+}
+.lab-vst__state[data-state="starting"]::before {
+  background: oklch(72% .14 75);
+  animation: lab-vst-pulse 1.1s ease-in-out infinite;   /* 只动 opacity，不碰合成成本 */
+}
+.lab-vst__state[data-state="ready"] { color: var(--ink-2); }
+.lab-vst__state[data-state="ready"]::before { background: oklch(64% .15 150); }
+.lab-vst__state[data-state="error"] { color: var(--ink); }
+.lab-vst__state[data-state="error"]::before { background: oklch(58% .19 25); }
+@keyframes lab-vst-pulse { 50% { opacity: .22; } }
+
+.lab-vst__grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  gap: var(--sp-7); align-items: start;
+}
+
+/* 左：插件列表（134 条要能滚能搜） */
+.lab-vst__pick {
+  min-width: 0; border: 1px solid var(--rule); border-radius: 3px;
+  background: var(--paper-2); overflow: hidden;
+}
+.lab-vst__search {
+  display: block; width: 100%; height: 38px; padding: 0 var(--sp-3);
+  border: 0; border-bottom: 1px solid var(--rule); background: transparent;
+  font: inherit; font-size: 13px; color: var(--ink); outline: none;
+}
+.lab-vst__search:focus { border-bottom-color: var(--ink); }
+.lab-vst__search::placeholder { color: var(--ink-3); }
+.lab-vst__count {
+  margin: 0; padding: 6px var(--sp-3); font-family: var(--font-mono);
+  font-size: 11px; color: var(--ink-3); border-bottom: 1px solid var(--rule-soft);
+}
+.lab-vst__plugins {
+  list-style: none; margin: 0; padding: 0;
+  max-height: min(56vh, 460px); overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.lab-vst__row { margin: 0; }
+.lab-vst__item {
+  display: block; width: 100%; padding: 7px var(--sp-3);
+  text-align: left; background: none; border: 0; cursor: pointer; min-width: 0;
+}
+.lab-vst__item:hover { background: oklch(21% .022 270 / .045); }
+.lab-vst__item.is-on {
+  background: oklch(21% .022 270 / .08);
+  box-shadow: inset 2px 0 0 var(--ink);
+}
+.lab-vst__name {
+  display: block; font-size: 13px; line-height: 1.5; color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lab-vst__sub {
+  display: block; font-size: 11.5px; line-height: 1.45; color: var(--ink-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.lab-vst__sub--err { color: oklch(50% .16 25); }
+.lab-vst__empty { margin: 0; padding: var(--sp-3); font-size: 12.5px; color: var(--ink-3); }
+
+/* 右：处理区 */
+.lab-vst__run {
+  min-width: 0; padding: var(--sp-4); border: 1px solid var(--rule);
+  border-radius: 3px; background: var(--paper-2);
+}
+.lab-vst__k {
+  margin: var(--sp-3) 0 2px; font-size: 11px; letter-spacing: .08em;
+  color: var(--ink-3);
+}
+.lab-vst__k:first-child { margin-top: 0; }
+.lab-vst__song, .lab-vst__picked {
+  margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.lab-vst__picked { color: var(--ink-2); }
+.lab-vst__picked[data-state="error"] { color: oklch(50% .16 25); }
+.lab-vst__hint {
+  margin: var(--sp-2) 0 0; font-size: 11.5px; line-height: 1.6; color: var(--ink-3);
+}
+.lab-vst__hint[hidden] { display: none; }
+/* 显式探测入口：后端没有单插件探测，点它会加载全部插件（见 app.js probeOnce） */
+.lab-vst__probe {
+  margin-top: var(--sp-2); padding: 0; background: none; border: 0;
+  border-bottom: 1px solid var(--rule); font: inherit; font-size: 11.5px;
+  line-height: 1.6; color: var(--ink-2); cursor: pointer;
+}
+.lab-vst__probe:hover { color: var(--ink); border-bottom-color: var(--ink); }
+.lab-vst__probe[hidden] { display: none; }
+.lab-vst__go { margin-top: var(--sp-4); width: 100%; }
+.lab-vst__why {
+  margin: var(--sp-2) 0 0; min-height: 1.6em;
+  font-size: 11.5px; line-height: 1.6; color: var(--ink-3);
+}
+
+.lab-vst__prog { margin-top: var(--sp-3); display: flex; flex-direction: column; gap: 6px; }
+.lab-vst__prog[hidden] { display: none; }
+.lab-vst__prog-bar {
+  position: relative; display: block; height: 3px; border-radius: 3px;
+  background: var(--rule); overflow: hidden;
+}
+.lab-vst__prog-bar i {
+  position: absolute; inset: 0; background: var(--ink); border-radius: 3px;
+  transform-origin: 0 50%;
+  animation: lab-vst-bar 1.15s var(--ease-out) infinite;
+}
+.lab-vst__prog-t { font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+/* 进度条只动 transform：整首离线处理看不到真实百分比，做一条来回扫的确定感 */
+@keyframes lab-vst-bar {
+  0%   { transform: translateX(-100%) scaleX(.2); }
+  60%  { transform: translateX(55%) scaleX(.5); }
+  100% { transform: translateX(240%) scaleX(.2); }
+}
+
+.lab-vst__err {
+  margin: var(--sp-3) 0 0; padding: var(--sp-2) var(--sp-3);
+  font-size: 12px; line-height: 1.6; color: oklch(45% .15 25);
+  background: oklch(60% .18 25 / .08); border-left: 2px solid oklch(58% .19 25);
+  border-radius: 0 3px 3px 0; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.lab-vst__err[hidden] { display: none; }
+.lab-vst__out { margin-top: var(--sp-4); }
+.lab-vst__out[hidden] { display: none; }
+.lab-vst__out audio { display: block; width: 100%; height: 36px; }
+.lab-vst__meta {
+  margin: var(--sp-2) 0 0; font-family: var(--font-mono);
+  font-size: 11px; line-height: 1.6; color: var(--ink-3);
+}
+
+/* 手机 / 触屏（只写这一档，桌面不写窄屏规则） */
+@media (max-width: 1280px) and (pointer: coarse) {
+  .lab-vst__grid { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
+  .lab-vst__plugins { max-height: 42vh; }
+  .lab-vst__go { height: 44px; }          /* 触屏命中区 */
 }
 
 /* ==========================================================================
@@ -4890,7 +5919,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
   box-shadow: 0 10px 24px -12px oklch(0% 0 0 / .8), inset 0 0 0 1px oklch(100% 0 0 / .08);
 }
 .platter--sm .platter__label {
-  inset: 34%; font-size: 9.5px;
+  top: 34%;  right: 34%;  bottom: 34%;  left: 34%; font-size: 9.5px;
   background: linear-gradient(150deg, oklch(62% .14 30), oklch(34% .09 290));
 }
 .platter--sm .platter__dot { top: 6%; transform: rotate(var(--rot, 0deg)); }
@@ -5079,7 +6108,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
    盖在图片上，把别人的主页背景洗成一片糊）。 */
 .me__glow {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 0;
   pointer-events: none;
   animation: me-bg-breathe 48s ease-in-out infinite alternate;
@@ -5134,7 +6163,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 /* 自定义视频：铺满横幅（object-fit: cover），比色团高一层；摘掉之后色团自然露出来 */
 .me__banner video.me__bgvid {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 1;
   display: block;
   width: 100%;
@@ -5146,7 +6175,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
    改之前是一条 58% 高的白色渐变，把封面下半截几乎全洗白了。 */
 .me__banner::after {
   content: '';
-  position: absolute; inset: auto 0 0 0; height: 72px;
+  position: absolute; top: auto; right: 0; bottom: 0; left: 0; height: 72px;
   z-index: 2;
   background: linear-gradient(to bottom,
     oklch(100% 0 0 / 0) 0%, oklch(100% 0 0 / 0.68) 60%, #fff 96%);
@@ -5306,19 +6335,27 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 #drawer-stage-list {
   /* 注意：这里不能写 scrollbar-width / scrollbar-color —— 那两个标准属性一旦出现，
      Chromium 就忽略下面的 ::-webkit-scrollbar 自定义样式，系统默认滚动条（带两端小箭头）
-     会顶回来。玻璃滑钮全靠 webkit 伪元素。 */
-  overflow-x: hidden;
-  overflow-y: auto;
+     会顶回来。玻璃滑钮全靠 webkit 伪元素。
+     2026-11-15 起外框定高不滚，滚的是里面的左栏 .dstages__cats 和右侧 .dstages__pane。 */
+  overflow: hidden;
 }
 
-#drawer-stage-list::-webkit-scrollbar { width: 10px; height: 0; }
-#drawer-stage-list::-webkit-scrollbar-button,
-#drawer-stage-list::-webkit-scrollbar-button:start,
-#drawer-stage-list::-webkit-scrollbar-button:end { display: none; width: 0; height: 0; }
-#drawer-stage-list::-webkit-scrollbar-track-piece { background: transparent; }
-#drawer-stage-list::-webkit-scrollbar-track { background: transparent; }
-#drawer-stage-list::-webkit-scrollbar-corner { background: transparent; }
-#drawer-stage-list::-webkit-scrollbar-thumb {
+#drawer-stage-list .dstages__pane::-webkit-scrollbar,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar { width: 10px; height: 0; }
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-button,
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-button:start,
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-button:end,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-button,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-button:start,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-button:end { display: none; width: 0; height: 0; }
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-track-piece,
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-track,
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-corner,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-track-piece,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-track,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-corner { background: transparent; }
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-thumb,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-thumb {
   min-height: 44px;
   border-radius: 999px;
   background-color: oklch(100% 0 0 / 0.26);
@@ -5327,7 +6364,8 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
     oklch(100% 0 0 / 0.20));
   box-shadow: inset 0 0 0 1px oklch(100% 0 0 / 0.24);
 }
-#drawer-stage-list::-webkit-scrollbar-thumb:hover {
+#drawer-stage-list .dstages__pane::-webkit-scrollbar-thumb:hover,
+#stage-menu-pop .dstages__pane::-webkit-scrollbar-thumb:hover {
   background-image: linear-gradient(to bottom,
     oklch(100% 0 0 / 0.62),
     oklch(100% 0 0 / 0.36));
@@ -5434,6 +6472,21 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
   font-variant-numeric: tabular-nums;
 }
 
+/* 颜色行：一块色卡 + 十六进制值。点色卡开系统取色器（触屏上是系统面板）。
+   色卡用 appearance:none 去掉 input[type=color] 自带的边框和 inner padding，
+   只留圆角色块和一圈细边，和滑块/开关同一套语言。 */
+.spnl__color { display: flex; align-items: center; gap: 8px; }
+.spnl__colorinp {
+  -webkit-appearance: none; appearance: none;
+  width: 46px; height: 24px; padding: 0; margin: 0;
+  border: 0; border-radius: 7px; background: none; cursor: pointer;
+  box-shadow: 0 0 0 1px oklch(100% 0 0 / 0.22), 0 1px 4px oklch(0% 0 0 / 0.35);
+}
+.spnl__colorinp::-webkit-color-swatch-wrapper { padding: 0; }
+.spnl__colorinp::-webkit-color-swatch { border: 0; border-radius: 7px; }
+.spnl__colorinp:focus-visible { outline: 2px solid oklch(80% 0.14 250 / 0.7); outline-offset: 3px; }
+.spnl__hex { margin-left: 0; text-transform: uppercase; }
+
 /* 滑块：用播放器现有的细轨风格 */
 .spnl__range {
   -webkit-appearance: none; appearance: none;
@@ -5479,6 +6532,37 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 }
 .spnl__sel option { background: oklch(16% 0.02 270); color: oklch(96% 0 0); }
 
+/* 自绘下拉（2026-11-21）：手机上面板里的原生 <select> 会弹安卓系统选择器，
+   和深色玻璃面板不搭。按钮 + 就地展开一列选项，桌面 / 手机同一套。 */
+.spnl__pick { display: flex; flex-direction: column; gap: 5px; }
+.spnl__pickbtn {
+  display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 10px; border-radius: 8px;
+  background: oklch(100% 0 0 / 0.1);
+  box-shadow: inset 0 0 0 1px oklch(100% 0 0 / 0.12);
+  color: oklch(96% 0 0 / 0.9);
+  font-size: 11.5px; text-align: left; cursor: pointer;
+}
+.spnl__pickbtn:hover { background: oklch(100% 0 0 / 0.14); }
+.spnl__pickbtn:focus-visible { outline: 2px solid oklch(80% 0.14 250 / 0.7); outline-offset: 2px; }
+.spnl__picklab { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spnl__pickchev { flex: none; font-size: 10px; opacity: .55; transition: transform 160ms var(--ease-out); }
+.spnl__pick.is-open .spnl__pickchev { transform: rotate(180deg); }
+.spnl__picklist {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px; border-radius: 9px;
+  background: oklch(18% 0.02 270 / 0.98);
+  box-shadow: inset 0 0 0 1px oklch(100% 0 0 / 0.1), 0 10px 24px oklch(0% 0 0 / 0.4);
+}
+.spnl__picklist[hidden] { display: none; }
+.spnl__pickopt {
+  height: 28px; padding: 0 9px; border-radius: 6px;
+  color: oklch(96% 0 0 / 0.72);
+  font-size: 11.5px; text-align: left; cursor: pointer;
+}
+.spnl__pickopt:hover { background: oklch(100% 0 0 / 0.08); color: oklch(99% 0 0); }
+.spnl__pickopt.is-on { background: oklch(62% 0.16 250 / 0.85); color: oklch(99% 0 0); }
+
 /* 分段按钮组 */
 .spnl__seg { display: flex; gap: 2px; padding: 2px; border-radius: 9px; background: oklch(100% 0 0 / 0.08); }
 .spnl__seg button {
@@ -5512,8 +6596,168 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 .spnl__galcard.is-on img { box-shadow: 0 0 0 2px oklch(80% 0.13 250 / 0.9); }
 .spnl__galcard.is-on span { color: oklch(100% 0 0 / 0.95); }
 
+/* 自定义背景（图片 / 视频）— 2026-11-16
+   缩略图按用户要求整体去掉：页面里不再留预览框，看效果点「调整」进裁剪器。
+   布局改成「按钮行 + 状态文字」，按钮可以换行，窄面板里不会挤成一条。 */
+.spnl__media { display: flex; flex-direction: column; gap: 6px; width: 100%; min-width: 0; }
+.spnl__mediabtns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.spnl__mediabtn,
+.spnl__mediaadj,
+.spnl__mediaclr {
+  height: 26px; padding: 0 10px; border-radius: 7px; font-size: 11px;
+  background: oklch(100% 0 0 / 0.12); color: oklch(98% 0 0);
+  cursor: pointer; white-space: nowrap;
+  transition: opacity 140ms var(--ease-out), transform 140ms var(--ease-out);
+}
+.spnl__mediaadj { color: oklch(92% 0.03 250 / 0.95); }
+.spnl__mediabtn:hover,
+.spnl__mediaadj:not(:disabled):hover,
+.spnl__mediaclr:not(:disabled):hover { background: oklch(100% 0 0 / 0.18); }
+.spnl__mediaadj:disabled,
+.spnl__mediaclr:disabled { opacity: 0.36; cursor: not-allowed; }
+.spnl__mediast {
+  font-size: 10px; color: oklch(96% 0 0 / 0.5);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.spnl__mediast.is-busy { color: oklch(88% 0.05 250 / 0.85); }
+
+/* ==========================================================================
+   自定义背景 · 四角取景编辑器
+   --------------------------------------------------------------------------
+   app.js 用 createElement 挂到 body（index.html 不在本模块的修改范围）。
+   动画只碰 opacity / transform；不许 backdrop-filter —— 项目已查明
+   22px 背景模糊 + WebGL 流色会把大厅拖卡死。框外压暗用四块遮罩铺。
+   ========================================================================== */
+.spnl-crop {
+  position: fixed; inset: 0; z-index: 120000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px; overflow: auto;
+  background: oklch(6% 0.01 270 / 0.78);
+  animation: spnlCropIn 160ms var(--ease-out) both;
+}
+@keyframes spnlCropIn { from { opacity: 0; } to { opacity: 1; } }
+.spnl-crop__panel {
+  display: flex; flex-direction: column; gap: 10px;
+  margin: auto; max-width: calc(100vw - 32px);
+}
+.spnl-crop__head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  color: oklch(98% 0 0 / 0.92);
+}
+.spnl-crop__title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+.spnl-crop__ratio {
+  font-size: 10.5px; color: oklch(92% 0 0 / 0.6);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+/* 取景框越出画面区域：琥珀色提示，不用错误红 */
+.spnl-crop__ratio.is-outside { color: oklch(85% 0.12 85 / 0.95); }
+.spnl-crop__stage {
+  position: relative; border-radius: 12px;
+  background: oklch(10% 0.01 270);
+  box-shadow: 0 18px 60px oklch(0% 0 0 / 0.5), inset 0 0 0 1px oklch(100% 0 0 / 0.08);
+  touch-action: none; user-select: none;
+}
+/* 媒体层只在这里裁圆角：取景框 / 手柄放外面，贴边时也不会被切掉命中区 */
+.spnl-crop__clip {
+  position: absolute; inset: 0; overflow: hidden; border-radius: inherit;
+}
+.spnl-crop__media {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  display: block; object-fit: cover; pointer-events: none;
+  transition: opacity 120ms var(--ease-out);
+}
+.spnl-crop__loading {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: oklch(96% 0 0 / 0.6);
+}
+/* 可视框以外再压暗一层：工作区 = 完整媒体矩形，这层盖住 cover 溢出的素材 */
+.spnl-crop__frameshade {
+  position: absolute; pointer-events: none;
+  /* 0.24：框外素材要能看见，但和框内形成层次；取景框外的 0.55 会叠在上面 */
+  box-shadow: 0 0 0 9999px oklch(0% 0 0 / 0.24);
+}
+/* 舞台可视框参考线：放在遮罩与压暗层之上，始终清晰。
+   用 inset 描边而不是 outline —— 框贴到工作区边缘时不会被 clip 裁掉。 */
+.spnl-crop__frame {
+  position: absolute; pointer-events: none; border-radius: 2px;
+  /* 冷色，和取景框的纯白描边区分开 */
+  box-shadow: inset 0 0 0 1.5px oklch(85% 0.06 250 / 0.72);
+}
+/* 取景框外压暗：四块遮罩由 app.js 的 draw() 定位，避免 backdrop-filter 开销 */
+.spnl-crop__mask {
+  position: absolute; left: 0; top: 0; width: 100%; height: 0;
+  background: oklch(0% 0 0 / 0.55); pointer-events: none;
+}
+.spnl-crop__sel {
+  position: absolute;
+  outline: 1.5px solid oklch(100% 0 0 / 0.85);
+  cursor: move; touch-action: none;
+}
+/* 手柄：元素 30px 命中区，视觉圆点收到 14px（触屏 22px 的要求已满足） */
+.spnl-crop__h {
+  position: absolute; width: 30px; height: 30px;
+  margin: -15px 0 0 -15px; z-index: 2;
+  cursor: nwse-resize; touch-action: none;
+}
+.spnl-crop__h::after {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 14px; height: 14px; margin: -7px 0 0 -7px;
+  border-radius: 4px; background: oklch(100% 0 0 / 0.95);
+  box-shadow: 0 1px 4px oklch(0% 0 0 / 0.55), inset 0 0 0 1px oklch(0% 0 0 / 0.15);
+}
+.spnl-crop__h--nw { left: 0; top: 0; }
+.spnl-crop__h--ne { left: 100%; top: 0; cursor: nesw-resize; }
+.spnl-crop__h--sw { left: 0; top: 100%; cursor: nesw-resize; }
+.spnl-crop__h--se { left: 100%; top: 100%; }
+.spnl-crop__foot {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 10.5px; color: oklch(96% 0 0 / 0.55);
+}
+.spnl-crop__tip { flex: 1; min-width: 160px; line-height: 1.4; }
+.spnl-crop__acts { display: flex; gap: 6px; margin-left: auto; }
+.spnl-crop__btn {
+  height: 30px; padding: 0 14px; border-radius: 9px; font-size: 12px;
+  background: oklch(100% 0 0 / 0.12); color: oklch(98% 0 0 / 0.9);
+  cursor: pointer;
+  transition: opacity 140ms var(--ease-out), transform 140ms var(--ease-out);
+}
+.spnl-crop__btn:hover { background: oklch(100% 0 0 / 0.2); }
+.spnl-crop__btn:active { transform: scale(0.97); }
+.spnl-crop__btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.spnl-crop__btn:disabled:hover { background: oklch(100% 0 0 / 0.12); }
+.spnl-crop__btn--primary {
+  background: oklch(80% 0.13 250 / 0.9); color: oklch(16% 0.02 270);
+}
+.spnl-crop__btn--primary:hover { background: oklch(84% 0.13 250); }
+
+/* 手机 / 触屏：命中区整体放大，编辑器从顶部开始排，避免键盘或小高度挤压 */
+@media (max-width: 1280px) and (pointer: coarse) {
+  .spnl__mediabtn,
+  .spnl__mediaadj,
+  .spnl__mediaclr { height: 32px; padding: 0 12px; }
+  .spnl-crop { padding: 12px 10px 18px; align-items: flex-start; }
+  .spnl-crop__panel { max-width: calc(100vw - 20px); gap: 8px; }
+  .spnl-crop__tip { font-size: 11px; }
+  .spnl-crop__btn { height: 38px; padding: 0 18px; font-size: 13px; }
+  .spnl-crop__h { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+  .spnl-crop__h::after { width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 5px; }
+}
+
 /* 说明文字 */
 .spnl__hint { font-size: 10.5px; line-height: 1.5; color: oklch(96% 0 0 / 0.42); }
+
+/* 宿主补的「画面」分组（2026-11-21）：画质四项，和形态自己声明的 items 隔一条线 */
+.spnl__group {
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid oklch(100% 0 0 / 0.1);
+}
+.spnl__grouph {
+  font-size: 10px; letter-spacing: 0.12em;
+  color: oklch(96% 0 0 / 0.38);
+}
+.spnl__picctl { display: flex; flex-direction: column; gap: 10px; }
+.spnl__picctl[hidden] { display: none; }
 
 /* 竖屏收一点宽度 */
 @media (max-width: 520px) {
@@ -5586,7 +6830,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 .plat__front,
 .plat__back {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   border-radius: 18px;
   overflow: hidden;
   isolation: isolate;               /* 把 logo/foot 那几层 z-index 关在卡里 */
@@ -5596,7 +6840,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 /* PixelCard 画布（2026-11-06）：盖在头像/暗角之上、logo/文字之下，
    只在悬停时出像素；不接指针事件，点击照旧落到卡片上。 */
 .pixel-canvas {
-  position: absolute; inset: 0; z-index: 2;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 2;
   width: 100%; height: 100%;
   border-radius: inherit;
   pointer-events: none;
@@ -5655,7 +6899,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
    这样 onerror 能兜住（头像地址失效时不至于整块空白）。 */
 .plat__face {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -5668,7 +6912,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 /* 已登录时压在头像下缘的暗角，保证昵称读得清 */
 .plat__scrim {
   position: absolute;
-  inset: auto 0 0 0;
+  top: auto;  right: 0;  bottom: 0;  left: 0;
   height: 58%;
   z-index: 2;
   opacity: 0;
@@ -5894,6 +7138,10 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
   padding: 0;
   border-radius: 22px;
   background: transparent;
+  /* 最后一道底（2026-11-12）：3D 面 / WebGL / 模糊层万一被合成器整层丢掉，
+     舞台本身仍是一块平台色，不会露出窗口白底（历史「铺色带」白屏）。
+     --plat-bg 由 app.js 的 beginHallPalette 同步写入；没写入时退回深灰。 */
+  background-color: var(--plat-bg, #17171a);
   overflow: hidden;
   isolation: isolate;
   /* 静态外投影：只挂在舞台上，四个面自己只负责表面和 inset 描边 */
@@ -5936,7 +7184,7 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
    三[hidden] 时 IntersectionObserver 会让着色器自己停。 */
 .hall-plat__grain,
 .hall-plat__blur {
-  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 0; pointer-events: none;
   border-radius: inherit;
 }
 .hall-plat__grain canvas { display: block; width: 100%; height: 100%; }
@@ -5964,11 +7212,38 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
     rgb(255 255 255 / calc(var(--look-l3-veil-top, 5.5%) * var(--look-l3-on, 1))),
     rgb(0 0 0 / calc(var(--look-l3-veil-bottom, 7%) * var(--look-l3-on, 1))));
 }
+/* 拖跑马带期间（app.js 在 pointerdown→pointerup 之间挂这个类）：
+   22px 模糊是「每帧重新采样底下那张还在重画的 WebGL 画布」，
+   低端 GPU / Electron 透明窗口最容易在这时候丢合成表面。拖拽期间先撤掉，
+   松手立刻恢复；模糊只是氛围层，观感几乎不变。
+   这样即使拖拽期合成器出问题，面板也只剩纯色/渐变，不会再整片白。 */
+.hall-plat.is-marq-drag .hall-plat__blur {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+/* 手机 / 触屏拖拽期再激进一档（用户拍板：只要流畅）。
+   活动面原本带 filter: brightness(1)，会给整块 3D 面（含跑马带）强制一张
+   离屏表面；拖动这几百毫秒里把它摘掉（brightness(1) 视觉等价），
+   合成预算只留给轨道 transform。桌面不动（桌面 GPU 余量足够）。
+   只在 is-marq-drag 期间生效，松手同一帧恢复。 */
+@media (pointer: coarse) {
+  .hall-plat.is-marq-drag .plat-face.is-active { filter: none; }
+}
+html.is-lizi-android .hall-plat.is-marq-drag .plat-face.is-active { filter: none; }
+/* 退场（点当前平台 dock 图标 / 收起面板）的 420ms clip-path 收缩期：
+   流色已经暂停，但最后一帧还冻在 WebGL 画布里，22px 模糊仍在逐帧采样；
+   收缩完就 hidden，这段模糊本来就看不见。撤掉模糊 + 活动面 filter，
+   和拖拽期同一个理由：合成表面被收走时，面板只剩纯色/渐变，不再整片白。 */
+.hall-plat.is-plat-leaving .hall-plat__blur {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.hall-plat.is-plat-leaving .plat-face.is-active { filter: none; }
 /* 换台扫色（2026-11-08）：旧平台底色盖满整块，clip-path 从右边缘收走，
    露出下面已经换成新平台色的底。JS 只建一次，动画结束归零透明。 */
 .hall-plat__wipe {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 3;
   border-radius: inherit;
   pointer-events: none;
@@ -6002,7 +7277,11 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 }
 .pstrip__name {
   min-width: 0;
-  font-size: calc(13px * var(--plat-scale, 1));
+  /* 2026-11-20：铺色态左上来源选择器的大小改由设置页滑杆控制（16–40，默认 28，
+     原来固定 13px）。--src-size 由 app.js 写在 :root 上；长条高度 / 图标 /
+     跑马带都不动，字号超过 28 时标签允许溢出长条（面板内边距兜得住）。 */
+  font-size: calc(var(--src-size, 28) * 1px * var(--plat-scale, 1));
+  line-height: 1.1;
   font-weight: 600;
   letter-spacing: .01em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -6052,7 +7331,8 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
   /* 2026-11-08：根段悬停要「浮起」+ 阴影，overflow:hidden 会把上移那 1px 和
      阴影一起裁掉。每段自己还有 max-width + 省略号，不会长到压住右边图标。 */
   overflow: visible;
-  font-size: calc(13px * var(--plat-scale, 1));
+  /* 和 .pstrip__name 同步：来源根段 / 路径段都吃 --src-size，悬停不再缩回去 */
+  font-size: calc(var(--src-size, 28) * 1px * var(--plat-scale, 1));
   font-weight: 600;
   letter-spacing: .01em;
   line-height: 1.1;
@@ -6062,7 +7342,9 @@ body.is-hero-flying .view--now .now__transport { opacity: 0; }
 .pstrip__crumb-seg {
   flex: 0 1 auto;
   min-width: 0;
-  max-width: calc(160px * var(--plat-scale, 1));
+  /* 28px 字号下 160px 只放得下 5 个半汉字，长的来源名会被无谓截断；
+     320px 能放下「我收藏的歌单」，窄屏另有 34vw / 18vw 的上限。 */
+  max-width: calc(320px * var(--plat-scale, 1));
   padding: 2px 0;
   border: 0; background: none; color: inherit;
   font: inherit; letter-spacing: inherit;
@@ -6083,11 +7365,11 @@ span.pstrip__crumb-seg { cursor: default; }
   font-weight: 400;
 }
 
-/* 标题 / 来源这一行本身被按住时临时放大到两倍；松手、取消或拖出即恢复。
-   触发只看这一行，不碰右侧图标，也不碰跑马带拖拽。 */
+/* 标题 / 来源这一行本身被按住时再放大一档（默认 28 → 34，比例 1.214）；
+   松手、取消或拖出即恢复。触发只看这一行，不碰右侧图标，也不碰跑马带拖拽。 */
 .hall-plat__bar.is-title-press .pstrip__name,
 .hall-plat__bar.is-title-press .pstrip__crumb {
-  font-size: calc(26px * var(--plat-scale, 1));
+  font-size: calc(var(--src-size, 28) * 1.214 * 1px * var(--plat-scale, 1));
   letter-spacing: -.01em;
 }
 
@@ -6095,9 +7377,11 @@ span.pstrip__crumb-seg { cursor: default; }
    悬停 / 浮层开着时浮起一点、带一块玻璃底，提示这里可以点开。 */
 .pstrip__crumb-seg.is-src,
 .pstrip__name.is-src {
-  padding: 3px 8px;
-  margin-left: -8px;
-  border-radius: 8px;
+  /* 内边距 / 负边距 / 圆角跟着字号走（em）：28px 下是 4.2 / 12.6 / 12.6，
+     悬停玻璃底的占比和原来 13px 时一致，换成窄屏 13px 也自动退回小尺寸。 */
+  padding: .15em .45em;
+  margin-left: -.45em;
+  border-radius: .45em;
   cursor: pointer;
   transition: transform 160ms var(--ease-out),
               background 160ms var(--ease-out),
@@ -6121,6 +7405,9 @@ span.pstrip__crumb-seg { cursor: default; }
 .psrc {
   position: absolute;
   z-index: 9;
+  /* 布局保持 170×160 / 13px（option-wheel.js 的排布数学按这个算）；
+     >560px 时整块按 --src-size / 13 放大，和来源标签的设定字号对齐。
+     竖屏 ≤560 不放大：glide-select 切来源时会瞬开一次滚轮，不能闪出大块文字。 */
   width: 170px;
   height: 160px;
   color: var(--plat-ink, #fff);
@@ -6135,6 +7422,16 @@ span.pstrip__crumb-seg { cursor: default; }
 .psrc.is-open { opacity: 1; pointer-events: auto; cursor: grab; }
 .psrc.is-open.is-dragging { cursor: grabbing; }
 .psrc[hidden] { display: none; }
+/* 2026-11-20：来源标签的大小改由设置页滑杆控制（--src-size，默认 28），滚轮
+   按同一倍率（--src-size / 13）整体放大。只放大外观和命中区：位置、170×160
+   容器、13px 字号和 option-wheel.js 的排布数学都不动，左缘锚定标签左沿、
+   垂直原点取容器中线，中间那行仍正对标签。按住拖动时 option-wheel.js 挂
+   is-grow，在设定倍率上再放大 8%（拖动才变大），松手恢复。
+   竖屏 ≤560 的来源是 glide-select（切换时会瞬开一次滚轮），不能跟着放大。 */
+@media (min-width: 561px) {
+  .psrc { transform: scale(calc(var(--src-size, 28) / 13)); transform-origin: left center; }
+  .psrc.is-open.is-grow { transform: scale(calc(var(--src-size, 28) / 13 * 1.08)); }
+}
 /* ReactBits 原版：每项绝对居中，transform-origin 在左缘，逐帧写 transform */
 .ow__item {
   position: absolute;
@@ -6347,6 +7644,8 @@ span.pstrip__crumb-seg { cursor: default; }
   aspect-ratio: 1;
   border-radius: 8px;
   overflow: hidden;
+  /* 旧内核兜底：封面图未加载时仍有一个可见的玻璃占位（现代内核被下一行覆盖） */
+  background-color: rgba(255, 255, 255, .08);
   background: color-mix(in oklch, currentColor 8%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in oklch, currentColor 16%, transparent);
   transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out);
@@ -6392,6 +7691,8 @@ span.pstrip__crumb-seg { cursor: default; }
   font-size: calc(var(--marq-card-w, 156px) * 0.0641);  /* 10 / 156 */
   line-height: 1.4; font-weight: 500;
   color: inherit;
+  /* 旧内核兜底：角标不能变成纯透明文字 */
+  background-color: rgba(0, 0, 0, .35);
   background: color-mix(in oklch, currentColor 18%, rgba(0, 0, 0, .35));
   box-shadow: inset 0 0 0 1px color-mix(in oklch, currentColor 22%, transparent);
   backdrop-filter: none;
@@ -6430,8 +7731,18 @@ span.pstrip__crumb-seg { cursor: default; }
 @media (max-width: 560px) {
   .hall-plat { padding: 12px; border-radius: 18px; }
   .pstrip__name { display: none; }
-  /* 面包屑不能跟着平台名一起藏：右对齐优先保住当前层级，只展示不换行 */
-  .pstrip__crumb { display: flex; max-width: 52vw; justify-content: flex-end; }
+  /* 面包屑不能跟着平台名一起藏：右对齐优先保住当前层级，只展示不换行。
+     竖屏的来源选择器是 #glide-select（m/glide-select.css），这条面包屑只是
+     路径提示，字号留在 13px，不能跟着铺色态放大到 28px 和左边的 chip 打架。 */
+  .pstrip__crumb {
+    display: flex;
+    max-width: 52vw;
+    justify-content: flex-end;
+    font-size: calc(13px * var(--plat-scale, 1));
+  }
+  .hall-plat__bar.is-title-press .pstrip__crumb {
+    font-size: calc(26px * var(--plat-scale, 1));
+  }
   .pstrip__crumb-seg { max-width: 34vw; }
   .pstrip__crumb-seg:not(.is-cur) { max-width: 18vw; }
   /* 搜索展开时给中间图标列让位：窄屏收到 140，输入框仍然可点 */
@@ -6504,7 +7815,7 @@ span.pstrip__crumb-seg { cursor: default; }
 }
 .srail__thumb {
   position: absolute;
-  inset: 2px;
+  top: 2px;  right: 2px;  bottom: 2px;  left: 2px;
   z-index: 0;
   border-radius: 7px;
   background: color-mix(in oklch, currentColor 12%, transparent);
@@ -6578,14 +7889,14 @@ span.pstrip__crumb-seg { cursor: default; }
    面内各自 overflow:hidden，内容在面自己的滚动容器里滚。 */
 .plat-prism {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   perspective: 1400px;
   perspective-origin: 50% 45%;
   --prism-h: 298px;                 /* 由 layoutPrism 按整块面板高度写回 */
 }
 .plat-prism__box {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   transform-style: preserve-3d;
   will-change: transform;
 }
@@ -6593,7 +7904,7 @@ span.pstrip__crumb-seg { cursor: default; }
    四块尺寸完全相同，都是 .hall-plat 的矩形。 */
 .plat-face {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -6605,6 +7916,8 @@ span.pstrip__crumb-seg { cursor: default; }
   isolation: isolate;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+  /* 旧内核兜底：下面 color-mix 无效时，面仍是一块深色玻璃，不是透明 */
+  background-color: #17171a;
   background: color-mix(in oklch, #fff 7%, #17171a);
   color: #fff;
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / .1);
@@ -6626,6 +7939,10 @@ span.pstrip__crumb-seg { cursor: default; }
 .plat-face--song {
   --fi: 0;
   color: var(--plat-ink, #fff);
+  /* 旧内核兜底：整条渐变里混了 color-mix，失效时面是透明的；
+     先垫当前平台的纯色（JS 写的是 hex，旧 WebView 也能读），
+     现代内核仍由下面的渐变覆盖（渐变本身不透明，观感不变）。 */
+  background-color: var(--plat-bg, #17171a);
   background:
     radial-gradient(ellipse 90% 75% at 88% 112%,
       rgb(0 0 0 / calc(var(--look-l4-corner, 16%) * var(--look-l4-on, 1))) 0%,
@@ -6713,7 +8030,7 @@ span.pstrip__crumb-seg { cursor: default; }
 .plat-prism::after {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 5;
   border-radius: 22px;
   background: rgb(0 0 0 / .2);
@@ -6920,6 +8237,17 @@ span.pstrip__crumb-seg { cursor: default; }
 .hall-stage__i.is-on .hall-stage__art { box-shadow: inset 0 0 0 1px oklch(100% 0 0 / .6); }
 .hall-stage__i:focus-visible .hall-stage__art { box-shadow: inset 0 0 0 1px oklch(100% 0 0 / .78); }
 .hall-stage__art.is-fail .hall-stage__img { display: none; }
+/* AI 工坊做的形态没有预览图（那是内置形态的构建产物），用一块占位，
+   别让它去请求一个不存在的 jpg（id 里还带冒号） */
+.hall-stage__img--mine {
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(120, 138, 255, 0.22), rgba(255, 255, 255, 0.06));
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  filter: none;
+}
 /* 名称放在图下，不再压字盖图 */
 .hall-stage__cap {
   display: flex;
@@ -7150,7 +8478,7 @@ span.pstrip__crumb-seg { cursor: default; }
    不做圆角、不叠阴影，退出按钮也只是细边框文字块。 */
 .ma-fs {
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 900;
   display: flex;
   flex-direction: column;
@@ -7209,7 +8537,7 @@ span.pstrip__crumb-seg { cursor: default; }
    否则 pages.css 里引用 var(--ink) 的字会在白底上仍是浅色。 */
 .ma-fs #view-myalbums {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: auto;
   height: auto;
   min-height: 0;
@@ -7461,7 +8789,7 @@ body.is-ma-fs { overflow: hidden; }
                 calc(var(--look-l4-top, 12%) * var(--look-l4-on, 1)));
 }
 .lookprev__grain,
-.lookprev__blur { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.lookprev__blur { position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: inherit; pointer-events: none; }
 .lookprev__grain {
   background:
     radial-gradient(circle at 24% 36%, #ffb37a, transparent 52%),
@@ -7850,7 +9178,7 @@ body.pbn-off #player { display: none !important; }
 .setcard::before {
   content: "";
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 0;
   pointer-events: none;
   opacity: 0;
@@ -7952,6 +9280,33 @@ body.pbn-off #player { display: none !important; }
   outline: 2px solid var(--ink);
   outline-offset: 3px;
 }
+
+/* ---------- 陀螺仪转视角（2026-11-17）----------
+   只在触屏窄屏出现；桌面直接不显示（不是禁用）。app.js 还会用
+   matchMedia('(max-width:1280px) and (pointer:coarse)') 同步 hidden，
+   这里再兜一层：即使 JS 没跑到，桌面也不会露出这两行。 */
+.setpage__row--gyro { display: none; }
+@media (max-width: 1280px) and (pointer: coarse) {
+  .setpage__row--gyro:not([hidden]) { display: flex; }
+}
+/* 桌面专属行（窗口圆角，2026-11-21）：只给有精确指针的设备。
+   app.js 同时用 matchMedia('(pointer:fine)') 同步 hidden，这里兜底。 */
+.setpage__row--desktop { display: none; }
+@media (pointer: fine) {
+  .setpage__row--desktop:not([hidden]) { display: flex; }
+}
+/* 「以当前朝向为准」小按钮：沿用设置页的浅色描边语言 */
+.setpage__mini {
+  flex: none;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--rule); border-radius: 10px;
+  background: transparent; color: var(--ink-2);
+  font: inherit; font-size: 13.5px; white-space: nowrap;
+  cursor: pointer;
+}
+.setpage__mini:hover { border-color: var(--ink); color: var(--ink); }
+.setpage__mini:active { transform: scale(.98); }
 
 /* ---------- 响应式（A 方案）：<1280 单列；<900 导航变横向吸顶 chips ---------- */
 @media (max-width: 1279px) {
@@ -8087,6 +9442,31 @@ body.pbn-off #player { display: none !important; }
 
 /* 抓手节点只由 app.js 在手机铺色态创建；桌面即使意外存在也藏掉 */
 .hall-hero-grip { display: none; }
+
+/* 横屏：手机把 width=1280 的布局整体缩到 ~0.62，海报 : 面板还是桌面的
+   577 : 423，面板只有 ~191 CSS 高，跑马卡片被压到 96（旧版是 156 那一档）。
+   横屏把左轨让给平台：290 : 540 → 面板 ~294 高，156 的卡放得下（卡高 195 +
+   带子内边距，跑马带实测 224），一屏约 7 张卡，比例回到 PC 全屏的样子。
+   竖屏（orientation: portrait）不进这里，仍用 phone.css / 反解那套；
+   桌面是 pointer: fine，也不进。APK 的 /index.html 另有 sync.js 注入的
+   480:520，在 head 末尾，优先级与顺序都压过这条，桌面入口保持原样。 */
+@media (max-width: 1280px) and (pointer: coarse) and (orientation: landscape) {
+  /* 2026-11-14：290 : 540 把海报压得太矮（1216×158，7.7:1），用户反馈「海报变矮了、
+     比例不对」。可面板高度反过来又决定卡宽（app.js 的 (panelH-28)*0.578），
+     海报一加高卡就缩 —— 两头抢空间。
+     现在卡宽在横屏钉死 156（卡高 195），再把面板自己的垂直开销收干净：
+     面内边距 10→4、长条与带子的间距 8→6、带子内边距 16→2、
+     海报与面板之间那道缝 20→8、大厅底部留白 16→8。
+     面板最低 = 4 + 48 + 6 + (195 + 4) + 4 = 261，
+     434 : 566 → 海报 ≈202（1216×202，6:1），面板 ≈263，156 的卡完整可见。 */
+  #view-hall.is-plat-mode .hall-hero { flex: 434 1 0; }
+  #view-hall.is-plat-mode .hall-rail,
+  #view-hall.is-plat-mode .hall-plat { flex: 566 1 0; }
+  #view-hall.is-plat-mode .hall-rail { margin-top: 8px; }
+  #view-hall .hall-plat .plat-face { padding-block: 4px; row-gap: 6px; }
+  #view-hall .hall-marq { padding-block: 2px; min-height: calc(195px + 4px); }
+  #view-hall .hall { padding-bottom: 8px; }
+}
 
 @media (max-width: 1280px) and (pointer: coarse) {
   /* 海报允许真的收成 0 高；sync.js 只改 flex 比例，min-height 兜底在这里让开 */
@@ -8510,7 +9890,7 @@ body.is-stage .updtoast { bottom: 18px; }
    ========================================================================== */
 .updmodal {
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 980;                 /* 压在 ma-fs（900）、mig（260）、toast（150）之上 */
   display: grid;
   place-items: center;
@@ -8605,4 +9985,84 @@ body.is-stage .updtoast { bottom: 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .updmodal, .updmodal__card { animation: none; }
+}
+
+/* ==========================================================================
+   大厅兜底：旧 WebView（Chromium < 111）与低端 GPU
+   --------------------------------------------------------------------------
+   vivo Y27t 同时踩了两条机器相关的坑：
+   1) 系统 WebView 停在 oklch/color-mix 之前（< 111）：所有 oklch token 和大厅
+      渐变整条失效，页面退成白底，白字隐藏；badge 的 oklch 白字失效后变成黑字。
+   2) Mali-G52 MC2 低端 GPU 上，大面积 WebGL 流色画布 + 22px backdrop-filter
+      可能拿不到 WebGL 上下文或分配合成表面失败，整块铺色面板不合成。
+   上面的普通 sRGB 回退已经保证第 1 条不白屏；这里再给旧内核一张氛围 hero、
+   一块确定的平台色面板底，并在手机上撤掉那块大面积模糊（模糊只是氛围层）。
+   所有规则都限定在“旧内核”或“触屏”，桌面 Chrome/Electron 的视觉不变。
+   ========================================================================== */
+@supports not (color: oklch(50% 0.1 12)) {
+  /* 没有封面时：用 sRGB 近似色板铺一张深色氛围图，替代失效的 oklch 渐变。
+     底部垫的 #1b2130 已经在 .hall-hero 里，这里三层半透明色压在它上面。 */
+  .hall-hero:not(.has-art) {
+    background:
+      radial-gradient(120% 120% at 22% 14%, rgba(112, 161, 255, .62), transparent 58%),
+      radial-gradient(110% 120% at 84% 88%, rgba(245, 156, 216, .48), transparent 60%),
+      linear-gradient(162deg, rgba(0, 205, 197, .72), #353c55 82%);
+    /* background 简写会把颜色层重置成透明；单独再垫一次深色底，
+       渐变里的半透明层才是压在深色上、而不是压在白页上。 */
+    background-color: #1b2130;
+  }
+  /* 有封面但图没加载出来时，底也是深色，白标题不会掉进白纸里 */
+  .hall-hero { background-color: #1b2130; }
+  /* 铺色舞台：面的背景全由 color-mix 组成，旧内核会整面透明。
+     先给舞台本身一块平台纯色/深色（--plat-bg 由 JS 写成 hex，旧内核可读），
+     即使四个 3D 面都没画出来，面板也不会是白色空洞。 */
+  .hall-plat { background-color: var(--plat-bg, #17171a); }
+  .plat-face--song { background-color: var(--plat-bg, #17171a); }
+  .plat-face--albums,
+  .plat-face--box { background-color: #17171a; }
+
+  /* 抽屉内部是暗场 token（oklch 白系），旧内核同样需要 sRGB 副本 */
+  .drawer {
+    --ink: #f4f5f7;
+    --ink-2: #e4e6ea;
+    --ink-3: #b3b7bf;
+    --ink-4: #9a9ea6;
+    --rule: rgba(255, 255, 255, .14);
+    --rule-soft: rgba(255, 255, 255, .09);
+  }
+}
+
+/* 安卓 / 触屏：铺色面板的 22px 背景模糊叠在一张大面积 WebGL 流色画布上，
+   低端 GPU（vivo Y27t 的 Mali-G52 MC2）最容易在这里分配合成表面失败。
+   模糊只负责把流色揉软，流色本身已经是柔的；手机上关掉它，观感几乎不变，
+   但合成压力大幅下降。桌面（pointer:fine / 宽屏）保持原样。 */
+@media (max-width: 1280px) and (pointer: coarse) {
+  .hall-plat__blur {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* app.js 启动时会探测 WebGL，拿不到上下文就给 body 挂 .no-webgl。
+   此时不依赖流色：面板显式用平台纯色/深色底，模糊层也不需要了。
+   （面的 CSS 渐变本来就与 WebGL 无关，这条只是让兜底更明确。） */
+body.no-webgl .hall-plat { background-color: var(--plat-bg, #17171a); }
+body.no-webgl .hall-plat__blur {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ==========================================================================
+   歌词模糊开关（设置页「播放页排版」/ 播放页抽屉「调整参数」）
+   --------------------------------------------------------------------------
+   默认开：每一行都挂 filter: blur(3px)，只有 .is-active 清掉 —— 所以"除了
+   正在唱的那句，别的一律糊"。关掉时 app.js 给 <html> 挂 .lyric-blur-off，
+   这里把 filter 撤掉，行距/字号/强调色都不动，只换清晰度。
+   播放页和首页 hero 必须一起撤：两边是同一组歌词、靠 FLIP 平移飞进播放页，
+   只关一边，飞过去的那一瞬会从糊跳成清晰。
+   值存 localStorage['lizi.lyric.blur']，见 app.js 的 setLyricBlur。 */
+html.lyric-blur-off body.is-now .ly,
+html.lyric-blur-off .hall-hero__rows .ly {
+  filter: none;
+  will-change: auto;
 }

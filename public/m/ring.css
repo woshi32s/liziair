@@ -46,7 +46,7 @@
 .mcard__art::before {
   content: '';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   background: linear-gradient(115deg,
     color-mix(in oklab, var(--tone-a) 14%, transparent),
     transparent 58%);
@@ -55,7 +55,7 @@
 }
 .mcard__img {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -93,10 +93,16 @@
 body.is-ring .mstrip { opacity: 0; }
 .mstrip { transition: opacity .24s var(--ease-out, ease); }
 
+/* 性能：m.css 给 .hall 的 scale(.99) 会把整个大厅变成一个全屏缩放合成层，
+   软件光栅 / 低端 WebView 上环一开就掉到 1–2fps（实测 rAF 1fps）。
+   环开着时只保留 opacity 退暗，去掉这层多余的缩放；视觉上只差 1%，但
+   少了一层全屏纹理合成。 */
+body.is-ring .hall { transform: none; }
+
 /* ---------------------------------------------------------------- 环覆盖层 */
 .mring {
   position: fixed;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   z-index: 240;
   overflow: hidden;
   background:
@@ -172,7 +178,7 @@ body.is-ring .mstrip { opacity: 0; }
 }
 .mring__img {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -199,7 +205,7 @@ body.is-ring .mstrip { opacity: 0; }
 .mring__card.is-empty .mring__art::after {
   content: '无封面';
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   display: grid;
   place-items: center;
   font-size: 10px;
@@ -216,7 +222,7 @@ body.is-ring .mstrip { opacity: 0; }
 /* 远端压暗：ring.js 逐帧写 opacity（背面卡直接 visibility:hidden） */
 .mring__shade {
   position: absolute;
-  inset: 0;
+  top: 0;  right: 0;  bottom: 0;  left: 0;
   border-radius: 12px;
   background: #000;
   opacity: 0;

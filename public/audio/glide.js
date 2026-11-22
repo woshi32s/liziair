@@ -46,7 +46,7 @@ const Glide = (() => {
   const cfg = { ...DEFAULTS };
 
   const listeners = {};
-  const on = (evt, fn) => (listeners[evt] ||= []).push(fn);
+  const on = (evt, fn) => (listeners[evt] = listeners[evt] || []).push(fn);
   const emit = (evt, data) => {
     (listeners[evt] || []).forEach((fn) => { try { fn(data); } catch (e) { console.warn('[glide]', e); } });
   };
@@ -598,7 +598,8 @@ const Glide = (() => {
 
   function injectDrawer() {
     const tiles = document.querySelector('#drawer .drawer__tiles');
-    if (!tiles || document.getElementById('btn-xfade')) return;
+    const body = document.querySelector('#drawer .drawer__body');
+    if (!tiles || !body || document.getElementById('btn-xfade')) return;
 
     const btn = document.createElement('button');
     btn.className = 'drawer__row drawer__tile drawer__tile--wide';
@@ -612,7 +613,10 @@ const Glide = (() => {
       <span class="drawer__desc">交叉淡入淡出</span>
       <span class="drawer__val" id="xfade-badge">关</span>
       <svg class="ico drawer__caret" aria-hidden="true"><use href="#i-chevron"/></svg>`;
-    tiles.appendChild(btn);
+    /* 2026-11-14：用户要求「歌曲过渡」挪到最下面。以前它挂在 .drawer__tiles 里
+       当第 4 块磁贴（横跨三列），现在直接挂到抽屉内容区的末尾（DIY 那组之后），
+       展开的面板跟着它走。 */
+    body.appendChild(btn);
 
     const panel = document.createElement('div');
     panel.className = 'drawer__sub xfade-panel';
@@ -629,7 +633,7 @@ const Glide = (() => {
         <input class="sl" id="xfade-dur" type="range" min="${MIN_LEN}" max="${MAX_LEN}" step="0.5" value="6" aria-label="过渡时长">
       </div>
       <p class="xfade-note" id="xfade-note"></p>`;
-    tiles.insertAdjacentElement('afterend', panel);
+    btn.insertAdjacentElement('afterend', panel);
 
     drawer = {
       btn, panel,
